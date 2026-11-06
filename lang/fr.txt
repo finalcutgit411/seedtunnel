@@ -264,6 +264,12 @@ fr: Impossible d'enregistrer la passphrase (disque plein ? détails dans %s) : l
 en: The backups already made keep the passphrase they were made with: the new one only applies to the next ones.
 fr: Les sauvegardes déjà faites gardent la passphrase avec laquelle elles ont été faites : la nouvelle ne vaut que pour les suivantes.
 
+en: Neither the backup restored nor this server has a passphrase for the weekly backup: it was turned off. To turn it on again:  seedtunnel backup auto on
+fr: Ni la sauvegarde restaurée ni ce serveur n'ont de passphrase pour la sauvegarde hebdomadaire : elle a été désactivée. Pour la réactiver :  seedtunnel backup auto on
+
+en: The weekly backup of this server is kept, with its passphrase (the backup restored was made before it was turned on).
+fr: La sauvegarde hebdomadaire de ce serveur est gardée, avec sa passphrase (la sauvegarde restaurée datait d'avant son activation).
+
 en: Archive refused: "%s" is a link or a special file
 fr: Archive refusée : « %s » est un lien ou un fichier spécial
 

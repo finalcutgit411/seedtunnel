@@ -522,7 +522,7 @@ backup_unsafe_state_file() {
 }
 
 restore_main() {
-    local file=${1-} list bad stamp was=$INTERACTIVE
+    local file=${1-} list bad stamp was=$INTERACTIVE kept_passphrase=0
     [[ -n $file ]] || die 'Usage: seedtunnel restore FILE'
     [[ -r $file ]] || die 'File not found: %s' "$file"
     banner
@@ -593,6 +593,14 @@ restore_main() {
     # not the one that was backed up: it stays
     rm -f "$BACKUP_TMP_DIR/x/etc/seedtunnel/packages"
     if [[ -f $APP_STATE_DIR/packages ]]; then cp -p "$APP_STATE_DIR/packages" "$BACKUP_TMP_DIR/x/etc/seedtunnel/"; fi
+    # The weekly backup of this server keeps its passphrase when the backup
+    # restored was made before it was turned on: its timer is not in the
+    # backup and keeps running, and without its passphrase every weekly backup
+    # would fail
+    if [[ ! -e $BACKUP_TMP_DIR/x/etc/seedtunnel/backup.passphrase && -s $BACKUP_PASSPHRASE_FILE ]] && backup_auto_enabled; then
+        cp -p "$BACKUP_PASSPHRASE_FILE" "$BACKUP_TMP_DIR/x/etc/seedtunnel/"
+        kept_passphrase=1
+    fi
     if [[ -n $(find "$APP_STATE_DIR" -mindepth 1 -maxdepth 1 ! -name packages 2>/dev/null || true) ]]; then
         mv "$APP_STATE_DIR" "$APP_STATE_DIR.before-restore-$stamp"
         RESTORE_PREVIOUS="$APP_STATE_DIR.before-restore-$stamp"
@@ -623,12 +631,21 @@ restore_main() {
         restore_transmission_state "$BACKUP_TMP_DIR/x"
     fi
     if firewall_enabled; then firewall_enable; fi
-    if [[ -r $BACKUP_PASSPHRASE_FILE ]]; then backup_auto_install_units; fi
+    if [[ -r $BACKUP_PASSPHRASE_FILE ]]; then
+        backup_auto_install_units
+    elif backup_auto_enabled; then
+        # its timer on, but no passphrase anywhere: it could only fail
+        backup_auto_disable
+        warn 'Neither the backup restored nor this server has a passphrase for the weekly backup: it was turned off. To turn it on again:  seedtunnel backup auto on'
+    fi
     RESTORE_PREVIOUS=""
     backup_cleanup
     trap - EXIT INT TERM
     INTERACTIVE=$was
     echo
+    if ((kept_passphrase)); then
+        ok 'The weekly backup of this server is kept, with its passphrase (the backup restored was made before it was turned on).'
+    fi
     ok 'Restore finished.'
     if seedbox_installed; then text restore_after; fi
 }

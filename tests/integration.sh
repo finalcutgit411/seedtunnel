@@ -205,6 +205,21 @@ nothing_changed() {
     ! grep -E 'Starting|Restarting|Reloading|Stopping|Applying|Installing|Creating|Enabling|Updating' <<<"$out"
 }
 
+# The first backup of phase 2 was made by hand, before the weekly backup was
+# turned on: it holds no passphrase for it
+restore_older_backup_test() {
+    local older="" file
+    # the oldest backup made by hand
+    for file in /var/backups/seedtunnel/*.tar.gz.enc; do
+        [[ $file != *-auto.tar.gz.enc ]] || continue
+        if [[ -z $older || $file -ot $older ]]; then older=$file; fi
+    done
+    [[ -n $older ]] || return 1
+    output_has "is kept, with its passphrase" app restore "$older" --passphrase-file "$W/passphrase" --yes || return 1
+    test -s /etc/seedtunnel/backup.passphrase && systemctl is-enabled --quiet seedtunnel-backup.timer \
+        && app backup auto run
+}
+
 # The full disk protection turned off by hand (disabled and stopped): the
 # next « seedtunnel apply » enables and starts it again, then changes nothing
 timers_put_back_test() {
@@ -755,6 +770,9 @@ phase2() {
     check "list of torrents restored" wait_torrents 1
     check "firewall restored" systemctl is-active --quiet seedtunnel-firewall.service
     check "weekly backup restored" systemctl is-enabled --quiet seedtunnel-backup.timer
+    # as seen on a real server: a backup made before the weekly backup was
+    # turned on, restored while it is on
+    check "older backup restored: the weekly backup keeps its passphrase" restore_older_backup_test
 
     step "Removal"
     check "seedbox" app seedbox uninstall --yes

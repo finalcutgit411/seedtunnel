@@ -2460,6 +2460,61 @@ backup_dates_in_words() (
     grep -q "commencé hier" "$WORK/dates.out" && grep -q "la dernière : aujourd'hui" "$WORK/dates.out"
 )
 
+# --- 1.2.7: a restore keeps the weekly backup working ----------------------------
+# Seen on a real server: the weekly backup turned on, then a backup made
+# before restored. The settings restored had no passphrase, the timer (not in
+# the backup) kept running: every weekly backup would have failed.
+
+restore_weekly_load() {
+    restore_archive_load "$1"
+    # a backup made before the weekly backup was turned on: no passphrase in it
+    restore_archive_make "$1"
+    BACKUP_PASSPHRASE_FILE="$APP_STATE_DIR/backup.passphrase"
+    WEEKLY=$1
+    # then the weekly backup turned on: its timer runs
+    touch "$WORK/$1-timer-on"
+    : >"$WORK/$1-calls"
+    backup_auto_enabled() { [[ -e $WORK/$WEEKLY-timer-on ]]; }
+    backup_auto_install_units() { echo units >>"$WORK/$WEEKLY-calls"; }
+    backup_auto_disable() {
+        echo disable >>"$WORK/$WEEKLY-calls"
+        rm -f "$WORK/$WEEKLY-timer-on"
+    }
+    confirm() { return 0; }
+    # messages in English, whatever an earlier test saved
+    i18n_init() { i18n_load en; }
+    # nothing else to put back here
+    vpn_installed() { return 1; }
+    seedbox_installed() { return 1; }
+    firewall_enabled() { return 1; }
+}
+
+restore_keeps_weekly_passphrase() (
+    restore_weekly_load weekly-kept
+    echo "the weekly passphrase" >"$BACKUP_PASSPHRASE_FILE"
+    chmod 600 "$BACKUP_PASSPHRASE_FILE"
+    restore_main "$WORK/weekly-kept.enc" >"$WORK/weekly-kept.out" 2>&1 || {
+        cat "$WORK/weekly-kept.out"
+        return 1
+    }
+    cat "$WORK/weekly-kept.out" "$WORK/weekly-kept-calls"
+    # its passphrase is still there, its timer still on, and it is said
+    [[ -s $BACKUP_PASSPHRASE_FILE && $(<"$BACKUP_PASSPHRASE_FILE") == "the weekly passphrase" ]] \
+        && grep -qx units "$WORK/weekly-kept-calls" && ! grep -q disable "$WORK/weekly-kept-calls" \
+        && grep -q "is kept, with its passphrase" "$WORK/weekly-kept.out"
+)
+
+restore_weekly_without_passphrase_off() (
+    restore_weekly_load weekly-none
+    # the timer runs, but no passphrase anywhere: turned off, and said
+    restore_main "$WORK/weekly-none.enc" >"$WORK/weekly-none.out" 2>&1 || {
+        cat "$WORK/weekly-none.out"
+        return 1
+    }
+    cat "$WORK/weekly-none.out" "$WORK/weekly-none-calls"
+    grep -qx disable "$WORK/weekly-none-calls" && grep -q "it was turned off" "$WORK/weekly-none.out"
+)
+
 printf '\033[1m=== Unit tests\033[0m\n'
 check "vpn_sync: WireGuard refusing the configuration shows « failed »" vpn_sync_reports_wg_failure
 check "vpn_sync: a failure of « wg-quick strip » is seen" vpn_sync_reports_strip_failure
@@ -2589,6 +2644,8 @@ check "weekly backup: new passphrase → the older backups keep theirs (said)" b
 check "translations: empty, or a stray %, refused" i18n_check_stricter
 check "seedbox: the home page asks for the password first" nginx_home_asks_password_first
 check "dates: today, yesterday, N days ago (EN, FR)" backup_dates_in_words
+check "restore of an older backup: the weekly backup keeps its passphrase" restore_keeps_weekly_passphrase
+check "restore: weekly backup without any passphrase → turned off, said" restore_weekly_without_passphrase_off
 
 printf '\n\033[1m%s passed, %s failed\033[0m\n' "$PASS" "$FAIL"
 ((FAIL == 0))

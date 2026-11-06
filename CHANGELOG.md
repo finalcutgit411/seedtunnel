@@ -3,6 +3,11 @@
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 
+## [1.2.7] - 2026-11-06
+
+### Fixed
+- **Restore and weekly backup**: restoring a backup made before the weekly backup was turned on removed its passphrase (the settings restored had none), while its timer, which is not part of a backup, kept running: every weekly backup would have failed, without a word. Seen on a real server, found by the diagnostics of 1.2.6. The passphrase of the server is now kept in that case, and it is said. If the timer runs and there is no passphrase anywhere, the weekly backup is turned off, and it is said.
+
 ## [1.2.6] - 2026-11-06
 
 Reliability and finishing touches.
