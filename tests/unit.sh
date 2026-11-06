@@ -412,7 +412,7 @@ firewall_boot_service_put_right() (
         [[ $1 != is-enabled ]]
     }
     firewall_refresh &>"$WORK/fw/out" || return 1
-    grep -qx "systemctl enable seedtunnel-firewall.service" "$WORK/fw/calls"
+    grep -qx "systemctl enable --now seedtunnel-firewall.service" "$WORK/fw/calls"
 )
 
 vpn_uninstall_checked() (
@@ -838,15 +838,19 @@ update_old_apply_failure_reported() (
 )
 
 # git repository with the installed version (one commit) and the new one (tag
-# v9.9.9, whose seedtunnel.sh ends with status 7)
+# v9.9.9, whose seedtunnel.sh ends with status 7). As in the real repository,
+# lib/common.sh says the version of each.
 update_git_make() {
     update_versions_make 7
     APP_VERSION=1.0.0
     confirm() { return 0; }
+    mkdir -p "$APP_DIR/lib"
+    echo 'APP_VERSION="1.0.0"' >"$APP_DIR/lib/common.sh"
     git -C "$APP_DIR" init --quiet
     git -C "$APP_DIR" add -A
     git -C "$APP_DIR" -c user.name=t -c user.email=t@t commit --quiet -m old
     cp "$WORK/app/new/seedtunnel.sh" "$APP_DIR/seedtunnel.sh"
+    echo "APP_VERSION=\"${UPDATE_TAG_CODE_VERSION:-9.9.9}\"" >"$APP_DIR/lib/common.sh"
     git -C "$APP_DIR" -c user.name=t -c user.email=t@t commit --quiet -am new
     git -C "$APP_DIR" tag v9.9.9
     git -C "$APP_DIR" checkout --quiet HEAD~1
@@ -1933,6 +1937,529 @@ restore_wrong_passphrase_asked_again() (
         && [[ $(<"$APP_STATE_DIR/vpn.conf") == "VPN_PORT=1194" && -z $BACKUP_TMP_DIR ]]
 )
 
+# --- 1.2.6: reliability --------------------------------------------------------------
+
+# Runs bash code with the libraries loaded and the options of seedtunnel.sh
+# (set -e: an unhandled failure stops everything), in a process of its own:
+# inside a test, « set -e » would be ignored (tests run in a condition)
+strict() {
+    ROOT=$ROOT WORK=$WORK bash -c "set -Eeuo pipefail; $(declare -f load); load; $1"
+}
+
+df_failure_does_not_stop() (
+    strict '
+        df() { return 1; }
+        sysctl() { echo 0; }
+        timedatectl() { echo yes; }
+        logger() { :; }
+        seedbox_installed() { return 0; }
+        SEEDBOX_DATA_DIR=/srv/seedbox
+        free=$(disk_free_gb /)
+        [[ -z $free ]]
+        doctor_system
+        diskguard_check
+        diskguard_prestart
+        echo "reached the end"' >"$WORK/df.out" 2>&1
+    cat "$WORK/df.out"
+    grep -q "reached the end" "$WORK/df.out" && grep -q "Free space of / unreadable" "$WORK/df.out"
+)
+
+net_hardening_checked_everywhere() (
+    load
+    NET_HARDENING_FILE="$WORK/90-network.conf"
+    # the server has IPv6
+    NET_HARDENING_IPV6_DIR=$WORK
+    net_hardening_generate >"$NET_HARDENING_FILE"
+    chown() { :; }
+    : >"$WORK/sysctl-loads"
+    # every value is 0, except the IPv6 redirects, still accepted until loaded
+    sysctl() {
+        local key
+        shift
+        for key in "$@"; do
+            if [[ $key == net.ipv6.conf.all.accept_redirects && ! -s $WORK/sysctl-loads ]]; then echo 1; else echo 0; fi
+        done
+    }
+    net_hardening_load() { echo load >>"$WORK/sysctl-loads"; }
+    timedatectl() { echo yes; }
+    DOCTOR_WARNINGS=0
+    doctor_system >"$WORK/hardening.out" 2>&1
+    cat "$WORK/hardening.out"
+    grep -q "settings not applied" "$WORK/hardening.out" || return 1
+    # the file did not change, yet the settings are loaded again
+    net_hardening_apply >>"$WORK/hardening.out" 2>&1
+    (($(wc -l <"$WORK/sysctl-loads") == 1)) || return 1
+    # all in force: nothing loaded again
+    net_hardening_apply >>"$WORK/hardening.out" 2>&1
+    (($(wc -l <"$WORK/sysctl-loads") == 1))
+)
+
+doctor_nat_checks_interface() (
+    load
+    VPN_PORT=51820
+    VPN_PUBLIC_ADDRESS=203.0.113.10
+    systemctl() { return 0; }
+    wg() { echo 51820; }
+    sysctl() { echo 1; }
+    vpn_count_clients() { echo 1; }
+    vpn_connected_count() { echo 0; }
+    # the rules were made when the network interface was eth0; it is ens3 now
+    nft() { printf '%s\n' 'table ip seedtunnel {' '	chain postrouting {' '		ip saddr 10.8.0.0/24 oifname "eth0" masquerade' '	}' '}'; }
+    default_interface() { echo ens3; }
+    DOCTOR_ERRORS=0
+    doctor_vpn 203.0.113.10 >"$WORK/nat.out" 2>&1
+    cat "$WORK/nat.out"
+    ((DOCTOR_ERRORS == 1)) && grep -q "network interface of the server (ens3)" "$WORK/nat.out" || return 1
+    # made for the interface in use: fine
+    default_interface() { echo eth0; }
+    DOCTOR_ERRORS=0
+    doctor_vpn 203.0.113.10 &>/dev/null
+    ((DOCTOR_ERRORS == 0))
+)
+
+firewall_policy_checked() (
+    load
+    FIREWALL_CONF_FILE="$WORK/fw-policy.conf"
+    FIREWALL_ENABLED=1
+    state_write "$FIREWALL_CONF_FILE" FIREWALL_ENABLED
+    firewall_summary() { echo SSH; }
+    firewall_sshd_ports() { echo 22; }
+    systemctl() { return 1; }
+    # the table is there, but its input chain accepts everything
+    POLICY=accept
+    nft() { printf '%s\n' 'table inet seedtunnel_fw {' '	chain input {' "		type filter hook input priority filter; policy $POLICY;" '		tcp dport { 22 } accept' '	}' '}'; }
+    DOCTOR_ERRORS=0
+    doctor_firewall >"$WORK/policy.out" 2>&1
+    firewall_status >>"$WORK/policy.out" 2>&1
+    cat "$WORK/policy.out"
+    ((DOCTOR_ERRORS == 1)) && (($(grep -c "do not refuse" "$WORK/policy.out") == 2)) || return 1
+    # everything not allowed is refused: fine
+    POLICY=drop
+    DOCTOR_ERRORS=0
+    doctor_firewall &>/dev/null
+    ((DOCTOR_ERRORS == 0))
+)
+
+doctor_weekly_backup_needs() (
+    load
+    BACKUP_DIR="$WORK/doctor-auto"
+    mkdir -p "$BACKUP_DIR"
+    touch "$BACKUP_DIR/server-auto.tar.gz.enc"
+    BACKUP_PASSPHRASE_FILE="$WORK/doctor-auto.passphrase"
+    BACKUP_DOWNLOADED_MARK="$WORK/doctor-auto.mark"
+    touch "$BACKUP_DOWNLOADED_MARK"
+    backup_auto_enabled() { return 0; }
+    # the timer is stopped, and the passphrase can be read by everyone
+    systemctl() { return 1; }
+    echo "a test passphrase" >"$BACKUP_PASSPHRASE_FILE"
+    chmod 644 "$BACKUP_PASSPHRASE_FILE"
+    DOCTOR_ERRORS=0
+    doctor_backup >"$WORK/auto-needs.out" 2>&1
+    cat "$WORK/auto-needs.out"
+    ((DOCTOR_ERRORS == 2)) && grep -q "timer is stopped" "$WORK/auto-needs.out" \
+        && grep -q "read by others" "$WORK/auto-needs.out" || return 1
+    # no passphrase at all
+    rm -f "$BACKUP_PASSPHRASE_FILE"
+    doctor_backup >"$WORK/auto-needs.out" 2>&1
+    grep -q "passphrase of the weekly backup is missing" "$WORK/auto-needs.out" || return 1
+    # all there: no error
+    systemctl() { [[ $1 == is-active ]]; }
+    echo "a test passphrase" >"$BACKUP_PASSPHRASE_FILE"
+    chmod 600 "$BACKUP_PASSPHRASE_FILE"
+    DOCTOR_ERRORS=0
+    doctor_backup &>/dev/null
+    ((DOCTOR_ERRORS == 0))
+)
+
+doctor_reports_unfinished_update() (
+    load
+    APP_DIR="$WORK/app-unfinished/seedtunnel"
+    mkdir -p "$APP_DIR.previous"
+    timedatectl() { echo yes; }
+    doctor_system >"$WORK/unfinished.out" 2>&1
+    cat "$WORK/unfinished.out"
+    grep -q "did not finish" "$WORK/unfinished.out" && grep -q "rm -rf $APP_DIR.previous" "$WORK/unfinished.out"
+)
+
+# certbot, the full disk protection, the weekly backup and the firewall at
+# boot: enabled and running after the next run, nothing done when they are
+services_put_right() (
+    load
+    chown() { :; }
+    rm -f "$WORK"/units-*
+    DISKGUARD_SERVICE="$WORK/units-dg.service"
+    DISKGUARD_TIMER="$WORK/units-dg.timer"
+    BACKUP_SERVICE="$WORK/units-bk.service"
+    BACKUP_TIMER="$WORK/units-bk.timer"
+    FIREWALL_CONF_FILE="$WORK/units-fw.conf"
+    FIREWALL_RULES="$WORK/units-fw.nft"
+    FIREWALL_UNIT="$WORK/units-fw.service"
+    FIREWALL_ENABLED=1
+    state_write "$FIREWALL_CONF_FILE" FIREWALL_ENABLED
+    firewall_generate_rules() { echo rules; }
+    echo rules >"$FIREWALL_RULES"
+    nft() { :; }
+    SEEDBOX_DOMAIN=seedbox.example.org
+    SEEDBOX_LETSENCRYPT=auto
+    SEEDBOX_LETSENCRYPT_SERVER=production
+    seedbox_selfsigned_ensure() { :; }
+    letsencrypt_usable() { return 0; }
+    seedbox_certificate_mode() { echo letsencrypt; }
+    seedbox_apply_nginx() { :; }
+    systemctl() {
+        case $1 in
+            is-enabled) [[ $UNITS_ENABLED == *" ${*: -1} "* ]] ;;
+            is-active) [[ $UNITS_ACTIVE == *" ${*: -1} "* ]] ;;
+            *) echo "systemctl $*" >>"$WORK/units" ;;
+        esac
+    }
+    services_apply() {
+        : >"$WORK/units"
+        seedbox_apply_https && diskguard_install && backup_auto_install_units && firewall_refresh
+    }
+    # after a restart: the timers of the certificate and of the disk ran but
+    # were not enabled at boot; the backup timer and the firewall are enabled
+    # but stopped
+    UNITS_ENABLED=" seedtunnel-backup.timer seedtunnel-firewall.service "
+    UNITS_ACTIVE=" certbot.timer seedtunnel-diskguard.timer "
+    services_apply >"$WORK/units.out" 2>&1 || {
+        cat "$WORK/units.out"
+        return 1
+    }
+    cat "$WORK/units"
+    grep -qx "systemctl enable --now certbot.timer" "$WORK/units" \
+        && grep -qx "systemctl enable --now seedtunnel-diskguard.timer" "$WORK/units" \
+        && grep -qx "systemctl start seedtunnel-backup.timer" "$WORK/units" \
+        && grep -qx "systemctl start seedtunnel-firewall.service" "$WORK/units" || return 1
+    # all in order: nothing is done
+    UNITS_ENABLED=" certbot.timer seedtunnel-diskguard.timer seedtunnel-backup.timer seedtunnel-firewall.service "
+    UNITS_ACTIVE=$UNITS_ENABLED
+    services_apply >"$WORK/units.out" 2>&1 || return 1
+    ! grep -E "enable|start" "$WORK/units"
+)
+
+vpn_enable_failure_said() (
+    load
+    VPN_PORT=51820
+    wg-quick() { printf '[Interface]\n'; }
+    nft() { return 0; }
+    wg() { if [[ $1 == show ]]; then echo 51820; fi; }
+    # running, not enabled at boot, and enabling it fails
+    systemctl() { [[ $1 == is-active ]]; }
+    vpn_reconcile 0 </dev/null >"$WORK/vpn-enable.out" 2>&1 || return 1
+    cat "$WORK/vpn-enable.out"
+    grep -q "could not be enabled at boot" "$WORK/vpn-enable.out"
+)
+
+diskguard_start_failure_said() (
+    load
+    DISKGUARD_MARKER="$WORK/diskguard.failed"
+    SEEDBOX_DATA_DIR=$WORK
+    seedbox_installed() { return 0; }
+    : >"$WORK/dg-logger"
+    logger() { echo "logger $*" >>"$WORK/dg-logger"; }
+    disk_free_gb() { echo 50; }
+    # stopped by the guard, room again, but Transmission does not start
+    date +%s >"$DISKGUARD_MARKER"
+    systemctl() { [[ $1 != start ]]; }
+    diskguard_check >"$WORK/dg-start.out" 2>&1
+    cat "$WORK/dg-start.out" "$WORK/dg-logger"
+    # still marked (tried again at the next check), and said in the journal
+    [[ -e $DISKGUARD_MARKER ]] && grep -q "does not start again" "$WORK/dg-logger" || return 1
+    # the diagnostics say it does not start, not that the disk is full
+    DOCTOR_ERRORS=0
+    doctor_transmission >"$WORK/dg-doctor.out" 2>&1
+    cat "$WORK/dg-doctor.out"
+    ((DOCTOR_ERRORS == 1)) && grep -q "does not start again although there is room (50 GB free)" "$WORK/dg-doctor.out"
+)
+
+validators_stricter() (
+    load
+    local good bad
+    # IPv4: no leading zero
+    is_ipv4 10.0.0.1 && is_ipv4 0.0.0.0 && ! is_ipv4 010.0.0.1 && ! is_ipv4 1.2.3.04 && ! is_ipv4 00.1.2.3 || return 1
+    # DNS: no comma at either end
+    vpn_is_valid_dns "1.1.1.1, 1.0.0.1" && ! vpn_is_valid_dns "1.1.1.1," && ! vpn_is_valid_dns "1.1.1.1, " \
+        && ! vpn_is_valid_dns ", 1.1.1.1" || return 1
+    # public address of the VPN: IPv4, IPv6 or domain name
+    for good in 203.0.113.10 2001:db8::1 vpn.example.org VPN.Example.org; do
+        vpn_is_valid_address "$good" || {
+            echo "refused: $good"
+            return 1
+        }
+    done
+    for bad in 1.2.3 300.1.1.1 a..b example -vpn.example.org vpn.example.org. 2001:::1 "a b" 010.0.0.1; do
+        if vpn_is_valid_address "$bad"; then
+            echo "accepted: $bad"
+            return 1
+        fi
+    done
+)
+
+update_git_tag_checked() (
+    load
+    # the code of the tag v9.9.9 says another version
+    UPDATE_TAG_CODE_VERSION=1.0.0
+    update_git_make
+    # and a tag that is not a version
+    git -C "$APP_DIR" tag v9.9.10-test v9.9.9
+    git() {
+        if fetch_stub "$@"; then return 0; fi
+        command git "$@"
+    }
+    (update_from_git) >"$WORK/update-tags.out" 2>&1
+    cat "$WORK/update-tags.out"
+    # nothing switched, nothing applied
+    [[ $(command git -C "$APP_DIR" rev-parse HEAD) == "$UPDATE_OLD" && ! -e $WORK/app/applied ]] \
+        && grep -q "Tag v9.9.9 left out: its code says version 1.0.0" "$WORK/update-tags.out"
+)
+
+language_asked_again() (
+    load
+    rm -f "$APP_LANG_FILE"
+    SEEDTUNNEL_LANG=""
+    # an answer other than 1 or 2 is asked again
+    language_first_run <<<$'3\nfrench\n2' >/dev/null 2>&1
+    [[ $(<"$APP_LANG_FILE") == fr ]] || return 1
+    # a file that holds something else: the question is asked
+    echo xx >"$APP_LANG_FILE"
+    language_first_run <<<'1' >/dev/null 2>&1
+    [[ $(<"$APP_LANG_FILE") == en ]] || return 1
+    # from the menu: asked again too; an empty answer goes back
+    language_menu <<<$'9\n2' >/dev/null 2>&1
+    [[ $(<"$APP_LANG_FILE") == fr ]] || return 1
+    language_menu <<<'' >/dev/null 2>&1
+    [[ $(<"$APP_LANG_FILE") == fr ]] || return 1
+    # written aside, then renamed: a failure leaves the saved choice whole
+    i18n_load en
+    mv() { return 1; }
+    language_save en >"$WORK/language.out" 2>&1
+    unset -f mv
+    [[ $(<"$APP_LANG_FILE") == fr && ! -e $APP_LANG_FILE.tmp ]] && grep -q "Cannot save the language" "$WORK/language.out"
+)
+
+shortcut_put_right() (
+    load
+    APP_SHORTCUT="$WORK/bin/seedtunnel"
+    rm -rf "${WORK:?}/bin"
+    mkdir -p "$WORK/bin"
+    # missing: created
+    install_shortcut
+    [[ $(readlink "$APP_SHORTCUT") == "$ROOT/seedtunnel.sh" ]] || return 1
+    # pointing to an older copy: put right
+    ln -sfn /opt/old-copy/seedtunnel.sh "$APP_SHORTCUT"
+    install_shortcut
+    [[ $(readlink "$APP_SHORTCUT") == "$ROOT/seedtunnel.sh" ]] || return 1
+    # a file of another program: left alone, and said
+    rm -f "$APP_SHORTCUT"
+    echo "another program" >"$APP_SHORTCUT"
+    install_shortcut 2>"$WORK/shortcut.out"
+    cat "$WORK/shortcut.out"
+    [[ $(<"$APP_SHORTCUT") == "another program" ]] && grep -q "another program" "$WORK/shortcut.out"
+)
+
+# Before anything: not even the check of the system (root, Debian), which
+# creates the folder of the settings
+commands_refused_first() (
+    local arguments out
+    for arguments in "whatever" "apply now" "doctor x" "update x" "language fr en" "restore a.enc b.enc" "diskguard-check x"; do
+        # shellcheck disable=SC2086 # one word per argument
+        if out=$(SEEDTUNNEL_LANG=en bash "$ROOT/seedtunnel.sh" $arguments 2>&1); then
+            echo "accepted: $arguments"
+            return 1
+        fi
+        if [[ $out != *"Unknown command"* && $out != *"Too many arguments"* ]]; then
+            echo "$arguments → $out"
+            return 1
+        fi
+    done
+)
+
+share_refused_without_room() (
+    share_load room
+    pgrep() { return 0; }
+    # /run (in memory) is almost full
+    df() { printf 'Avail\n%s\n' 1000; }
+    if (share_create "$WORK/to-share" file.conf Title "" Note) &>"$WORK/share.out"; then
+        cat "$WORK/share.out"
+        return 1
+    fi
+    cat "$WORK/share.out"
+    grep -q "Not enough room" "$WORK/share.out" && [[ -z $(find "$SHARE_DIR" -mindepth 1 2>/dev/null) ]]
+)
+
+# nginx takes the first expression of the map that matches the address
+share_map_key() {
+    local regex value
+    while read -r regex value; do
+        regex=${regex#\"~}
+        regex=${regex%\"}
+        if [[ $1 =~ $regex ]]; then
+            printf '%s' "$value"
+            return 0
+        fi
+    done < <(share_generate_nginx_http | sed -n '/^map \$uri \$seedtunnel_share_file {/,/^}/{/"~/p}')
+}
+
+share_page_not_limited() (
+    load
+    local token=0123456789abcdef0123456789abcdef
+    # the page of a link (opened by the preview of a message) is not counted
+    [[ $(share_map_key "/share/$token/index.html") == '"";' ]] || return 1
+    # its file is: served once
+    [[ $(share_map_key "/share/$token/phone.conf") == '$uri;' ]]
+)
+
+vpn_sync_checks_nat_first() (
+    load
+    : >"$WORK/sync-calls"
+    wg-quick() { printf '[Interface]\n'; }
+    wg() { echo "wg $1" >>"$WORK/sync-calls"; }
+    # nftables refuses the NAT rules
+    nft() {
+        echo "nft $*" >>"$WORK/sync-calls"
+        return 1
+    }
+    if vpn_sync </dev/null &>/dev/null; then return 1; fi
+    cat "$WORK/sync-calls"
+    ! grep -q "wg syncconf" "$WORK/sync-calls"
+)
+
+vpn_kernel_check_cleans_up() (
+    load
+    # left by a check cut short
+    touch "$WORK/st-wgtest"
+    ip() {
+        case "$1 $2" in
+            "link show") return 1 ;;
+            "link del") rm -f "$WORK/st-wgtest" ;;
+            "link add") [[ ! -e $WORK/st-wgtest ]] && touch "$WORK/st-wgtest" ;;
+        esac
+    }
+    vpn_check_kernel >"$WORK/kernel.out" 2>&1 || {
+        cat "$WORK/kernel.out"
+        return 1
+    }
+    [[ ! -e $WORK/st-wgtest ]]
+)
+
+vpn_port_change_through_vpn() (
+    back_load
+    vpn_port_is_free() { return 0; }
+    vpn_apply() { echo "apply" >>"$WORK/back-calls"; }
+    : >"$WORK/questions"
+    confirm() {
+        echo "$1" >>"$WORK/questions"
+        [[ $1 == 'Is that right?' ]]
+    }
+    # this session goes through the VPN
+    SSH_CONNECTION="10.8.0.2 50000 10.8.0.1 22"
+    VPN_PORT=51820
+    # same address, new port, Quad9
+    ANSWERS=("203.0.113.10" "51821" "1")
+    vpn_change_settings >"$WORK/port.out" 2>&1
+    cat "$WORK/port.out" "$WORK/questions"
+    # warned, asked (« no » by default), nothing applied
+    grep -q "every client is disconnected" "$WORK/port.out" && grep -q "Change the port anyway?" "$WORK/questions" || return 1
+    back_nothing_done || return 1
+    # same port: not asked
+    : >"$WORK/questions"
+    VPN_PORT=51820
+    ANSWERS=("203.0.113.10" "51820" "1")
+    vpn_change_settings >"$WORK/port.out" 2>&1 || return 1
+    ! grep -q "anyway" "$WORK/questions" && grep -q apply "$WORK/back-calls"
+)
+
+firewall_message_says_rule() (
+    firewall_trial_load
+    # no new login: « yes » is refused, and the rule is said
+    journalctl() { :; }
+    firewall_enable <<<"yes" >"$WORK/fw/out" 2>&1
+    cat "$WORK/fw/out"
+    (($(grep -c "through the VPN, only if this session goes through the VPN too" "$WORK/fw/out") == 2))
+)
+
+backup_new_passphrase_warns() (
+    load
+    BACKUP_DIR="$WORK/passphrase-backups"
+    rm -rf "$BACKUP_DIR"
+    mkdir -p "$BACKUP_DIR"
+    touch "$BACKUP_DIR/seedtunnel-server-20261101-030000-auto.tar.gz.enc"
+    BACKUP_PASSPHRASE_FILE="$WORK/new.passphrase"
+    backup_require_something() { :; }
+    backup_read_passphrase() { BACKUP_PASSPHRASE="the new passphrase"; }
+    backup_auto_install_units() { :; }
+    clear() { :; }
+    backup_auto_enable >"$WORK/new-passphrase.out" 2>&1 || return 1
+    cat "$WORK/new-passphrase.out"
+    grep -q "already made keep the passphrase" "$WORK/new-passphrase.out" || return 1
+    # no backup yet: nothing to say about older ones
+    rm -f "$BACKUP_DIR"/*.enc
+    backup_auto_enable >"$WORK/new-passphrase.out" 2>&1 || return 1
+    ! grep -q "already made" "$WORK/new-passphrase.out"
+)
+
+i18n_check_stricter() (
+    local copy="$WORK/i18n-copy"
+    rm -rf "$copy"
+    mkdir -p "$copy/tests"
+    cp -r "$ROOT/seedtunnel.sh" "$ROOT/lib" "$ROOT/lang" "$copy/"
+    cp "$ROOT/tests/i18n_check.py" "$copy/tests/"
+    python3 "$copy/tests/i18n_check.py" >/dev/null || {
+        echo "the copy as it is: refused"
+        return 1
+    }
+    # a translation left empty (one without %s: the placeholders still match)
+    awk 'done != 1 && /^en: / && !/%/ { print; getline; print "fr: "; done = 1; next } { print }' \
+        "$ROOT/lang/fr.txt" >"$copy/lang/fr.txt"
+    if python3 "$copy/tests/i18n_check.py" >"$WORK/i18n.out"; then
+        echo "empty translation accepted"
+        return 1
+    fi
+    # « 100 % »: printf would read the « % » as the start of a placeholder
+    awk 'done != 1 && /^en: / && !/%/ { print; getline; print $0 " 100 %"; done = 1; next } { print }' \
+        "$ROOT/lang/fr.txt" >"$copy/lang/fr.txt"
+    if python3 "$copy/tests/i18n_check.py" >"$WORK/i18n.out"; then
+        echo "stray % accepted"
+        return 1
+    fi
+)
+
+nginx_home_asks_password_first() (
+    load
+    SEEDBOX_DOMAIN=seedbox.example.org
+    SEEDBOX_CERTIFICATE=letsencrypt
+    local block
+    block=$(nginx_generate_site | sed -n '/location = \/ {/,/}/p')
+    echo "$block"
+    # « return » would answer before nginx asks for the password
+    [[ -n $block ]] && ! grep -q return <<<"$block"
+)
+
+backup_dates_in_words() (
+    load
+    BACKUP_DIR="$WORK/dates-backups"
+    mkdir -p "$BACKUP_DIR"
+    touch "$BACKUP_DIR/server-auto.tar.gz.enc"
+    BACKUP_PASSPHRASE_FILE="$WORK/dates.passphrase"
+    echo "a test passphrase" >"$BACKUP_PASSPHRASE_FILE"
+    chmod 600 "$BACKUP_PASSPHRASE_FILE"
+    BACKUP_DOWNLOADED_MARK="$WORK/dates.mark"
+    touch "$BACKUP_DOWNLOADED_MARK"
+    backup_auto_enabled() { return 0; }
+    systemctl() { [[ $1 == is-active ]]; }
+    doctor_backup >"$WORK/dates.out" 2>&1
+    backup_auto_status >>"$WORK/dates.out" 2>&1
+    cat "$WORK/dates.out"
+    ! grep -q "day(s)" "$WORK/dates.out" && (($(grep -c "today" "$WORK/dates.out") == 3)) || return 1
+    # yesterday, in French
+    i18n_load fr
+    touch -d '25 hours ago' "$BACKUP_DOWNLOADED_MARK"
+    doctor_backup >"$WORK/dates.out" 2>&1
+    cat "$WORK/dates.out"
+    grep -q "commencé hier" "$WORK/dates.out" && grep -q "la dernière : aujourd'hui" "$WORK/dates.out"
+)
+
 printf '\033[1m=== Unit tests\033[0m\n'
 check "vpn_sync: WireGuard refusing the configuration shows « failed »" vpn_sync_reports_wg_failure
 check "vpn_sync: a failure of « wg-quick strip » is seen" vpn_sync_reports_strip_failure
@@ -2038,6 +2565,30 @@ check "back: passphrase of a backup (wrong entries asked again)" backup_passphra
 check "back: backup now and weekly backup (empty passphrase)" backup_create_and_weekly_can_go_back
 check "back: restore, path of the file (asked again if missing)" backup_menu_can_go_back
 check "back: restore, wrong passphrase asked again, then back" restore_wrong_passphrase_asked_again
+check "df failing: free space unreadable, nothing stops (diagnostics, full disk)" df_failure_does_not_stop
+check "network settings: one value off (IPv6 too) → said, and loaded again" net_hardening_checked_everywhere
+check "diagnostics: NAT made for another network interface → error" doctor_nat_checks_interface
+check "firewall: rules that do not refuse by default → said (doctor, status)" firewall_policy_checked
+check "diagnostics: weekly backup without timer or passphrase → error" doctor_weekly_backup_needs
+check "diagnostics: update cut short (.previous left) → said" doctor_reports_unfinished_update
+check "services: enabled at boot and running, nothing done when they are" services_put_right
+check "VPN: not enabled at boot → said" vpn_enable_failure_said
+check "full disk: Transmission that does not start again → kept, said" diskguard_start_failure_said
+check "validation: IPv4 without leading zero, DNS, public address of the VPN" validators_stricter
+check "update (git): only vX.Y.Z tags whose code says that version" update_git_tag_checked
+check "language: asked until 1 or 2, saved file written aside" language_asked_again
+check "shortcut: link elsewhere put right, another program left alone" shortcut_put_right
+check "commands: unknown, or arguments too many → refused before anything" commands_refused_first
+check "one-time link: not enough room in /run → no link" share_refused_without_room
+check "one-time link: its page is not counted, its file is" share_page_not_limited
+check "VPN: NAT rules refused → the clients are not changed" vpn_sync_checks_nat_first
+check "VPN: test interface left behind → removed before the check" vpn_kernel_check_cleans_up
+check "VPN: new port with a session through the VPN → asked, no by default" vpn_port_change_through_vpn
+check "firewall: the message says which new login counts" firewall_message_says_rule
+check "weekly backup: new passphrase → the older backups keep theirs (said)" backup_new_passphrase_warns
+check "translations: empty, or a stray %, refused" i18n_check_stricter
+check "seedbox: the home page asks for the password first" nginx_home_asks_password_first
+check "dates: today, yesterday, N days ago (EN, FR)" backup_dates_in_words
 
 printf '\n\033[1m%s passed, %s failed\033[0m\n' "$PASS" "$FAIL"
 ((FAIL == 0))

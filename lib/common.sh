@@ -6,7 +6,7 @@
 # =============================================================================
 
 APP_NAME="seedtunnel"
-APP_VERSION="1.2.5"
+APP_VERSION="1.2.6"
 # GitHub repository used by « seedtunnel update » (owner/project)
 APP_REPO="finalcutgit411/seedtunnel"
 # Server state and secrets (readable by root only)
@@ -89,6 +89,15 @@ pause() {
     IFS= read -r -p "$(t 'Press [Enter] to continue…') " _ || true
 }
 
+# 0 → « today », 1 → « yesterday », N → « N days ago »
+days_ago() {
+    case $1 in
+        0) t 'today' ;;
+        1) t 'yesterday' ;;
+        *) t '%s days ago' "$1" ;;
+    esac
+}
+
 # State of a service, in color: running / stopped / missing
 service_state() {
     if systemctl is-active --quiet "$1" 2>/dev/null; then
@@ -97,6 +106,19 @@ service_state() {
         printf '%s%s%s' "$C_RED" "$(t 'stopped')" "$C_RESET"
     else
         printf '%s%s%s' "$C_DIM" "$(t 'missing')" "$C_RESET"
+    fi
+}
+
+# unit_ensure_on "Description" UNIT — the systemd unit is enabled at boot and
+# running (one that was turned off by hand, or whose enabling failed, is put
+# right). Nothing is done when it already is: « seedtunnel apply » then changes
+# nothing. A failure stops the script with the end of the log, like « run ».
+unit_ensure_on() {
+    local description=$1 unit=$2
+    if ! systemctl is-enabled --quiet "$unit" 2>/dev/null; then
+        run "$description" systemctl enable --now "$unit"
+    elif ! systemctl is-active --quiet "$unit" 2>/dev/null; then
+        run "$description" systemctl start "$unit"
     fi
 }
 
@@ -312,12 +334,17 @@ CONFIG_KEYS=" LANGUAGE VPN_PUBLIC_ADDRESS VPN_PORT VPN_DNS VPN_CLIENTS SEEDBOX_U
  SEEDBOX_LETSENCRYPT SEEDBOX_LETSENCRYPT_SERVER SEEDBOX_SSH_KEYS_FILE
  SEEDBOX_SFTP_PASSWORD FIREWALL "
 
+# Does the file belong to root, readable by root only?
+secret_file_private() {
+    local owner="" mode=""
+    read -r owner mode < <(stat -L -c '%u %a' -- "$1" 2>/dev/null) || true
+    [[ $owner == "$EUID" && $mode == [0-7]00 ]]
+}
+
 # A file that may hold a secret must belong to root and be readable by root
 # only (it is refused otherwise, before being read)
 secret_file_check() {
-    local owner="" mode=""
-    read -r owner mode < <(stat -L -c '%u %a' -- "$1" 2>/dev/null) || true
-    if [[ $owner != "$EUID" || $mode != [0-7]00 ]]; then
+    if ! secret_file_private "$1"; then
         die '%s may hold a secret: it must belong to root and be readable by root only:  chown root: %s && chmod 600 %s' "$1" "$1" "$1"
     fi
 }
@@ -377,6 +404,22 @@ check_system() {
     install -d -m 700 "$APP_STATE_DIR"
     touch "$APP_LOG"
     chmod 600 "$APP_LOG"
+}
+
+# « seedtunnel » shortcut to open the menu from anywhere. It goes into
+# /usr/local/bin, in the PATH even after a « su » without a dash. A link that
+# points elsewhere (an older copy of seedtunnel) is put right; a file of
+# another program is left alone, and it is said.
+APP_SHORTCUT="/usr/local/bin/seedtunnel"
+install_shortcut() {
+    local target="$APP_DIR/seedtunnel.sh"
+    if [[ -L $APP_SHORTCUT ]]; then
+        if [[ $(readlink -- "$APP_SHORTCUT") != "$target" ]]; then ln -sfn -- "$target" "$APP_SHORTCUT" 2>/dev/null || true; fi
+    elif [[ -e $APP_SHORTCUT ]]; then
+        warn '%s belongs to another program: left alone (seedtunnel is still there: %s).' "$APP_SHORTCUT" "$target"
+    else
+        ln -s -- "$target" "$APP_SHORTCUT" 2>/dev/null || true
+    fi
 }
 
 # Only one copy at a time may change the server. The lock file says who holds
@@ -539,13 +582,35 @@ net.ipv4.conf.*.accept_source_route = 0
 EOF
 }
 
-# Called when installing the VPN and the seedbox (does nothing if up to date)
+# The settings of the file, read back on « all » (those of IPv6 only if the
+# server has IPv6): the same check for « seedtunnel apply » and the diagnostics
+NET_HARDENING_IPV6_DIR="/proc/sys/net/ipv6/conf/all"
+net_hardening_keys() {
+    printf '%s\n' net.ipv4.conf.all.accept_redirects net.ipv4.conf.all.secure_redirects \
+        net.ipv4.conf.all.send_redirects net.ipv4.conf.all.accept_source_route
+    if [[ -d $NET_HARDENING_IPV6_DIR ]]; then
+        printf '%s\n' net.ipv6.conf.all.accept_redirects net.ipv6.conf.all.accept_source_route
+    fi
+}
+
+# Is the hardening in force? Status 1 if one value differs, or cannot be read
+net_hardening_in_force() {
+    local key
+    while IFS= read -r key; do
+        [[ $(sysctl -n "$key" 2>/dev/null) == 0 ]] || return 1
+    done < <(net_hardening_keys)
+}
+
+# systemd-sysctl, as at boot: it understands « * » and « - »
+net_hardening_load() { /usr/lib/systemd/systemd-sysctl "$NET_HARDENING_FILE"; }
+
+# Called when installing the VPN and the seedbox, and by « seedtunnel apply ».
+# The settings are loaded again only if the file changed or one value differs:
+# a run with nothing to fix changes nothing.
 net_hardening_apply() {
-    if write_if_changed "$NET_HARDENING_FILE" 644 root:root net_hardening_generate \
-        || [[ $(sysctl -n net.ipv4.conf.all.send_redirects 2>/dev/null) != 0 ]]; then
+    if write_if_changed "$NET_HARDENING_FILE" 644 root:root net_hardening_generate || ! net_hardening_in_force; then
         printf '\n=== %(%F %T)T · kernel network hardening\n' -1 >>"$APP_LOG"
-        # systemd-sysctl, as at boot: it understands « * » and « - »
-        if /usr/lib/systemd/systemd-sysctl "$NET_HARDENING_FILE" >>"$APP_LOG" 2>&1; then
+        if net_hardening_load >>"$APP_LOG" 2>&1 && net_hardening_in_force; then
             ok 'Kernel network settings hardened (ICMP redirects, source routing)'
         else
             warn 'Kernel network settings not applied (details in %s).' "$APP_LOG"
@@ -580,17 +645,20 @@ disk_free_text() {
 # 38654705664 → « 36GB » (« 36Go » in French)
 human_size() { numfmt --to=iec --suffix="$(t 'B')" "$1"; }
 
-# Free space in whole gigabytes (GiB) on the partition of a folder
+# Free space in whole gigabytes (GiB) on the partition of a folder; empty if it
+# cannot be measured. Never a failure: under « set -e », a df that fails would
+# stop the script where it is used (« free=$(disk_free_gb …) »).
 disk_free_gb() {
-    df -Pk "$1" 2>/dev/null | awk 'NR == 2 { printf "%d", $4 / 1048576 }'
+    { df -Pk "$1" 2>/dev/null || true; } | awk 'NR == 2 { printf "%d", $4 / 1048576 }'
 }
 
 # --- Network ----------------------------------------------------------------------
-# IPv4 address: four numbers from 0 to 255
+# IPv4 address: four numbers from 0 to 255, without leading zero (« 010 » is
+# read as 8 by some programs)
 is_ipv4() {
     local IFS=. part
     local -a parts
-    [[ $1 =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || return 1
+    [[ $1 =~ ^(0|[1-9][0-9]{0,2})(\.(0|[1-9][0-9]{0,2})){3}$ ]] || return 1
     read -r -a parts <<<"$1"
     for part in "${parts[@]}"; do
         ((10#$part <= 255)) || return 1
@@ -646,6 +714,15 @@ public_ipv4() {
     done
     ip -4 route get 1.1.1.1 2>/dev/null \
         | awk '!found { for (i = 1; i < NF; i++) if ($i == "src") { print $(i+1); found = 1 } }'
+}
+
+# Address the SSH session running seedtunnel comes from: SSH_CONNECTION, or
+# else the terminal (after sudo or su). Empty from the console.
+ssh_session_source() {
+    local source=${SSH_CONNECTION-}
+    source=${source%% *}
+    if [[ -z $source ]]; then source=$(who -m 2>/dev/null | sed -n 's/.*(\([^)]*\)).*/\1/p' || true); fi
+    printf '%s' "$source"
 }
 
 # Is a port already in use?  port_in_use tcp|udp PORT

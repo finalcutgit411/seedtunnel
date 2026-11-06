@@ -98,17 +98,29 @@ update_back_to_previous() {
     die 'Update cancelled, version %s kept (details in %s).' "$APP_VERSION" "$APP_LOG"
 }
 
+# Version written in the code of a git tag (APP_VERSION of lib/common.sh);
+# empty if there is none (never a failure, for « set -e »)
+update_tag_version() {
+    { git -C "$APP_DIR" show "$1:lib/common.sh" 2>/dev/null || true; } | awk -F'"' '/^APP_VERSION="/ { print $2; exit }'
+}
+
 update_from_git() {
-    local tag="" candidate previous
+    local tag="" candidate previous version
     [[ -z $(git -C "$APP_DIR" status --porcelain 2>/dev/null) ]] \
         || die 'The folder %s has local changes: update cancelled.' "$APP_DIR"
     run 'Fetching the published versions' git -C "$APP_DIR" fetch --tags --quiet
-    # newest tag of seedtunnel (older tags of the repository belong to finalcut)
+    # Newest published version: a vX.Y.Z tag only, of seedtunnel (older tags
+    # of the repository belong to finalcut), whose code says the same version
+    # (otherwise the update would go on and on, or go backwards)
     while IFS= read -r candidate; do
-        if git -C "$APP_DIR" cat-file -e "$candidate:seedtunnel.sh" 2>/dev/null; then
+        [[ $candidate =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+        git -C "$APP_DIR" cat-file -e "$candidate:seedtunnel.sh" 2>/dev/null || continue
+        version=$(update_tag_version "$candidate")
+        if [[ $version == "${candidate#v}" ]]; then
             tag=$candidate
             break
         fi
+        warn 'Tag %s left out: its code says version %s.' "$candidate" "${version:-?}"
     done < <(git -C "$APP_DIR" tag -l 'v*' --sort=-v:refname)
     [[ -n $tag ]] || die 'No published version (vX.Y.Z tag) in the repository.'
     if ! version_greater "${tag#v}" "$APP_VERSION"; then

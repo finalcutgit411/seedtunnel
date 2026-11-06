@@ -588,7 +588,13 @@ server {
     client_max_body_size 32m;
 $(share_generate_nginx "${hsts//$'\n    '/$'\n        '}")
 
+    # Home page: the password first, then the web interface. A « return » here
+    # would answer before nginx asks for the password (it runs earlier), and
+    # tell anyone that Transmission is behind: try_files runs after it.
     location = / {
+        try_files /.seedtunnel-no-such-file @seedbox_home;
+    }
+    location @seedbox_home {
         return 302 /transmission/web/;
     }
     location /transmission/ {
@@ -661,9 +667,9 @@ seedbox_apply_https() {
         fi
     fi
     seedbox_apply_nginx
-    # automatic renewal (installed with the certbot package)
-    if [[ $SEEDBOX_CERTIFICATE != selfsigned ]] && ! systemctl is-active --quiet certbot.timer; then
-        run 'Enabling automatic renewal' systemctl enable --now certbot.timer
+    # automatic renewal (installed with the certbot package), at boot too
+    if [[ $SEEDBOX_CERTIFICATE != selfsigned ]]; then
+        unit_ensure_on 'Enabling automatic renewal' certbot.timer
     fi
 }
 

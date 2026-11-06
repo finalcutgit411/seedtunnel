@@ -2,11 +2,14 @@
 """Checks the translations of seedtunnel.
 
 Every English message written in the code (first argument of the functions
-that translate: t, say, section, ok, warn, err, die, run, confirm, doctor_*;
-second argument of ask) must have its translation in lang/fr.txt, with the
-same placeholders (%s, %d…) in the same order. Translations nobody uses any
-more are reported too. Long texts (text_en_* functions) must exist in every
-language, and every « text NAME » of the code must exist.
+that translate: t, say, section, ok, warn, err, die, run, unit_ensure_on,
+confirm, doctor_*; second argument of ask) must have its translation in
+lang/fr.txt, not empty, with the same placeholders (%s, %d…) in the same
+order. A message or a translation may only hold %s, %d (with a width, like
+%-10s) or %%: any other « % » would be read by printf (« 100 % » too).
+Translations nobody uses any more are reported too. Long texts (text_en_*
+functions) must exist in every language, and every « text NAME » of the code
+must exist.
 
 Usage: tests/i18n_check.py              check (status 1 if something is wrong)
        tests/i18n_check.py --missing    print the missing messages, ready to
@@ -20,13 +23,23 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 CODE = [ROOT / "seedtunnel.sh", *sorted((ROOT / "lib").glob("*.sh"))]
 LANGUAGES = ["fr"]
 
-FUNCTIONS = r"(?:t|say|section|ok|warn|err|die|run|confirm|doctor_ok|doctor_warn|doctor_error|doctor_title)"
+FUNCTIONS = r"(?:t|say|section|ok|warn|err|die|run|unit_ensure_on|confirm|doctor_ok|doctor_warn|doctor_error|doctor_title)"
 LITERAL = r"""('[^']*'|"(?:[^"\\]|\\.)*")"""
 # lookahead: calls inside other calls are found too
 CALL = re.compile(r"(?<![\w-])" + FUNCTIONS + r"\s+(?=" + LITERAL + ")")
 ASK = re.compile(r"(?<![\w-])ask(?:_back)?\s+[A-Za-z_]+\s+(?=" + LITERAL + ")")
 TEXT_CALL = re.compile(r"(?<![\w-])text\s+([a-z_]+)")
 PLACEHOLDER = re.compile(r"%[-0-9.]*[sd]")
+# every « % » and what follows it: allowed if group 1 matched
+PERCENT = re.compile(r"%(%|-?[0-9]*[sd])?")
+
+
+def odd_percent(text):
+    """First « % » sequence printf would misread, or None."""
+    for match in PERCENT.finditer(text):
+        if match.group(1) is None:
+            return text[match.start():match.start() + 2]
+    return None
 
 
 def unquote(literal):
@@ -87,10 +100,17 @@ def main():
             return 0
         for message in missing:
             problems.append(f"{messages[message]}: no {language} translation for: {message}")
-        for message in translations:
+        for message in messages:
+            if odd_percent(message):
+                problems.append(f"{messages[message]}: « {odd_percent(message)} » in: {message}")
+        for message, translation in translations.items():
             if message not in messages:
                 problems.append(f"lang/{language}.txt: translation no longer used: {message}")
-            elif PLACEHOLDER.findall(message) != PLACEHOLDER.findall(translations[message]):
+            elif not translation.strip():
+                problems.append(f"lang/{language}.txt: empty translation: {message}")
+            elif odd_percent(translation):
+                problems.append(f"lang/{language}.txt: « {odd_percent(translation)} » in: {translation}")
+            elif PLACEHOLDER.findall(message) != PLACEHOLDER.findall(translation):
                 problems.append(f"lang/{language}.txt: placeholders differ: {message}")
         english_texts, texts = text_functions("en"), text_functions(language)
         for name in sorted(english_texts - texts):

@@ -57,6 +57,10 @@ firewall_open_tcp_ports() {
     { grep -oE 'tcp dport (\{[^}]*\}|[0-9]+) accept' || true; } | { grep -oE '[0-9]+' || true; } | sort -un
 }
 
+# Do loaded rules (text of « nft list » on standard input) have their input
+# chain, refusing by default what is not allowed?
+firewall_refuses_by_default() { grep -qE 'type filter hook input priority [^;]*; policy drop;'; }
+
 # What is open, in words
 firewall_summary() {
     local summary
@@ -165,12 +169,10 @@ firewall_is_local_address() {
 }
 
 # Does the session running seedtunnel come from the Internet (not through
-# the VPN, not from the server itself, not from the console)? SSH_CONNECTION,
-# or else the terminal (after sudo or su)
+# the VPN, not from the server itself, not from the console)?
 firewall_session_from_internet() {
-    local source=${SSH_CONNECTION-}
-    source=${source%% *}
-    if [[ -z $source ]]; then source=$(who -m 2>/dev/null | sed -n 's/.*(\([^)]*\)).*/\1/p' || true); fi
+    local source
+    source=$(ssh_session_source)
     [[ -n $source && $source != "$VPN_SUBNET".* ]] && ! firewall_is_local_address "$source"
 }
 
@@ -216,7 +218,7 @@ firewall_wait_confirmation() {
         IFS= read -r -t "$left" -p "$(t 'Does it work? Type "yes" to keep the firewall:') " answer || return 1
         [[ ${answer,,} == yes || ${answer,,} == oui ]] || return 1
         if firewall_new_ssh_login "$start"; then return 0; fi
-        warn 'No new SSH login was seen since the rules were applied: open a NEW SSH connection to this server, the same way as this one, then type "yes" again.'
+        warn 'No new SSH login was seen since the rules were applied: open a NEW SSH connection to this server, then type "yes" again. From the Internet it always counts; through the VPN, only if this session goes through the VPN too.'
     done
 }
 
@@ -256,6 +258,7 @@ firewall_enable() {
         start=$(date +%s)
         echo
         say 'Now open a NEW SSH connection to this server, without closing this one.'
+        say 'From the Internet it always counts; through the VPN, only if this session goes through the VPN too.'
         if firewall_wait_confirmation "$start"; then
             systemctl stop "$FIREWALL_ROLLBACK_UNIT.timer" &>/dev/null || true
             # the automatic undo must really be cancelled before the new rules
@@ -322,21 +325,24 @@ firewall_refresh() {
         mv -f "$next" "$FIREWALL_RULES"
         pending_clear firewall
     fi
-    # on in the settings: also at boot (enabling it may have failed before)
+    # on in the settings: also at boot (enabling it may have failed before),
+    # and its service running (stopping it removes the rules)
     if write_if_changed "$FIREWALL_UNIT" 644 root:root firewall_generate_unit; then
         run 'Reloading systemd' systemctl daemon-reload
     fi
-    if ! systemctl is-enabled --quiet seedtunnel-firewall.service 2>/dev/null; then
-        run 'Enabling at boot' systemctl enable seedtunnel-firewall.service
-    fi
+    unit_ensure_on 'Enabling at boot' seedtunnel-firewall.service
 }
 
 firewall_status() {
+    local rules
     if firewall_enabled; then
-        if nft list table inet "$FIREWALL_TABLE" &>/dev/null; then
-            ok 'Firewall on — open: %s' "$(firewall_summary)"
-        else
+        rules=$(nft list table inet "$FIREWALL_TABLE" 2>/dev/null || true)
+        if [[ -z $rules ]]; then
             warn 'Firewall enabled but rules missing:  seedtunnel firewall enable --yes'
+        elif ! firewall_refuses_by_default <<<"$rules"; then
+            warn 'Firewall rules loaded, but they do not refuse what is not allowed:  seedtunnel firewall enable --yes'
+        else
+            ok 'Firewall on — open: %s' "$(firewall_summary)"
         fi
     else
         say 'seedtunnel firewall off (everything is open, apart from the fail2ban rules).'

@@ -82,6 +82,9 @@ fr: Option inconnue : %s   (aide : seedtunnel help)
 en: Unknown command: %s   (help: seedtunnel help)
 fr: Commande inconnue : %s   (aide : seedtunnel help)
 
+en: Too many arguments for « seedtunnel %s »: %s   (help: seedtunnel help)
+fr: Arguments en trop pour « seedtunnel %s » : %s   (aide : seedtunnel help)
+
 # --- Sauvegarde et restauration -----------------------------------------------------
 
 en: Nothing to back up: neither VPN, nor seedbox, nor firewall installed.
@@ -168,8 +171,8 @@ fr:   Dernière : %s
 en: Weekly backup: off   (seedtunnel backup auto on)
 fr: Sauvegarde hebdomadaire : désactivée   (seedtunnel backup auto on)
 
-en: Last download of a backup started: %s day(s) ago
-fr: Dernier téléchargement d'une sauvegarde commencé : il y a %s jour(s)
+en: Last download of a backup started: %s
+fr: Dernier téléchargement d'une sauvegarde commencé : %s
 
 en: No backup downloaded yet   (seedtunnel backup share)
 fr: Aucune sauvegarde téléchargée pour l'instant   (seedtunnel backup share)
@@ -258,6 +261,9 @@ fr: %s existe déjà : choisissez un autre nom, ou supprimez-le d'abord.
 en: Cannot save the passphrase (disk full? details in %s): the weekly backup was not changed.
 fr: Impossible d'enregistrer la passphrase (disque plein ? détails dans %s) : la sauvegarde hebdomadaire n'a pas été modifiée.
 
+en: The backups already made keep the passphrase they were made with: the new one only applies to the next ones.
+fr: Les sauvegardes déjà faites gardent la passphrase avec laquelle elles ont été faites : la nouvelle ne vaut que pour les suivantes.
+
 en: Archive refused: "%s" is a link or a special file
 fr: Archive refusée : « %s » est un lien ou un fichier spécial
 
@@ -265,6 +271,15 @@ en: Archive refused: %s holds something else than settings (it could run command
 fr: Archive refusée : %s contient autre chose que des réglages (cela pourrait lancer des commandes)
 
 # --- Bibliothèque commune ---------------------------------------------------------------
+
+en: today
+fr: aujourd'hui
+
+en: yesterday
+fr: hier
+
+en: %s belongs to another program: left alone (seedtunnel is still there: %s).
+fr: %s appartient à un autre programme : il n'a pas été touché (seedtunnel reste disponible : %s).
 
 en: WireGuard VPN + seedbox
 fr: VPN WireGuard + seedbox
@@ -412,6 +427,9 @@ fr: Conservés : supprimer %s supprimerait aussi %s, que seedtunnel n'a pas inst
 
 # --- Protection du disque -----------------------------------------------------------------
 
+en: Transmission does not start again although there is room (%s GB free):  journalctl -u transmission-daemon -n 30
+fr: Transmission ne redémarre pas alors qu'il y a de la place (%s Go libres) :  journalctl -u transmission-daemon -n 30
+
 en: Enabling the full disk protection
 fr: Activation de la protection contre le disque plein
 
@@ -422,6 +440,30 @@ en: Transmission stopped: disk almost full (%s GB free).
 fr: Transmission arrêté : disque presque plein (%s Go libres).
 
 # --- Diagnostic ---------------------------------------------------------------------------
+
+en: An update did not finish: %s is still there. If seedtunnel works, delete it:  rm -rf %s
+fr: Une mise à jour ne s'est pas terminée : %s est toujours là. Si seedtunnel fonctionne, supprimez-le :  rm -rf %s
+
+en: NAT rules not made for the network interface of the server (%s): the clients have no Internet   → seedtunnel apply
+fr: Règles NAT pas faites pour la carte réseau du serveur (%s) : les clients n'ont pas Internet   → seedtunnel apply
+
+en: Transmission does not start again although there is room (%s GB free)   → journalctl -u transmission-daemon -n 30
+fr: Transmission ne redémarre pas alors qu'il y a de la place (%s Go libres)   → journalctl -u transmission-daemon -n 30
+
+en: Free space for downloads unreadable (%s)
+fr: Espace libre pour les téléchargements illisible (%s)
+
+en: Firewall rules loaded, but they do not refuse what is not allowed   → seedtunnel firewall enable --yes
+fr: Règles du pare-feu chargées, mais elles ne refusent pas ce qui n'est pas autorisé   → seedtunnel firewall enable --yes
+
+en: Weekly backup on, but its timer is stopped: no backup will be made   → seedtunnel apply
+fr: Sauvegarde hebdomadaire activée, mais son minuteur est arrêté : aucune sauvegarde ne sera faite   → seedtunnel apply
+
+en: The passphrase of the weekly backup is missing: the backups will fail   → seedtunnel backup auto on
+fr: La passphrase de la sauvegarde hebdomadaire est absente : les sauvegardes échoueront   → seedtunnel backup auto on
+
+en: The passphrase of the weekly backup can be read by others than root   → chmod 600 %s
+fr: La passphrase de la sauvegarde hebdomadaire est lisible par d'autres que root   → chmod 600 %s
 
 en: %s: running
 fr: %s : actif
@@ -627,8 +669,8 @@ fr: Sauvegarde hebdomadaire activée (la première arrive d'ici une semaine)
 en: Last automatic backup %s days ago: the weekly backup seems to fail   → journalctl -u seedtunnel-backup
 fr: Dernière sauvegarde automatique il y a %s jours : la sauvegarde hebdomadaire semble échouer   → journalctl -u seedtunnel-backup
 
-en: Weekly backup on, last one %s day(s) ago
-fr: Sauvegarde hebdomadaire activée, la dernière il y a %s jour(s)
+en: Weekly backup on, last one %s
+fr: Sauvegarde hebdomadaire activée, la dernière : %s
 
 en: Weekly backup off   → seedtunnel backup auto on
 fr: Sauvegarde hebdomadaire désactivée   → seedtunnel backup auto on
@@ -639,8 +681,8 @@ fr: Aucune sauvegarde téléchargée sur votre ordinateur pour l'instant   → s
 en: Last download of a backup started %s days ago   → seedtunnel backup share
 fr: Dernier téléchargement d'une sauvegarde commencé il y a %s jours   → seedtunnel backup share
 
-en: Download of a backup started %s day(s) ago (check its size on your computer)
-fr: Téléchargement d'une sauvegarde commencé il y a %s jour(s) (vérifiez sa taille sur votre ordinateur)
+en: Download of a backup started %s (check its size on your computer)
+fr: Téléchargement d'une sauvegarde commencé %s (vérifiez sa taille sur votre ordinateur)
 
 en: DIAGNOSTICS
 fr: DIAGNOSTIC
@@ -661,6 +703,9 @@ en: Everything is fine.
 fr: Tout est en ordre.
 
 # --- Pare-feu ---------------------------------------------------------------------------
+
+en: Firewall rules loaded, but they do not refuse what is not allowed:  seedtunnel firewall enable --yes
+fr: Règles du pare-feu chargées, mais elles ne refusent pas ce qui n'est pas autorisé :  seedtunnel firewall enable --yes
 
 en: web (80, 443/tcp), BitTorrent (%s)
 fr: web (80, 443/tcp), BitTorrent (%s)
@@ -697,6 +742,9 @@ fr: Application des règles (provisoire)
 
 en: Now open a NEW SSH connection to this server, without closing this one.
 fr: Ouvrez maintenant une NOUVELLE connexion SSH vers ce serveur, sans fermer celle-ci.
+
+en: From the Internet it always counts; through the VPN, only if this session goes through the VPN too.
+fr: Depuis Internet, elle compte toujours ; par le VPN, seulement si cette session passe aussi par le VPN.
 
 en: Does it work? Type "yes" to keep the firewall:
 fr: Elle fonctionne ? Tapez « oui » pour garder le pare-feu :
@@ -747,6 +795,9 @@ en: The firewall rules could not be removed (details in %s): the firewall stays 
 fr: Les règles du pare-feu n'ont pas pu être retirées (détails dans %s) : le pare-feu reste actif, rien n'a été supprimé.
 
 # --- Langue ------------------------------------------------------------------------------
+
+en: Cannot save the language (disk full?): it only applies to this run.
+fr: Impossible d'enregistrer la langue (disque plein ?) : elle ne vaut que pour cette fois.
 
 en: Language: %s   (change it with: seedtunnel language en|fr)
 fr: Langue : %s   (pour la changer : seedtunnel language en|fr)
@@ -1268,7 +1319,13 @@ fr: Certificat auto-signé : le navigateur affiche une alerte. Avant de l'accept
 en: Cannot prepare the link (disk full? details in %s).
 fr: Impossible de préparer le lien (disque plein ? détails dans %s).
 
+en: Not enough room in %s (in memory) for a link to %s (%s): copy it with WinSCP or scp instead.
+fr: Pas assez de place dans %s (en mémoire) pour un lien vers %s (%s) : copiez-le plutôt avec WinSCP ou scp.
+
 # --- Mise à jour -------------------------------------------------------------------------
+
+en: Tag %s left out: its code says version %s.
+fr: Tag %s ignoré : son code annonce la version %s.
 
 en: Cannot find the latest version published on github.com/%s.
 fr: Impossible de connaître la dernière version publiée sur github.com/%s.
@@ -1346,6 +1403,9 @@ en: Version %s could not apply the configuration, and git could not go back to v
 fr: La version %s n'a pas pu appliquer la configuration, et git n'a pas pu revenir à la version %s (détails dans %s). À la main :  git -C %s checkout %s ; seedtunnel apply
 
 # --- VPN ---------------------------------------------------------------------------------
+
+en: The VPN runs, but could not be enabled at boot (details in %s): after a restart of the server, it will not start by itself.
+fr: Le VPN tourne, mais n'a pas pu être activé au démarrage (détails dans %s) : après un redémarrage du serveur, il ne se lancera pas tout seul.
 
 en: The VPN is not installed:  seedtunnel vpn install
 fr: Le VPN n'est pas installé :  seedtunnel vpn install
@@ -1447,7 +1507,7 @@ en: %s h ago
 fr: il y a %s h
 
 en: %s days ago
-fr: il y a %s j
+fr: il y a %s jours
 
 en: DNS servers used by the VPN clients:
 fr: DNS utilisés par les clients du VPN :
@@ -1499,6 +1559,15 @@ fr:   Sortie  : interface %s
 
 en: Is that right?
 fr: C'est bon ?
+
+en: New port: the VPN restarts and every client is disconnected until it imports its new configuration.
+fr: Nouveau port : le VPN redémarre et chaque client est déconnecté jusqu'à ce qu'il importe sa nouvelle configuration.
+
+en: This SSH session goes through the VPN: it will be cut too. Reconnect without the VPN to import the new configuration.
+fr: Cette session SSH passe par le VPN : elle sera coupée elle aussi. Reconnectez-vous sans le VPN pour importer la nouvelle configuration.
+
+en: Change the port anyway?
+fr: Changer le port quand même ?
 
 en: WIREGUARD VPN INSTALLATION
 fr: INSTALLATION DU VPN WIREGUARD
@@ -1674,8 +1743,8 @@ fr: Certificat accepté par les navigateurs pour %s
 en: The certificate served for %s is refused by browsers (curl code %s)   → seedtunnel seedbox domain %s
 fr: Le certificat servi pour %s est refusé par les navigateurs (code curl %s)   → seedtunnel seedbox domain %s
 
-en: No new SSH login was seen since the rules were applied: open a NEW SSH connection to this server, the same way as this one, then type "yes" again.
-fr: Aucune nouvelle connexion SSH vue depuis l'application des règles : ouvrez une NOUVELLE connexion SSH vers ce serveur, de la même façon que celle-ci, puis tapez de nouveau « oui ».
+en: No new SSH login was seen since the rules were applied: open a NEW SSH connection to this server, then type "yes" again. From the Internet it always counts; through the VPN, only if this session goes through the VPN too.
+fr: Aucune nouvelle connexion SSH vue depuis l'application des règles : ouvrez une NOUVELLE connexion SSH vers ce serveur, puis tapez de nouveau « oui ». Depuis Internet, elle compte toujours ; par le VPN, seulement si cette session passe aussi par le VPN.
 
 en: Removing the dependencies installed with them
 fr: Suppression des dépendances installées avec eux

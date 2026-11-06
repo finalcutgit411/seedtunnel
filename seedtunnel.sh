@@ -40,13 +40,6 @@ APP_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 
 trap 'on_error $? $LINENO "$BASH_COMMAND" "${BASH_SOURCE[0]:-}"' ERR
 
-# « seedtunnel » shortcut to open the menu from anywhere. It goes into
-# /usr/local/bin, in the PATH even after a « su » without a dash.
-install_shortcut() {
-    local link=/usr/local/bin/seedtunnel
-    if [[ ! -e $link ]]; then ln -s "$APP_DIR/seedtunnel.sh" "$link" 2>/dev/null || true; fi
-}
-
 # State of the server at the top of the main menu
 menu_status() {
     local vpn_text seedbox_text disk_text firewall_text
@@ -187,6 +180,19 @@ case ${1-} in
         ;;
 esac
 
+# Unknown command, or arguments too many: refused before anything is done (no
+# folder created, no lock taken). The commands of vpn, seedbox, firewall and
+# backup check their own arguments.
+case ${1-} in
+    apply | update | doctor | diskguard-check | diskguard-prestart) MAX_ARGUMENTS=1 ;;
+    restore | language) MAX_ARGUMENTS=2 ;;
+    "" | vpn | seedbox | firewall | backup) MAX_ARGUMENTS=0 ;;
+    *) die 'Unknown command: %s   (help: seedtunnel help)' "$1" ;;
+esac
+if ((MAX_ARGUMENTS && $# > MAX_ARGUMENTS)); then
+    die 'Too many arguments for « seedtunnel %s »: %s   (help: seedtunnel help)' "$1" "${*:MAX_ARGUMENTS+1}"
+fi
+
 check_system
 # Commands that change nothing (or only add a backup file) do not wait for the
 # lock: they work even if a menu was left open in another window.
@@ -223,5 +229,4 @@ case ${1-} in
     language) language_cli "${2-}" ;;
     diskguard-check) diskguard_check ;;
     diskguard-prestart) diskguard_prestart || exit 1 ;;
-    *) die 'Unknown command: %s   (help: seedtunnel help)' "$1" ;;
 esac

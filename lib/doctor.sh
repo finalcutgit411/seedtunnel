@@ -43,7 +43,7 @@ certificate_days_left() {
 }
 
 doctor_system() {
-    local free synced redirects
+    local free synced
     doctor_title 'System'
     doctor_ok '%s, seedtunnel %s' "$APP_OS_DESCRIPTION" "$APP_VERSION"
     free=$(disk_free_gb /)
@@ -60,12 +60,15 @@ doctor_system() {
         doctor_warn 'Automatic security updates off'
     fi
     if [[ -f $NET_HARDENING_FILE ]]; then
-        redirects=$(sysctl -n net.ipv4.conf.all.accept_redirects net.ipv4.conf.all.send_redirects 2>/dev/null | tr -d '\n' || true)
-        if [[ $redirects == 00 ]]; then
+        if net_hardening_in_force; then
             doctor_ok 'Kernel network settings hardened'
         else
             doctor_warn 'Kernel network settings not applied   → seedtunnel apply'
         fi
+    fi
+    # left by an update cut short (power cut…): the next update refuses to run
+    if [[ -e $APP_DIR.previous ]]; then
+        doctor_warn 'An update did not finish: %s is still there. If seedtunnel works, delete it:  rm -rf %s' "$APP_DIR.previous" "$APP_DIR.previous"
     fi
     if [[ -e /run/reboot-required ]]; then
         doctor_warn 'Restart advised (update of the kernel or of a library)'
@@ -92,11 +95,7 @@ doctor_vpn() {
     else
         doctor_error 'IPv4 routing off: the clients will have no Internet   → seedtunnel apply'
     fi
-    if nft list table ip seedtunnel &>/dev/null; then
-        doctor_ok 'NAT rules in place'
-    else
-        doctor_error 'NAT rules missing   → seedtunnel vpn restart'
-    fi
+    doctor_vpn_nat
     if is_ipv4 "$VPN_PUBLIC_ADDRESS"; then
         if [[ $VPN_PUBLIC_ADDRESS == "$ip" ]]; then
             doctor_ok 'Address of the clients (%s) = public IP of the server' "$VPN_PUBLIC_ADDRESS"
@@ -114,6 +113,38 @@ doctor_vpn() {
     doctor_ok 'Clients: %s, %s connected right now' "$(vpn_count_clients)" "$(vpn_connected_count)"
     say "  (the UDP port cannot be tested from outside by the server itself: if in"
     say "   doubt, check the firewall in the control panel of the provider)"
+}
+
+# The clients go out to the Internet through the masquerade rule: it must be
+# there, for the network of the VPN, and use the network interface the server
+# uses now (it may have changed: new server, other name after an upgrade)
+doctor_vpn_nat() {
+    local rules interface
+    rules=$(nft list table ip seedtunnel 2>/dev/null || true)
+    interface=$(default_interface)
+    if [[ -z $rules ]]; then
+        doctor_error 'NAT rules missing   → seedtunnel vpn restart'
+    elif ! grep -qF "ip saddr $VPN_SUBNET.0/24 oifname \"$interface\" masquerade" <<<"$rules"; then
+        doctor_error 'NAT rules not made for the network interface of the server (%s): the clients have no Internet   → seedtunnel apply' "${interface:-?}"
+    else
+        doctor_ok 'NAT rules in place'
+    fi
+}
+
+# Transmission, or why the full disk protection keeps it stopped
+doctor_transmission() {
+    local free
+    if ! diskguard_stopped; then
+        doctor_service transmission-daemon 'Transmission'
+        return 0
+    fi
+    free=$(disk_free_gb "$SEEDBOX_DATA_DIR")
+    if diskguard_start_failed; then
+        doctor_error 'Transmission does not start again although there is room (%s GB free)   → journalctl -u transmission-daemon -n 30' "${free:-?}"
+    else
+        doctor_error 'Transmission stopped: disk almost full (%s GB free). Free some space: it restarts by itself above %s GB.' \
+            "${free:-?}" "$DISKGUARD_START_ABOVE_GB"
+    fi
 }
 
 # The certificate served, as a browser sees it through the public IP: chain,
@@ -136,12 +167,7 @@ doctor_certificate_served() {
 doctor_seedbox() {
     local ip=$1 crt days code free settings
     doctor_title 'Seedbox'
-    if diskguard_stopped; then
-        doctor_error 'Transmission stopped: disk almost full (%s GB free). Free some space: it restarts by itself above %s GB.' \
-            "$(disk_free_gb "$SEEDBOX_DATA_DIR")" "$DISKGUARD_START_ABOVE_GB"
-    else
-        doctor_service transmission-daemon 'Transmission'
-    fi
+    doctor_transmission
     doctor_service nginx 'nginx'
     doctor_service fail2ban 'fail2ban'
     doctor_service ssh.service 'SSH / SFTP'
@@ -208,9 +234,11 @@ doctor_seedbox() {
         doctor_error 'Permissions of the folder %s incompatible with the locked SFTP' "$SEEDBOX_DATA_DIR"
     fi
     free=$(disk_free_gb "$SEEDBOX_DATA_DIR")
-    if [[ -n $free ]] && ((free < 5)); then
+    if [[ -z $free ]]; then
+        doctor_warn 'Free space for downloads unreadable (%s)' "$SEEDBOX_DATA_DIR"
+    elif ((free < 5)); then
         doctor_warn 'Little space left for downloads: %s GB free' "$free"
-    elif [[ -n $free ]]; then
+    else
         doctor_ok 'Free space for downloads: %s GB' "$free"
     fi
     settings=$(fail2ban-client status 2>/dev/null || true)
@@ -228,6 +256,8 @@ doctor_firewall() {
         rules=$(nft list table inet "$FIREWALL_TABLE" 2>/dev/null || true)
         if [[ -z $rules ]]; then
             doctor_error 'Firewall enabled but rules missing   → seedtunnel firewall enable --yes'
+        elif ! firewall_refuses_by_default <<<"$rules"; then
+            doctor_error 'Firewall rules loaded, but they do not refuse what is not allowed   → seedtunnel firewall enable --yes'
         else
             doctor_ok 'On — open: %s' "$(firewall_summary)"
             # SSH port changed without updating the firewall: one would be
@@ -254,6 +284,15 @@ doctor_backup() {
     local latest age since
     doctor_title 'Backups'
     if backup_auto_enabled; then
+        # what the weekly backup needs to run on its own
+        if ! systemctl is-active --quiet seedtunnel-backup.timer 2>/dev/null; then
+            doctor_error 'Weekly backup on, but its timer is stopped: no backup will be made   → seedtunnel apply'
+        fi
+        if [[ ! -s $BACKUP_PASSPHRASE_FILE ]]; then
+            doctor_error 'The passphrase of the weekly backup is missing: the backups will fail   → seedtunnel backup auto on'
+        elif ! secret_file_private "$BACKUP_PASSPHRASE_FILE"; then
+            doctor_error 'The passphrase of the weekly backup can be read by others than root   → chmod 600 %s' "$BACKUP_PASSPHRASE_FILE"
+        fi
         latest=$(ls -1t "$BACKUP_DIR"/*-auto.tar.gz.enc 2>/dev/null | head -n 1 || true)
         age=$(file_age_days "$latest")
         if systemctl is-failed --quiet seedtunnel-backup.service 2>/dev/null; then
@@ -269,7 +308,7 @@ doctor_backup() {
         elif ((age > 8)); then
             doctor_warn 'Last automatic backup %s days ago: the weekly backup seems to fail   → journalctl -u seedtunnel-backup' "$age"
         else
-            doctor_ok 'Weekly backup on, last one %s day(s) ago' "$age"
+            doctor_ok 'Weekly backup on, last one %s' "$(days_ago "$age")"
         fi
     else
         doctor_warn 'Weekly backup off   → seedtunnel backup auto on'
@@ -281,7 +320,7 @@ doctor_backup() {
         doctor_warn 'Last download of a backup started %s days ago   → seedtunnel backup share' "$age"
     else
         # only the start of the download is known, not that it went to the end
-        doctor_ok 'Download of a backup started %s day(s) ago (check its size on your computer)' "$age"
+        doctor_ok 'Download of a backup started %s (check its size on your computer)' "$(days_ago "$age")"
     fi
 }
 

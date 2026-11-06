@@ -93,9 +93,11 @@ vpn_dns_value() {
 }
 
 # DNS servers of the clients: IPv4 or IPv6 addresses separated by commas
+# (« read » would drop a comma at the end: refused before)
 vpn_is_valid_dns() {
-    local entry count=0
+    local entry count=0 compact=${1//[[:space:]]/}
     local -a entries
+    [[ $compact != ,* && $compact != *, ]] || return 1
     IFS=, read -r -a entries <<<"$1"
     for entry in "${entries[@]}"; do
         entry=${entry// /}
@@ -106,7 +108,9 @@ vpn_is_valid_dns() {
     ((count > 0))
 }
 
-vpn_is_valid_address() { [[ $1 =~ ^[A-Za-z0-9.:-]+$ ]]; }
+# Public address of the server, written in the files of the clients: an IPv4
+# or IPv6 address, or a domain name (capital letters allowed)
+vpn_is_valid_address() { is_ipv4 "$1" || is_ipv6 "$1" || seedbox_is_valid_domain "${1,,}"; }
 
 # Is the UDP port free (or already ours)?
 vpn_port_is_free() {
@@ -120,6 +124,8 @@ vpn_port_is_free() {
 # containers, like the TUN/TAP module used to)
 vpn_check_kernel() {
     if ip link show "$VPN_INTERFACE" &>/dev/null; then return 0; fi
+    # left by a check cut short: « add » would fail on it
+    ip link del dev st-wgtest &>/dev/null || true
     if ! ip link add dev st-wgtest type wireguard 2>/dev/null; then
         die 'The kernel cannot create a WireGuard interface.\n  On a container VPS (OpenVZ, LXC), ask the provider to enable WireGuard,\n  or choose a KVM plan.'
     fi
@@ -223,6 +229,9 @@ EOF
 vpn_sync() {
     local stripped
     stripped=$(wg-quick strip "$VPN_INTERFACE") || return 1
+    # the NAT rules are checked first: if nftables refuses them, the clients
+    # are not changed either (never new clients without their open port)
+    nft -c -f "$VPN_NAT_RULES" || return 1
     wg syncconf "$VPN_INTERFACE" <(printf '%s\n' "$stripped") || return 1
     nft -f "$VPN_NAT_RULES" || return 1
 }
@@ -279,7 +288,11 @@ vpn_reconcile() {
     elif ! vpn_sync >>"$APP_LOG" 2>&1; then
         die 'The running VPN does not match its configuration and cannot be updated (details in %s):  seedtunnel vpn restart' "$APP_LOG"
     fi
-    systemctl enable --quiet "wg-quick@$VPN_INTERFACE" 2>/dev/null || true
+    # running: also at boot (it is not stopped for that)
+    if ! systemctl is-enabled --quiet "wg-quick@$VPN_INTERFACE" 2>/dev/null \
+        && ! systemctl enable --quiet "wg-quick@$VPN_INTERFACE" >>"$APP_LOG" 2>&1; then
+        warn 'The VPN runs, but could not be enabled at boot (details in %s): after a restart of the server, it will not start by itself.' "$APP_LOG"
+    fi
 }
 
 vpn_next_client_number() {
@@ -469,9 +482,11 @@ vpn_ask_dns() {
     done
 }
 
-# Questions shared by the installation and the change of settings. Status 1:
-# the user went back (empty answer, or « no » at the end), nothing to change.
+# Questions shared by the installation and the change of settings ($1: port in
+# use, for a change). Status 1: the user went back (empty answer, or « no » at
+# the end), nothing to change.
 vpn_ask_settings() {
+    local port_in_use=${1-}
     while true; do
         ask_back VPN_PUBLIC_ADDRESS 'Public address of the server (IP or domain name)' "$VPN_PUBLIC_ADDRESS" || return 1
         if vpn_is_valid_address "$VPN_PUBLIC_ADDRESS"; then break; fi
@@ -495,6 +510,17 @@ vpn_ask_settings() {
     say '  DNS     : %s' "$VPN_DNS"
     say '  Out     : interface %s' "${VPN_OUT_INTERFACE:-?}"
     echo
+    # a new port restarts the VPN: every tunnel is cut, this session too if it
+    # goes through the VPN (« no » by default then)
+    if [[ -n $port_in_use && $VPN_PORT != "$port_in_use" ]]; then
+        warn 'New port: the VPN restarts and every client is disconnected until it imports its new configuration.'
+        if [[ $(ssh_session_source) == "$VPN_SUBNET".* ]]; then
+            warn 'This SSH session goes through the VPN: it will be cut too. Reconnect without the VPN to import the new configuration.'
+            confirm 'Change the port anyway?' n || return 1
+            return 0
+        fi
+        echo
+    fi
     confirm 'Is that right?' y
 }
 
@@ -562,7 +588,7 @@ vpn_change_settings() {
     section 'VPN SETTINGS'
     warn 'After a change, every client will have to import its configuration again.'
     echo
-    vpn_ask_settings || return 1
+    vpn_ask_settings "$VPN_PORT" || return 1
     vpn_apply
     ok 'Settings saved. Show the clients again to get their new QR codes.'
 }

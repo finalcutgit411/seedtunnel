@@ -314,9 +314,7 @@ backup_auto_install_units() {
     if write_if_changed "$BACKUP_SERVICE" 644 root:root backup_generate_service; then changed=1; fi
     if write_if_changed "$BACKUP_TIMER" 644 root:root backup_generate_timer; then changed=1; fi
     if ((changed)); then run 'Reloading systemd' systemctl daemon-reload; fi
-    if ! systemctl is-enabled --quiet seedtunnel-backup.timer 2>/dev/null; then
-        run 'Enabling the weekly backup' systemctl enable --now seedtunnel-backup.timer
-    fi
+    unit_ensure_on 'Enabling the weekly backup' seedtunnel-backup.timer
 }
 
 backup_auto_enable() {
@@ -325,6 +323,10 @@ backup_auto_enable() {
     backup_require_something
     text backup_auto_help
     echo
+    if [[ -n $(backup_latest) ]]; then
+        warn 'The backups already made keep the passphrase they were made with: the new one only applies to the next ones.'
+        echo
+    fi
     backup_read_passphrase 1 || return 1
     # written next to it, then renamed: if writing fails, the passphrase saved
     # before stays whole
@@ -379,7 +381,7 @@ backup_auto_status() {
     fi
     age=$(file_age_days "$BACKUP_DOWNLOADED_MARK")
     if [[ -n $age ]]; then
-        say 'Last download of a backup started: %s day(s) ago' "$age"
+        say 'Last download of a backup started: %s' "$(days_ago "$age")"
     else
         say 'No backup downloaded yet   (seedtunnel backup share)'
     fi

@@ -26,7 +26,7 @@ On télécharge une version publiée et on vérifie son checksum (SHA-256) avant
 
 ```bash
 apt update && apt full-upgrade -y
-V=1.2.5
+V=1.2.6
 cd "$(mktemp -d)"
 curl -fLO https://github.com/finalcutgit411/seedtunnel/releases/download/v$V/seedtunnel-$V.tar.gz \
   && curl -fLO https://github.com/finalcutgit411/seedtunnel/releases/download/v$V/SHA256SUMS \
@@ -173,9 +173,12 @@ Dans un terminal, chaque changement est d'abord **à l'essai** : sans confirmati
 - les services ;
 - le DNS ;
 - l'expiration du certificat et son renouvellement ;
-- les ports et le pare-feu, dont le port SSH : un port changé sans mettre le pare-feu à jour vous enfermerait dehors ;
-- l'espace disque, la protection contre le disque plein et l'horloge ;
-- les sauvegardes (voir plus bas).
+- les ports et le pare-feu, dont le port SSH : un port changé sans mettre le pare-feu à jour vous enfermerait dehors ; que le pare-feu refuse bien ce qui n'est pas autorisé ;
+- le NAT du VPN, fait pour la carte réseau qu'utilise le serveur aujourd'hui ;
+- les réglages réseau du noyau (IPv4, et IPv6 si le serveur l'a) ;
+- l'espace disque, la protection contre le disque plein (dont un Transmission qui ne redémarre pas alors qu'il y a de la place) et l'horloge ;
+- une mise à jour qui ne s'est pas terminée ;
+- les sauvegardes (voir plus bas), dont le minuteur et la passphrase de la sauvegarde hebdomadaire.
 
 Il renvoie le code 1 s'il trouve un problème : il peut tourner dans une tâche planifiée.
 

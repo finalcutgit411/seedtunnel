@@ -205,6 +205,30 @@ nothing_changed() {
     ! grep -E 'Starting|Restarting|Reloading|Stopping|Applying|Installing|Creating|Enabling|Updating' <<<"$out"
 }
 
+# The full disk protection turned off by hand (disabled and stopped): the
+# next « seedtunnel apply » enables and starts it again, then changes nothing
+timers_put_back_test() {
+    systemctl disable --now seedtunnel-diskguard.timer || return 1
+    output_has "Enabling the full disk protection" app apply || return 1
+    systemctl is-enabled --quiet seedtunnel-diskguard.timer && systemctl is-active --quiet seedtunnel-diskguard.timer \
+        && nothing_changed app apply
+}
+
+# An unknown command, or a command with arguments too many, stops before the
+# lock is taken: it works even while another seedtunnel holds it
+commands_refused_first_test() {
+    local rc=0
+    (
+        exec 9<>/run/seedtunnel.lock
+        flock 9
+        sleep 5
+    ) &
+    sleep 1
+    output_has "Unknown command" app whatever && output_has "Too many arguments" app apply now || rc=1
+    wait
+    return "$rc"
+}
+
 # Kernel network hardening applied, including on the existing interface
 net_hardened() {
     local interface
@@ -582,6 +606,7 @@ EOF
     check "port 60001 forwarded to 10.8.0.2" output_has "dport 60001 dnat to 10.8.0.2" nft list table ip seedtunnel
     check "IPv4 routing on" test "$(sysctl -n net.ipv4.ip_forward)" = 1
     check "kernel network settings hardened" net_hardened
+    check "all of them, as the diagnostics check them (IPv6 included)" seedtunnel_function net_hardening_in_force
     check "hardening saved for the next boot" test -s /etc/sysctl.d/90-seedtunnel-network.conf
     check '« seedtunnel » command found even after a su without a dash' \
         env PATH=/usr/local/bin:/usr/bin:/bin bash -c 'command -v seedtunnel'
@@ -615,6 +640,8 @@ EOF
     check "web with credentials: 200" http_is 200 /transmission/web/ -u "$SBU:$PW1"
     check "Transmission answers behind nginx (409)" http_is 409 /transmission/rpc -u "$SBU:$PW1"
     check "wrong password refused" http_is 401 /transmission/web/ -u "$SBU:wrong"
+    check "home page: the password first (401)" http_is 401 /
+    check "home page with the password: to the web interface (302)" http_is 302 / -u "$SBU:$PW1"
     check "no password in clear in the configuration" bash -c "! grep -rqF -- '$PW1' /etc/seedtunnel /etc/nginx /etc/transmission-daemon"
     check "Transmission locked down by systemd" output_has "ProtectSystem=strict" systemctl show transmission-daemon -p ProtectSystem
     check "Transmission waits for the disk of the data" output_has "$DATA" systemctl show transmission-daemon -p RequiresMountsFor
@@ -687,6 +714,8 @@ EOF
     step "Applying the configuration again (seedtunnel apply)"
     check "puts back in order a change made by hand" apply_test
     check "run again: no change" nothing_changed app apply
+    check "a timer turned off by hand is put back in service" timers_put_back_test
+    check "unknown command refused before anything is done" commands_refused_first_test
 
     summary
 }

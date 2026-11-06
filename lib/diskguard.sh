@@ -24,6 +24,14 @@ DISKGUARD_TIMER="/etc/systemd/system/seedtunnel-diskguard.timer"
 
 diskguard_stopped() { [[ -e $DISKGUARD_MARKER ]]; }
 
+# The guard tried to start Transmission again, with room, and it failed (the
+# marker then holds « failed »)
+diskguard_start_failed() {
+    local _time="" state=""
+    read -r _time state 2>/dev/null <"$DISKGUARD_MARKER" || true
+    [[ $state == failed ]]
+}
+
 # The free space cannot be read: said loudly (journal, diagnostics), since the
 # protection cannot work then. Transmission is not stopped for it.
 diskguard_cannot_measure() {
@@ -65,9 +73,7 @@ diskguard_install() {
     if write_if_changed "$DISKGUARD_SERVICE" 644 root:root diskguard_generate_service; then changed=1; fi
     if write_if_changed "$DISKGUARD_TIMER" 644 root:root diskguard_generate_timer; then changed=1; fi
     if ((changed)); then run 'Reloading systemd' systemctl daemon-reload; fi
-    if ! systemctl is-active --quiet seedtunnel-diskguard.timer; then
-        run 'Enabling the full disk protection' systemctl enable --now seedtunnel-diskguard.timer
-    fi
+    unit_ensure_on 'Enabling the full disk protection' seedtunnel-diskguard.timer
 }
 
 diskguard_remove() {
@@ -109,10 +115,17 @@ diskguard_check() {
     fi
     if diskguard_stopped; then
         if ((free >= start_above)); then
-            systemctl start transmission-daemon
-            rm -f "$DISKGUARD_MARKER"
-            logger -t seedtunnel "Transmission started again: $free GB free"
-            say 'Transmission started again: %s GB free.' "$free"
+            if systemctl start transmission-daemon; then
+                rm -f "$DISKGUARD_MARKER"
+                logger -t seedtunnel "Transmission started again: $free GB free"
+                say 'Transmission started again: %s GB free.' "$free"
+            else
+                # still marked as stopped by the guard: tried again at the next
+                # check, and « seedtunnel doctor » says it does not start
+                printf '%s failed\n' "$(date +%s)" >"$DISKGUARD_MARKER"
+                logger -t seedtunnel "Transmission does not start again although there is room ($free GB free)" 2>/dev/null || true
+                warn 'Transmission does not start again although there is room (%s GB free):  journalctl -u transmission-daemon -n 30' "$free"
+            fi
         fi
     elif ((free < stop_below)) && systemctl is-active --quiet transmission-daemon; then
         systemctl stop transmission-daemon

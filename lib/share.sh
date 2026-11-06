@@ -40,6 +40,8 @@ share_generate_nginx_http() {
 # and by then the file is long gone. nginx decides it on the spot, so two
 # requests one right after the other cannot both get the file.
 map $uri $seedtunnel_share_file {
+    # the page of the link, opened as often as needed (preview of a message)
+    "~^/share/[0-9a-f]{32}/index\.html$" "";
     "~^/share/[0-9a-f]{32}/[^/]+$" $uri;
     default "";
 }
@@ -151,6 +153,15 @@ $steps
 EOF
 }
 
+# Is there room in /run (in memory, a small size) for a copy of FILE? A margin
+# of 1 MB is kept for the rest of the system. Not measurable: it is tried.
+share_room_for() {
+    local size avail=""
+    size=$(stat -c %s -- "$1")
+    avail=$({ df -B1 --output=avail "${SHARE_DIR%/*}" 2>/dev/null || true; } | tail -n 1)
+    [[ ! $avail =~ ^[0-9]+$ ]] || ((size + 1048576 <= avail))
+}
+
 # share_create FILE NAME "Title" "<li>steps…</li>" "Note" [MARK_FILE]
 # Publishes FILE under the name NAME and prints the link.
 share_create() {
@@ -159,6 +170,11 @@ share_create() {
     # the site must know /share/ (if it was installed by an older version)
     seedbox_apply_nginx
     share_purge
+    # links live in memory (/run): a big backup may not fit
+    if ! share_room_for "$source"; then
+        die 'Not enough room in %s (in memory) for a link to %s (%s): copy it with WinSCP or scp instead.' \
+            "${SHARE_DIR%/*}" "$name" "$(human_size "$(stat -c %s -- "$source")")"
+    fi
     install -d -m 750 -o root -g www-data "$SHARE_DIR"
     token=$(openssl rand -hex 16)
     dir="$SHARE_DIR/$token"

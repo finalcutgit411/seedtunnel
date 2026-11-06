@@ -26,7 +26,7 @@ Download a published version and check its fingerprint before running it. The co
 
 ```bash
 apt update && apt full-upgrade -y
-V=1.2.5
+V=1.2.6
 cd "$(mktemp -d)"
 curl -fLO https://github.com/finalcutgit411/seedtunnel/releases/download/v$V/seedtunnel-$V.tar.gz \
   && curl -fLO https://github.com/finalcutgit411/seedtunnel/releases/download/v$V/SHA256SUMS \
@@ -173,9 +173,12 @@ In a terminal, every change is **tried first**: without a confirmation from a ne
 - the services;
 - the DNS;
 - the expiry of the certificate and its renewal;
-- the ports and the firewall, including the SSH port: a port changed without updating the firewall would lock you out;
-- the disk space, the full disk protection and the clock;
-- the backups (see below).
+- the ports and the firewall, including the SSH port: a port changed without updating the firewall would lock you out; that the firewall really refuses what is not allowed;
+- the NAT of the VPN, made for the network interface the server uses now;
+- the kernel network settings (IPv4, and IPv6 if the server has it);
+- the disk space, the full disk protection (including a Transmission that does not start again although there is room) and the clock;
+- an update that did not finish;
+- the backups (see below), including the timer and the passphrase of the weekly backup.
 
 It exits with status 1 when it finds a problem, so it can run in a scheduled task.
 

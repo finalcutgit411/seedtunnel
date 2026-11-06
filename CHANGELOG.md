@@ -3,6 +3,39 @@
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 
+## [1.2.6] - 2026-11-06
+
+Reliability and finishing touches.
+
+### Security
+- **Home page of the seedbox**: `https://your-domain/` sent visitors to `/transmission/web/` before asking for the password (nginx answered a `return` before checking it), so anyone could see that Transmission was behind. The password is now asked first: `401` without it.
+
+### Changed
+- **Diagnostics** (`seedtunnel doctor`) check more:
+  - every kernel network setting of the hardening (IPv4, and IPv6 if the server has it), not two of them; `seedtunnel apply` loads them again as soon as one differs (and only then);
+  - the NAT rule of the VPN: there, for the network of the VPN, and made for the network interface the server uses now;
+  - the firewall: its rules really refuse what is not allowed (`firewall status` too);
+  - the weekly backup: its timer is running, its passphrase is there and readable by root only;
+  - an update that did not finish (`/opt/seedtunnel.previous` left).
+- **Dates in words**: « today », « yesterday », « 3 days ago » instead of « 0 day(s) ago ».
+- **Changing the port of the VPN** says that every client is disconnected; if your SSH session goes through the VPN, it asks first (« no » by default).
+- **Confirming the firewall**: the message says which new connection counts (from the Internet, always; through the VPN, only if this session goes through the VPN too).
+- **Weekly backup**: a new passphrase says that the backups already made keep theirs.
+- **Language**: the question is asked again until the answer is 1 or 2 (empty = back, from the menu); a saved file holding anything else asks it again too.
+
+### Fixed
+- **Services at boot**: the timers of the certificate, of the full disk protection and of the weekly backup, and the firewall loaded at boot, are now enabled at boot **and** running after `seedtunnel apply` (a timer turned off by hand, or a service enabled but stopped, stayed so). Nothing is done when they already are. An enabling at boot of the VPN that fails is now said.
+- **Full disk protection**: if Transmission did not start again once there was room, the protection forgot it had stopped it. It now tries again at each check, writes it in the journal, and `doctor` says that Transmission does not start (not that the disk is full).
+- **Free space that cannot be measured**: a failing `df` stopped `doctor` and the full disk protection with an « unexpected error ». « Unreadable » is now shown, and they go on.
+- **Validation**: an IPv4 address with a leading zero (`010.0.0.1`) is refused; a list of DNS servers ending with a comma too; the public address of the VPN must be an IPv4 or IPv6 address or a domain name.
+- **Update with git**: only `vX.Y.Z` tags are taken, and only if their code says that version.
+- **Commands**: an unknown command, or arguments too many (`apply`, `update`, `doctor`, `restore FILE`, `language X`), are refused before anything is done.
+- **`seedtunnel` shortcut**: a link pointing elsewhere (an older copy) is put right; a file of another program is left alone, and it is said.
+- **One-time links**: the free space of `/run` (in memory) is checked before copying the file; the page of a link is no longer counted by the limit of one download.
+- **VPN**: the NAT rules are checked before the clients are changed; a test interface left by a check cut short no longer stops the installation.
+- **Language**: the saved choice is written aside, then renamed.
+- **Translation check**: an empty translation, or a « % » that printf would misread (`100 %`), is now refused.
+
 ## [1.2.5] - 2026-11-06
 
 Security and data, after a review of every file of 1.2.4.

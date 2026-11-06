@@ -87,22 +87,46 @@ text() {
     fi
 }
 
-# Saves the language for the next runs
+# Saves the language for the next runs: written next to it, then renamed (a
+# full disk never leaves a cut file). If it cannot be saved, the language
+# still applies to this run.
 language_save() {
     install -d -m 700 "$APP_STATE_DIR"
-    printf '%s\n' "$1" >"$APP_LANG_FILE"
+    if ! { printf '%s\n' "$1" >"$APP_LANG_FILE.tmp" && mv -f "$APP_LANG_FILE.tmp" "$APP_LANG_FILE"; } 2>>"$APP_LOG"; then
+        rm -f "$APP_LANG_FILE.tmp"
+        warn 'Cannot save the language (disk full?): it only applies to this run.'
+    fi
     i18n_load "$1"
 }
 
-# First menu run without a saved choice: the question is asked once
+# Language saved for this server, if it is one (empty otherwise)
+language_saved() {
+    local saved=""
+    if [[ -r $APP_LANG_FILE ]]; then IFS= read -r saved <"$APP_LANG_FILE" || true; fi
+    if is_language "$saved"; then printf '%s' "$saved"; fi
+}
+
+# First menu run without a saved choice (or with a file that holds something
+# else): the question is asked until the answer is 1 or 2
 language_first_run() {
     local choice default=1
-    [[ ! -e $APP_LANG_FILE ]] || return 0
+    [[ -z $(language_saved) ]] || return 0
     is_language "${SEEDTUNNEL_LANG-}" && return 0
     if [[ $APP_LANG == fr ]]; then default=2; fi
     printf '\n  1) English\n  2) Français\n\n'
-    IFS= read -r -e -i "$default" -p "Language / Langue [1-2] : " choice || exit 130
-    if [[ $choice == 2 ]]; then language_save fr; else language_save en; fi
+    while true; do
+        IFS= read -r -e -i "$default" -p "Language / Langue [1-2] : " choice || exit 130
+        case $choice in
+            1)
+                language_save en
+                return 0
+                ;;
+            2)
+                language_save fr
+                return 0
+                ;;
+        esac
+    done
 }
 
 # seedtunnel language [en|fr]
@@ -117,12 +141,22 @@ language_cli() {
     esac
 }
 
+# From the menu: asked again until 1 or 2; an empty answer goes back
 language_menu() {
     local choice
     printf '\n  1) English\n  2) Français\n\n'
-    IFS= read -r -p "Language / Langue [1-2] : " choice || return 0
-    case $choice in
-        1) language_save en ;;
-        2) language_save fr ;;
-    esac
+    while true; do
+        IFS= read -r -p "Language / Langue [1-2] (empty = back / vide = retour) : " choice || return 0
+        case $choice in
+            1)
+                language_save en
+                return 0
+                ;;
+            2)
+                language_save fr
+                return 0
+                ;;
+            "") return 0 ;;
+        esac
+    done
 }
