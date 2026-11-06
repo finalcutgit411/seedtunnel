@@ -1517,6 +1517,15 @@ restore_archive_load() {
     rm -rf "$RESTORE_ROOT"
     mkdir -p "$RESTORE_ROOT/etc/seedtunnel"
     echo "VPN_PORT=51820" >"$RESTORE_ROOT/etc/seedtunnel/vpn.conf"
+    # a client, as the VPN writes it: settings for bash, and its WireGuard file
+    mkdir -p "$RESTORE_ROOT/etc/seedtunnel/vpn/clients"
+    (
+        CLIENT_NUMBER=2
+        CLIENT_PUBLIC_KEY="x/y+z="
+        state_write "$RESTORE_ROOT/etc/seedtunnel/vpn/clients/laptop.env" CLIENT_NUMBER CLIENT_PUBLIC_KEY
+    )
+    printf '[Interface]\nPrivateKey = a/b+c=\nAddress = 10.8.0.2/32\nDNS = 9.9.9.9, 1.1.1.1\n' \
+        >"$RESTORE_ROOT/etc/seedtunnel/vpn/clients/laptop.conf"
     echo "a test passphrase" >"$WORK/$1-passphrase"
     chmod 600 "$WORK/$1-passphrase"
     OPT_PASSPHRASE_FILE="$WORK/$1-passphrase"
@@ -1553,6 +1562,24 @@ restore_accepts_letsencrypt_links() (
     (restore_main "$WORK/le.enc") >"$WORK/le.out" 2>&1
     cat "$WORK/le.out"
     ! grep -q "refused" "$WORK/le.out" && grep -q "The backup contains" "$WORK/le.out"
+)
+
+restore_accepts_real_backup() (
+    restore_archive_load real
+    restore_archive_make real
+    # the WireGuard files of the clients are not settings read by bash
+    (restore_main "$WORK/real.enc") >"$WORK/real.out" 2>&1
+    cat "$WORK/real.out"
+    ! grep -q "refused" "$WORK/real.out" && grep -q "The backup contains" "$WORK/real.out"
+)
+
+restore_refuses_code_in_client() (
+    restore_archive_load client
+    printf 'CLIENT_NUMBER=2;touch\n' >>"$RESTORE_ROOT/etc/seedtunnel/vpn/clients/laptop.env"
+    restore_archive_make client
+    if (restore_main "$WORK/client.enc") >"$WORK/client.out" 2>&1; then return 1; fi
+    cat "$WORK/client.out"
+    grep -q "laptop.env holds something else" "$WORK/client.out"
 )
 
 restore_refuses_code_in_settings() (
@@ -1991,6 +2018,8 @@ check "SFTP: rename undone, group not back → said, account suspended" rename_g
 check "restore: archive with a link (to /etc/shadow) refused" restore_refuses_links
 check "restore: links of Let's Encrypt to its certificates accepted" restore_accepts_letsencrypt_links
 check "restore: settings that could run a command refused" restore_refuses_code_in_settings
+check "restore: a client's settings that could run a command refused" restore_refuses_code_in_client
+check "restore: real backup (WireGuard files of the clients) accepted" restore_accepts_real_backup
 check "settings files: what state_write writes is accepted, code is not" state_files_round_trip_safe
 check "backup: settings changed meanwhile → archive made again, never mixed" backup_redone_when_settings_change
 check "backup: an older backup is never replaced" backup_never_replaces_older

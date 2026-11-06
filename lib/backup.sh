@@ -507,13 +507,16 @@ backup_unsafe_entry() {
 # something. Nothing: all fine.
 backup_unsafe_state_file() {
     local file
-    [[ -d $1 ]] || return 0
-    while IFS= read -r -d '' file; do
-        if ! state_file_is_safe "$file"; then
+    # only the files read by « . »: vpn.conf, seedbox.conf, seedbox.secrets,
+    # firewall.conf, vpn/clients/*.env (vpn/clients/*.conf are WireGuard files,
+    # never read by bash)
+    for file in "$1"/*.conf "$1"/*.secrets "$1"/vpn/clients/*.env; do
+        [[ -e $file || -L $file ]] || continue
+        if [[ ! -f $file ]] || ! state_file_is_safe "$file"; then
             printf '%s' "$file"
             return 0
         fi
-    done < <(find "$1" -type f \( -name '*.conf' -o -name '*.env' -o -name '*.secrets' \) -print0)
+    done
 }
 
 restore_main() {
