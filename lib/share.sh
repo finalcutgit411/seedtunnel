@@ -51,6 +51,15 @@ map "$request_method $uri" $seedtunnel_share_refused {
     "~^[^ ]+ /share/[0-9a-f]{32}/[^/]+$" 1;
     default 0;
 }
+# The token of a link is its password: the access log shows /share/<token>/…
+# instead (the address, the time and the result stay)
+map $request_uri $seedtunnel_share_logged {
+    "~^/share/[0-9a-f]{32}(.*)$" "/share/<token>$1";
+    default $request_uri;
+}
+log_format seedtunnel_share '$remote_addr - $remote_user [$time_local] '
+    '"$request_method $seedtunnel_share_logged $server_protocol" $status $body_bytes_sent '
+    '"$http_referer" "$http_user_agent"';
 EOF
 }
 
@@ -64,6 +73,7 @@ share_generate_nginx() {
     location ^~ $SHARE_URL_PATH/ {
         auth_basic off;
         alias $SHARE_DIR/;
+        access_log /var/log/nginx/access.log seedtunnel_share;
         log_not_found off;
         # the file: GET only, served once (see the top of the site), always
         # whole (no Range, no cache)
@@ -152,11 +162,16 @@ share_create() {
     install -d -m 750 -o root -g www-data "$SHARE_DIR"
     token=$(openssl rand -hex 16)
     dir="$SHARE_DIR/$token"
-    install -d -m 750 -o root -g www-data "$dir"
-    install -m 640 -o root -g www-data "$source" "$dir/$name"
-    share_generate_page "$name" "$title" "$steps" "$note" >"$dir/index.html"
-    chown root:www-data "$dir/index.html"
-    chmod 640 "$dir/index.html"
+    # a link prepared halfway (disk full…) is deleted: nothing stays behind
+    if ! {
+        install -d -m 750 -o root -g www-data "$dir" \
+            && install -m 640 -o root -g www-data "$source" "$dir/$name" \
+            && share_generate_page "$name" "$title" "$steps" "$note" >"$dir/index.html" \
+            && chown root:www-data "$dir/index.html" && chmod 640 "$dir/index.html"
+    } >>"$APP_LOG" 2>&1; then
+        rm -rf "$dir"
+        die 'Cannot prepare the link (disk full? details in %s).' "$APP_LOG"
+    fi
 
     printf '\n=== %(%F %T)T · download link for %s\n' -1 "$name" >>"$APP_LOG"
     # The watcher runs as a service of its own. Whatever ends it (download,

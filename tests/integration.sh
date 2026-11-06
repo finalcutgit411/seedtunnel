@@ -259,6 +259,25 @@ share_test() {
     link_gone "${path}phone.conf"
 }
 
+# The tokens of the links never reach the access log of nginx: /share/<token>/
+# instead, with the address, the time and the result
+share_log_test() {
+    local out path token
+    out=$(app vpn share phone 2>&1) || return 1
+    path=$(share_path "$out") || return 1
+    token=${path#/share/}
+    token=${token%/}
+    curl -sk --max-time 10 -o /dev/null "https://127.0.0.1$path" || return 1
+    curl -skf --max-time 10 -o /dev/null "https://127.0.0.1${path}phone.conf" || return 1
+    curl -s --max-time 10 -o /dev/null "http://127.0.0.1${path}phone.conf" || true
+    sleep 1
+    if grep -qF "$token" /var/log/nginx/access.log; then
+        echo "token found in the access log"
+        return 1
+    fi
+    grep -qF '"GET /share/<token>/phone.conf HTTP' /var/log/nginx/access.log
+}
+
 # Another form of the address (here with « ?x ») does not get around the
 # single use: the first download, whatever its address, uses up the link
 share_variant_test() {
@@ -610,6 +629,7 @@ EOF
     check "two requests on the same connection: the file only once" share_same_connection_test
     check "HEAD refused (405) without using the link up" share_head_test
     check "watcher killed: the link is deleted anyway" share_watcher_killed_test
+    check "tokens of the links hidden in the access log of nginx" share_log_test
     check "seedbox sftp-config: WinSCP address with fingerprint, FileZilla file" sftp_config_test
     check "list of links impossible" http_is 403 /share/
     check "unknown token: 404" http_is 404 /share/0123456789abcdef0123456789abcdef/

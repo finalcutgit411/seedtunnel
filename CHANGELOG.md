@@ -3,6 +3,29 @@
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 
+## [1.2.5] - 2026-11-06
+
+Security and data, after a review of every file of 1.2.4.
+
+### Changed
+- **Every question of the menu can be left with an empty answer**: you go back, nothing is changed (« empty = back » is shown). « Add a client », for example, could not be left once started. A wrong answer (unknown client, invalid key or IP, wrong passphrase…) is now asked again instead of leaving the menu.
+
+### Security
+- **SFTP, keys only**: sshd could still accept a password through the « keyboard-interactive » login. It is now turned off, and it is checked (from the server, through the VPN and from the Internet) that sshd refuses passwords when asked, accepts keys and reads the keys of seedtunnel; otherwise the account is suspended.
+- **SFTP account reactivated**: now checked (expiry date read back). On failure, the account stays suspended and the command to run by hand is given.
+- **Restore**: an archive holding a link (other than those of Let's Encrypt) or a special file is refused: a link to `/etc/shadow` could have been written through. The settings files are read by bash: one holding anything but plain settings (`$(…)`, backticks, `;`…) is refused too, as it could run commands.
+- **One-time links**: the token was written in clear in the log of nginx. It is now hidden (`/share/<token>/…`).
+
+### Fixed
+- **Removal of packages**: it is now tried first (`apt-get -s`), for the packages and for their dependencies. If it would take a package that seedtunnel did not install, nothing is removed and the packages concerned are named. The list of the packages installed by seedtunnel is no longer emptied when the installed packages cannot be read.
+- **Backups**: if a setting changed while the archive was written (renewal of a certificate…), the archive could mix old and new settings. It is now made again, up to 3 times. `--output` replaced an existing file: it now refuses. The passphrase of the weekly backup is written aside, then renamed: a full disk can no longer leave it cut.
+- **SFTP keys**: importing several keys added the valid ones before an invalid one: now all or nothing. Removing a key rewrote the file in place: it is now written aside, then renamed, and stays whole on failure.
+- **Renaming the SFTP account**: if putting the old name of the group back failed too, nothing said so. The commands to run by hand are now given, and the account stays suspended.
+- **Firewall**: turning it off now checks that the rules are really gone; otherwise it stops without deleting anything. If the automatic undo cannot be cancelled, the previous rules come back. The rules loaded at boot are only replaced once the new ones are loaded; if that fails, the next `seedtunnel apply` tries again. The firewall is noted as on before being enabled at boot, so that `apply` puts it right.
+- **Removing the VPN**: the keys were deleted even if the tunnel could not be stopped. It now checks first that wg0 and its NAT rules are gone.
+- **One-time links**: a link prepared halfway (full disk) was left behind: it is now deleted.
+- **Update**: if the new version could not be put in place, the folder of seedtunnel was missing: the previous version now comes back at once. A `.previous` folder left by an interrupted update is no longer deleted (it may be the only working copy): the update stops and explains. If the previous version, once back, cannot apply its configuration either, it is now said. With git, if going back to the previous commit failed, the version that had just failed was applied again: it now stops with the git command to run. The README says how to put things back by hand after a power cut during an update.
+
 ## [1.2.4] - 2026-11-01
 
 Confirming the firewall, after a review of 1.2.3.

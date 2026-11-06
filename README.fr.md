@@ -26,7 +26,7 @@ On télécharge une version publiée et on vérifie son checksum (SHA-256) avant
 
 ```bash
 apt update && apt full-upgrade -y
-V=1.2.4
+V=1.2.5
 cd "$(mktemp -d)"
 curl -fLO https://github.com/finalcutgit411/seedtunnel/releases/download/v$V/seedtunnel-$V.tar.gz \
   && curl -fLO https://github.com/finalcutgit411/seedtunnel/releases/download/v$V/SHA256SUMS \
@@ -54,11 +54,21 @@ Le code est fait pour être lu : n'hésitez pas à parcourir `seedtunnel.sh` et 
 
 Ensuite, la commande `seedtunnel` relance le menu. `seedtunnel update` passe à la version suivante en vérifiant son checksum, puis réapplique la configuration pour que ses corrections prennent effet. En cas d'échec, la version précédente revient.
 
+Si le serveur a perdu le courant pendant une mise à jour, la commande `seedtunnel` peut ne plus exister : la version installée est alors dans `/opt/seedtunnel.previous`. Pour la remettre :
+
+```bash
+mv /opt/seedtunnel.previous /opt/seedtunnel
+```
+
+Si `/opt/seedtunnel` existe aussi, `seedtunnel update` refuse de continuer tant que `/opt/seedtunnel.previous` est là. Si seedtunnel fonctionne, supprimez-le : `rm -rf /opt/seedtunnel.previous`.
+
 ## Utilisation
 
 ### Menu
 
 `seedtunnel` sans argument donne accès à tout : VPN, seedbox, pare-feu, diagnostic, sauvegardes, mise à jour. L'état du serveur s'affiche en haut : clients VPN connectés, espace disque libre, services arrêtés.
+
+Chaque question du menu peut se quitter avec une réponse vide : on revient en arrière, rien n'est changé.
 
 ### Commandes
 
@@ -144,6 +154,8 @@ Plus besoin de `scp` pour récupérer un fichier sur son ordinateur :
 
 Le lien passe par le site HTTPS de la seedbox. Il contient un jeton aléatoire impossible à deviner, ne fonctionne **qu'une fois** et expire au bout de **10 minutes**. nginx ne sert le fichier qu'une fois : toute autre requête est refusée, même juste après sur la même connexion ou avec une autre forme de l'adresse, jamais de téléchargement partiel, et le fichier est aussitôt supprimé. Une requête HEAD est refusée sans consommer le lien. Ouvrir la page ne compte pas, seul le téléchargement du fichier compte : l'aperçu automatique d'une messagerie ne gâche donc pas le lien.
 
+Le jeton est masqué dans le journal de nginx (`/share/<jeton>/…`) : le journal dit toujours qui a téléchargé, quand, et si cela a marché.
+
 ### Pare-feu
 
 `seedtunnel firewall enable` refuse tout ce qui arrive sur le serveur, sauf :
@@ -176,11 +188,13 @@ Il renvoie le code 1 s'il trouve un problème : il peut tourner dans une tâche 
 - le pare-feu ;
 - l'état de Transmission : liste des torrents, progression, réglages.
 
+Si un réglage change pendant l'écriture de l'archive (renouvellement d'un certificat, par exemple), l'archive est refaite, jusqu'à 3 fois : une sauvegarde ne mélange jamais anciens et nouveaux réglages. Un fichier existant n'est jamais remplacé : `--output` refuse un nom déjà pris.
+
 `seedtunnel backup auto on` fait une sauvegarde chiffrée **chaque semaine** et garde les 4 dernières. Sa passphrase est enregistrée sur le serveur (lisible par root uniquement) pour qu'elle tourne seule : notez-la aussi ailleurs.
 
 Une sauvegarde restée sur le serveur disparaît avec lui : `seedtunnel backup share` donne un lien à usage unique pour télécharger la dernière sur votre ordinateur. `seedtunnel doctor` vous le rappelle quand la sauvegarde hebdomadaire est désactivée ou échoue, et quand aucune sauvegarde n'a été téléchargée depuis un mois.
 
-Sur un serveur neuf, `seedtunnel restore FICHIER` remet tout en place. Les clients VPN se reconnectent sans rien changer si `VPN_PUBLIC_ADDRESS` est un nom de domaine qui pointe vers le nouveau serveur.
+Sur un serveur neuf, `seedtunnel restore FICHIER` remet tout en place. L'archive est d'abord vérifiée : seulement des fichiers et des dossiers (et les liens de Let's Encrypt), et des fichiers de réglages qui ne peuvent lancer aucune commande. Les clients VPN se reconnectent sans rien changer si `VPN_PUBLIC_ADDRESS` est un nom de domaine qui pointe vers le nouveau serveur.
 
 Les fichiers téléchargés ne sont pas dans la sauvegarde : copiez-les avec `rsync`.
 
@@ -189,7 +203,7 @@ Les fichiers téléchargés ne sont pas dans la sauvegarde : copiez-les avec `rs
 - L'interface de contrôle de Transmission (RPC) n'écoute que sur `127.0.0.1` : on y accède par nginx, et le mot de passe est vérifié deux fois, par nginx puis par Transmission. Seul son port BitTorrent (60000) est ouvert aux pairs.
 - Transmission est **enfermé par systemd** (`ProtectSystem=strict`…) : il ne peut écrire que dans ses dossiers.
 - Les mots de passe ne sont **jamais écrits en clair**, ni passés en argument d'une commande. Seuls leurs hash sont gardés. Seule exception : la passphrase de la sauvegarde hebdomadaire, si vous l'activez, enregistrée lisible par root uniquement pour que la sauvegarde tourne seule.
-- L'utilisateur SFTP est enfermé dans le dossier des données : pas de shell, pas de tunnel. Si sshd ne lui applique pas toutes ces restrictions, depuis le serveur, par le VPN et depuis Internet (un bloc `Match` placé avant elles dans `sshd_config`, par exemple), le compte est suspendu plutôt que laissé sans elles.
+- L'utilisateur SFTP est enfermé dans le dossier des données : pas de shell, pas de tunnel. Si sshd ne lui applique pas toutes ces restrictions, depuis le serveur, par le VPN et depuis Internet (un bloc `Match` placé avant elles dans `sshd_config`, par exemple), le compte est suspendu plutôt que laissé sans elles. En mode « clés uniquement », on vérifie aussi que sshd refuse les mots de passe (connexion « keyboard-interactive » comprise) et lit les clés de seedtunnel.
 - Les fichiers qui peuvent contenir un secret (`--config`, `SEEDBOX_PASSWORD_FILE`, `--passphrase-file`) sont refusés si quelqu'un d'autre que root peut les lire.
 - Avec un certificat auto-signé, chaque lien de téléchargement est donné avec son empreinte SHA-256, à vérifier avant d'accepter l'alerte du navigateur.
 - fail2ban bannit les attaquants de SSH de **tous les ports**, quel que soit le port de SSH.
@@ -280,7 +294,7 @@ Le dépôt interrogé par `seedtunnel update` est défini par `APP_REPO` dans `l
 
 `seedtunnel seedbox uninstall`, `seedtunnel vpn uninstall`, `seedtunnel firewall disable`, ou les options du menu.
 
-Les données téléchargées sont conservées, sauf avec `--purge-data`. Les sauvegardes restent dans `/var/backups/seedtunnel`. Seuls les paquets installés par seedtunnel sont supprimés (listés dans `/etc/seedtunnel/packages`) : un nginx déjà là avant, par exemple, reste.
+Les données téléchargées sont conservées, sauf avec `--purge-data`. Les sauvegardes restent dans `/var/backups/seedtunnel`. Seuls les paquets installés par seedtunnel sont supprimés (listés dans `/etc/seedtunnel/packages`) : un nginx déjà là avant, par exemple, reste. La suppression est d'abord simulée (`apt-get -s`) : si elle emportait aussi un paquet que seedtunnel n'a pas installé, rien n'est supprimé et les paquets concernés sont nommés.
 
 ## Historique
 

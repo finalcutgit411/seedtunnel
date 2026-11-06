@@ -6,7 +6,7 @@
 # =============================================================================
 
 APP_NAME="seedtunnel"
-APP_VERSION="1.2.4"
+APP_VERSION="1.2.5"
 # GitHub repository used by « seedtunnel update » (owner/project)
 APP_REPO="finalcutgit411/seedtunnel"
 # Server state and secrets (readable by root only)
@@ -145,6 +145,25 @@ require_terminal() {
     INTERACTIVE=1
 }
 
+# Is the standard input a terminal? (a function, so that the tests can say yes)
+stdin_is_terminal() { [[ -t 0 ]]; }
+
+# ask_back VARIABLE "Question" [suggested value] — like ask, but an empty answer
+# goes back: status 1, the variable is left alone, nothing is to be changed.
+# Every question of the menus can be left this way (a suggestion is erased
+# first).
+ask_back() {
+    local _ab_var=$1 _ab_question _ab_answer
+    _ab_question=$(t '%s (empty = back)' "$(t "$2")")
+    ((INTERACTIVE)) || die 'Question asked outside interactive mode: %s' "$_ab_question"
+    IFS= read -r -e -i "${3-}" -p "$_ab_question: " _ab_answer || {
+        echo
+        exit 130
+    }
+    [[ -n ${_ab_answer//[[:space:]]/} ]] || return 1
+    printf -v "$_ab_var" '%s' "$_ab_answer"
+}
+
 # ask VARIABLE "Question" [suggested value]   (the suggestion can be edited)
 ask() {
     local _ask_var=$1 _ask_question _ask_default=${3-} _ask_answer
@@ -216,6 +235,15 @@ ask_password() {
 }
 
 # --- Files ------------------------------------------------------------------------
+
+# Can a state file be read by « . » (state_read) without running anything?
+# Only the lines that state_write writes: comments, empty lines, NAME='' or
+# NAME=value where the value is made of harmless characters, or of characters
+# escaped with a backslash (printf %q), which then stand for themselves.
+# « X=$(command) » is refused: $ and ( are not escaped.
+state_file_is_safe() {
+    ! LC_ALL=C grep -qvE "^(#.*|[A-Za-z_][A-Za-z0-9_]*=(''|([A-Za-z0-9_./:@,+=%-]|\\\\.)+))?$" "$1"
+}
 
 # state_write FILE VAR1 VAR2…  → writes VAR=value (escaped), mode 600
 state_write() {
@@ -404,7 +432,7 @@ packages_installed_list() {
 # refreshed once per run; we wait for the dpkg lock (automatic updates often
 # hold it right after boot).
 apt_install() {
-    local package before
+    local package before after
     local -a missing=()
     for package in "$@"; do package_installed "$package" || missing+=("$package"); done
     ((${#missing[@]})) || return 0
@@ -414,17 +442,49 @@ apt_install() {
         run 'Updating the package list' apt-get -o DPkg::Lock::Timeout=300 update
         APP_APT_UPDATED=1
     fi
-    before=$(packages_installed_list)
+    before=$(packages_installed_list) || before=""
     run "$(t 'Installing %s' "${missing[*]}")" apt-get -o DPkg::Lock::Timeout=300 install -y --no-install-recommends "${missing[@]}"
-    # what came with them (dependencies included) goes into the list
-    LC_ALL=C comm -13 <(printf '%s\n' "$before") <(packages_installed_list) >>"$APP_STATE_DIR/packages"
+    # what came with them (dependencies included) goes into the list. If the
+    # installed packages cannot be listed, only the ones asked for: never the
+    # whole system.
+    if [[ -n $before ]] && after=$(packages_installed_list) && [[ -n $after ]]; then
+        LC_ALL=C comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") >>"$APP_STATE_DIR/packages"
+    else
+        printf '%s\n' "${missing[@]}" >>"$APP_STATE_DIR/packages"
+    fi
+}
+
+# Packages that purging PACKAGE… would take with them (APT removes what depends
+# on them) although seedtunnel did not install them: one per line. Simulated,
+# nothing is removed. Status 1: the simulation failed, nothing is known.
+apt_purge_outsiders() {
+    local simulated
+    simulated=$(apt-get -s -o DPkg::Lock::Timeout=300 purge "$@" 2>>"$APP_LOG") || return 1
+    awk '/^(Purg|Remv) / { sub(/:.*/, "", $2); print $2 }' <<<"$simulated" | LC_ALL=C sort -u \
+        | LC_ALL=C comm -23 - <(LC_ALL=C sort -u "$APP_STATE_DIR/packages")
+}
+
+# apt_purge_checked "Description" PACKAGE… — purges them only if nothing else
+# goes with them; otherwise they are kept, and it is said
+apt_purge_checked() {
+    local description=$1 outsiders
+    shift
+    if ! outsiders=$(apt_purge_outsiders "$@"); then
+        warn 'Kept: %s (cannot check what removing them would take, details in %s).' "$*" "$APP_LOG"
+        return 0
+    fi
+    if [[ -n $outsiders ]]; then
+        warn 'Kept: removing %s would also remove %s, which seedtunnel did not install.' "$*" "${outsiders//$'\n'/ }"
+        return 0
+    fi
+    run "$description" apt-get -o DPkg::Lock::Timeout=300 purge -y "$@"
 }
 
 # apt_purge PACKAGE… — only removes the ones installed by seedtunnel, then the
 # dependencies they brought that nothing needs any more. No « autoremove »: it
 # would also take packages that have nothing to do with seedtunnel.
 apt_purge() {
-    local list="$APP_STATE_DIR/packages" package
+    local list="$APP_STATE_DIR/packages" package installed
     local -a present=() orphans=()
     packages_record_init
     for package in "$@"; do
@@ -433,15 +493,18 @@ apt_purge() {
     done
     ((${#present[@]})) || return 0
     export DEBIAN_FRONTEND=noninteractive
-    run "$(t 'Removing %s' "${present[*]}")" apt-get -o DPkg::Lock::Timeout=300 purge -y "${present[@]}"
+    apt_purge_checked "$(t 'Removing %s' "${present[*]}")" "${present[@]}"
     mapfile -t orphans < <(apt-get -s autoremove 2>/dev/null | awk '/^Remv / { sub(/:.*/, "", $2); print $2 }' \
         | grep -xF -f "$list" || true)
     if ((${#orphans[@]})); then
-        run 'Removing the dependencies installed with them' apt-get -o DPkg::Lock::Timeout=300 purge -y "${orphans[@]}"
+        apt_purge_checked "$(t 'Removing the dependencies installed with them')" "${orphans[@]}"
     fi
-    # the list keeps what is still installed
-    LC_ALL=C sort -u "$list" | LC_ALL=C comm -12 - <(packages_installed_list) >"$list.new" || true
-    mv -f "$list.new" "$list"
+    # the list keeps what is still installed; left as it is if the installed
+    # packages cannot be listed
+    if installed=$(packages_installed_list) && [[ -n $installed ]]; then
+        LC_ALL=C sort -u "$list" | LC_ALL=C comm -12 - <(printf '%s\n' "$installed") >"$list.new"
+        mv -f "$list.new" "$list"
+    fi
 }
 
 # Base packages + automatic security updates

@@ -206,25 +206,35 @@ lock_message_names_the_holder() (
 # A seedbox with a valid Let's Encrypt certificate for old.example.org; the
 # answers typed in the menu come from ANSWERS, « confirm » answers no.
 
+# The answers typed by the user, in order (ANSWERS). A question asked once more
+# than planned = a menu with no way out: the test fails. ask_back works as in
+# the script: an empty answer goes back (status 1).
+answers_load() {
+    INTERACTIVE=1
+    ANSWERS=()
+    exec 3>&2
+    ask() {
+        if ((${#ANSWERS[@]} == 0)); then
+            echo "the menu asks again: no way out of it" >&3
+            exit 99
+        fi
+        printf -v "$1" '%s' "${ANSWERS[0]}"
+        ANSWERS=("${ANSWERS[@]:1}")
+    }
+    ask_back() {
+        ask "$1"
+        [[ -n ${!1} ]]
+    }
+}
+
 domain_menu_load() {
     load
-    INTERACTIVE=1
+    answers_load
     SEEDBOX_DOMAIN=old.example.org
     SEEDBOX_CERTIFICATE=letsencrypt
     SEEDBOX_LETSENCRYPT=auto
     SEEDBOX_LETSENCRYPT_SERVER=production
     APPLIED=0
-    ANSWERS=()
-    # a question asked once more than planned = a menu with no way out
-    exec 3>&2
-    ask() {
-        if ((${#ANSWERS[@]} == 0)); then
-            echo "the menu asks again: no way out of it" >&3
-            exit 1
-        fi
-        printf -v "$1" '%s' "${ANSWERS[0]}"
-        ANSWERS=("${ANSWERS[@]:1}")
-    }
     confirm() { return 1; }
     clear() { :; }
     public_ipv4() { printf 203.0.113.10; }
@@ -246,8 +256,8 @@ domain_untouched() {
 domain_change_empty_answer_goes_back() (
     domain_menu_load
     ANSWERS=("")
-    seedbox_change_domain >"$WORK/domain.out" 2>&1
-    domain_untouched && grep -q 'Nothing changed' "$WORK/domain.out"
+    if seedbox_change_domain >"$WORK/domain.out" 2>&1; then return 1; fi
+    domain_untouched
 )
 
 domain_change_same_name_keeps_certificate() (
@@ -267,8 +277,8 @@ domain_change_warns_before_replacing_certificate() (
 domain_change_back_when_name_points_elsewhere() (
     domain_menu_load
     ANSWERS=("elsewhere.test" "q")
-    seedbox_change_domain >"$WORK/domain.out" 2>&1
-    domain_untouched && grep -q 'Nothing changed' "$WORK/domain.out"
+    if seedbox_change_domain >"$WORK/domain.out" 2>&1; then return 1; fi
+    domain_untouched
 )
 
 domain_change_applied_once_confirmed() (
@@ -300,7 +310,8 @@ firewall_trial_load() {
     pause() { :; }
     clear() { :; }
     chown() { :; }
-    systemctl() { :; }
+    # everything works; the automatic undo, once stopped, is no longer active
+    systemctl() { [[ $1 != is-active ]]; }
     nft() { echo "nft $*" >>"$WORK/fw/calls"; }
     systemd-run() { echo "systemd-run $*" >>"$WORK/fw/calls"; }
     # a new SSH login went through the new rules
@@ -347,6 +358,80 @@ firewall_change_confirmed_becomes_permanent() (
     firewall_was_on
     firewall_enable <<<"yes" >"$WORK/fw/out" 2>&1
     [[ $(<"$FIREWALL_RULES") == "new rules" && ! -e $FIREWALL_CANDIDATE ]] && firewall_enabled
+)
+
+# --- firewall (1.2.5): every change of state checked ------------------------------
+
+firewall_disable_checked() (
+    firewall_trial_load
+    firewall_was_on
+    # the table cannot be deleted: it is still there
+    nft() {
+        echo "nft $*" >>"$WORK/fw/calls"
+        [[ $1 != delete ]]
+    }
+    if (firewall_disable) &>"$WORK/fw/out"; then return 1; fi
+    cat "$WORK/fw/out"
+    # still on: nothing deleted, and said
+    [[ -e $FIREWALL_RULES && -e $FIREWALL_CONF_FILE ]] && grep -q "could not be removed" "$WORK/fw/out"
+)
+
+firewall_rollback_cancel_checked() (
+    firewall_trial_load
+    firewall_was_on
+    # the automatic undo cannot be stopped
+    systemctl() { [[ $1 == is-active ]]; }
+    if (firewall_enable <<<"yes") &>"$WORK/fw/out"; then return 1; fi
+    cat "$WORK/fw/out"
+    # the previous rules are back and stay the ones loaded at boot
+    [[ $(<"$FIREWALL_RULES") == "old rules" && ! -e $FIREWALL_CANDIDATE ]] \
+        && grep -qx "nft -f $FIREWALL_RULES" "$WORK/fw/calls"
+)
+
+firewall_refresh_keeps_boot_file() (
+    firewall_trial_load
+    firewall_was_on
+    # nftables refuses the new rules
+    nft() {
+        echo "nft $*" >>"$WORK/fw/calls"
+        return 1
+    }
+    if (firewall_refresh) &>"$WORK/fw/out"; then return 1; fi
+    [[ $(<"$FIREWALL_RULES") == "old rules" ]]
+)
+
+firewall_boot_service_put_right() (
+    firewall_trial_load
+    # enabling the service loaded at boot fails
+    systemctl() { [[ $1 != enable && $1 != is-active ]]; }
+    if (firewall_enable <<<"yes") &>"$WORK/fw/out"; then return 1; fi
+    # on in the settings, so the next run puts it right
+    firewall_enabled || return 1
+    systemctl() {
+        echo "systemctl $*" >>"$WORK/fw/calls"
+        [[ $1 != is-enabled ]]
+    }
+    firewall_refresh &>"$WORK/fw/out" || return 1
+    grep -qx "systemctl enable seedtunnel-firewall.service" "$WORK/fw/calls"
+)
+
+vpn_uninstall_checked() (
+    load
+    VPN_STATE_DIR="$WORK/vpn-uninstall"
+    VPN_CONF_FILE="$WORK/vpn-uninstall.conf"
+    mkdir -p "$VPN_STATE_DIR/clients"
+    echo key >"$VPN_STATE_DIR/server.key"
+    echo "VPN_PORT=51820" >"$VPN_CONF_FILE"
+    confirm() { return 0; }
+    clear() { :; }
+    pause() { :; }
+    systemctl() { :; }
+    nft() { :; }
+    # wg0 is still there after the stop
+    ip() { [[ $1 == link ]]; }
+    if (vpn_uninstall) &>"$WORK/vpn-uninstall.out"; then return 1; fi
+    cat "$WORK/vpn-uninstall.out"
+    [[ -s $VPN_STATE_DIR/server.key && -e $VPN_CONF_FILE ]] && grep -q "could not be stopped" "$WORK/vpn-uninstall.out"
 )
 
 # --- VPN: a change that failed is applied at the next run ------------------------
@@ -439,10 +524,12 @@ firewall_refresh_retried_after_failure() (
     rm -rf "$APP_STATE_DIR/pending"
     : >"$WORK/nft-calls"
     FIREWALL_RULES="$WORK/pending.nft"
+    FIREWALL_UNIT="$WORK/pending.service"
     rm -f "$FIREWALL_RULES"
     firewall_enabled() { return 0; }
     firewall_generate_rules() { echo "new rules"; }
     chown() { :; }
+    systemctl() { :; }
     nft() { retried "$WORK/nft-calls"; }
     if (firewall_refresh) &>/dev/null; then return 1; fi
     firewall_refresh &>/dev/null || return 1
@@ -475,7 +562,10 @@ nginx_reload_retried_after_failure() (
 # What « sshd -T » shows for the seedbox account when its SFTP rule applies
 sshd_rule_in_force() {
     printf 'chrootdirectory %s\nforcecommand internal-sftp -u 0002\n' "$SEEDBOX_DATA_DIR"
-    printf '%s no\n' permittty allowtcpforwarding allowagentforwarding allowstreamlocalforwarding x11forwarding permittunnel
+    printf '%s no\n' permittty allowtcpforwarding allowagentforwarding allowstreamlocalforwarding x11forwarding \
+        permittunnel kbdinteractiveauthentication
+    printf 'passwordauthentication %s\npubkeyauthentication yes\nauthorizedkeysfile %s/%%u\n' \
+        "$SEEDBOX_SFTP_PASSWORD" "$SFTP_KEYS_DIR"
 }
 
 ssh_reload_retried_after_failure() (
@@ -569,7 +659,9 @@ share_load() {
     echo secret >"$WORK/to-share"
     apt_install() { :; }
     seedbox_apply_nginx() { :; }
-    install() {
+    # install without -o / -g (the tests do not run as root)
+    install() { share_install "$@"; }
+    share_install() {
         local -a args=()
         while (($#)); do
             case $1 in
@@ -587,6 +679,22 @@ share_load() {
     systemctl() { echo "systemctl $*" >>"$WORK/share-calls"; }
     sleep() { :; }
 }
+
+share_prepared_halfway_deleted() (
+    share_load halfway
+    pgrep() { return 0; }
+    # the disk is full: the file of the link cannot be copied
+    install() {
+        if [[ " $* " == *" $WORK/to-share "* ]]; then return 1; fi
+        share_install "$@"
+    }
+    if (share_create "$WORK/to-share" file.conf Title "" Note) &>"$WORK/share.out"; then
+        cat "$WORK/share.out"
+        return 1
+    fi
+    # no folder of a link left behind, and no link shown
+    [[ -z $(find "$SHARE_DIR" -mindepth 1 -maxdepth 1 2>/dev/null) ]] && ! grep -q "https://" "$WORK/share.out"
+)
 
 share_refused_without_watcher() (
     share_load nowatch
@@ -679,6 +787,98 @@ update_failed_keeps_previous_version() (
     fi
     # the previous version is back, and it applied its configuration again
     grep -q "echo old" "$APP_DIR/seedtunnel.sh" && [[ $(<"$WORK/app/applied") == old ]]
+)
+
+# installed version (records « old » when it applies) and new version (records
+# « new », then ends with status $1)
+update_versions_make() {
+    APP_DIR="$WORK/app/seedtunnel"
+    rm -rf "$WORK/app"
+    mkdir -p "$APP_DIR" "$WORK/app/new"
+    printf '#!/bin/sh\necho old >>"%s"\n' "$WORK/app/applied" >"$APP_DIR/seedtunnel.sh"
+    printf '#!/bin/sh\necho new >>"%s"\nexit %s\n' "$WORK/app/applied" "$1" >"$WORK/app/new/seedtunnel.sh"
+    chmod +x "$APP_DIR/seedtunnel.sh" "$WORK/app/new/seedtunnel.sh"
+}
+
+update_refused_when_previous_left() (
+    load
+    update_versions_make 0
+    # left by an update cut short: maybe the only working copy
+    mkdir "$APP_DIR.previous"
+    echo kept >"$APP_DIR.previous/marker"
+    if (update_switch "$WORK/app/new" 9.9.9) &>"$WORK/update.out"; then return 1; fi
+    grep -q "did not finish" "$WORK/update.out" || return 1
+    [[ $(<"$APP_DIR.previous/marker") == kept ]] && grep -q "echo old" "$APP_DIR/seedtunnel.sh" \
+        && [[ ! -e $WORK/app/applied ]]
+)
+
+update_second_rename_failure_puts_back() (
+    load
+    update_versions_make 0
+    # the new version cannot be moved in place
+    mv() {
+        if [[ $* == *"$WORK/app/new"* ]]; then return 1; fi
+        command mv "$@"
+    }
+    if (update_switch "$WORK/app/new" 9.9.9) &>"$WORK/update.out"; then return 1; fi
+    grep -q "version $APP_VERSION kept" "$WORK/update.out" || return 1
+    # the installed version is back at once, nothing was applied
+    grep -q "echo old" "$APP_DIR/seedtunnel.sh" && [[ ! -e $APP_DIR.previous && ! -e $WORK/app/applied ]]
+)
+
+update_old_apply_failure_reported() (
+    load
+    update_versions_make 7
+    # the installed version fails too, when it applies its configuration again
+    printf '#!/bin/sh\necho old >>"%s"\nexit 3\n' "$WORK/app/applied" >"$APP_DIR/seedtunnel.sh"
+    if (update_switch "$WORK/app/new" 9.9.9) &>"$WORK/update.out"; then return 1; fi
+    cat "$WORK/update.out"
+    grep -q "files of version $APP_VERSION are back, but putting the configuration back into service failed" "$WORK/update.out" \
+        && [[ $(tr '\n' ' ' <"$WORK/app/applied") == "new old " ]]
+)
+
+# git repository with the installed version (one commit) and the new one (tag
+# v9.9.9, whose seedtunnel.sh ends with status 7)
+update_git_make() {
+    update_versions_make 7
+    APP_VERSION=1.0.0
+    confirm() { return 0; }
+    git -C "$APP_DIR" init --quiet
+    git -C "$APP_DIR" add -A
+    git -C "$APP_DIR" -c user.name=t -c user.email=t@t commit --quiet -m old
+    cp "$WORK/app/new/seedtunnel.sh" "$APP_DIR/seedtunnel.sh"
+    git -C "$APP_DIR" -c user.name=t -c user.email=t@t commit --quiet -am new
+    git -C "$APP_DIR" tag v9.9.9
+    git -C "$APP_DIR" checkout --quiet HEAD~1
+    UPDATE_OLD=$(git -C "$APP_DIR" rev-parse HEAD)
+    # no network: the tags are already there
+    fetch_stub() { [[ $* == *fetch* ]]; }
+}
+
+update_git_failed_goes_back() (
+    load
+    update_git_make
+    git() {
+        if fetch_stub "$@"; then return 0; fi
+        command git "$@"
+    }
+    if (update_from_git) &>"$WORK/update.out"; then return 1; fi
+    [[ $(command git -C "$APP_DIR" rev-parse HEAD) == "$UPDATE_OLD" ]] \
+        && [[ $(tr '\n' ' ' <"$WORK/app/applied") == "new old " ]]
+)
+
+update_git_head_checked() (
+    load
+    update_git_make
+    # going back to the previous commit « succeeds » but HEAD does not move
+    git() {
+        if fetch_stub "$@" || [[ $* == *"checkout --quiet $UPDATE_OLD"* ]]; then return 0; fi
+        command git "$@"
+    }
+    if (update_from_git) &>"$WORK/update.out"; then return 1; fi
+    cat "$WORK/update.out"
+    # stopped with the git command, without applying the version that failed again
+    grep -q "checkout $UPDATE_OLD" "$WORK/update.out" && [[ $(<"$WORK/app/applied") == new ]]
 )
 
 # --- validation of addresses and ports ----------------------------------------------
@@ -825,6 +1025,23 @@ packages_load() {
     APP_APT_UPDATED=1
 }
 
+# apt-get as the tests need it: the simulation of a purge (-s … purge) removes
+# exactly the packages asked for, unless $WORK/also-removed adds some;
+# « -s autoremove » prints $WORK/autoremove
+apt_get_stub() {
+    apt-get() {
+        echo "apt-get $*" >>"$WORK/apt-calls"
+        if [[ $1 == -s && $* == *" purge "* ]]; then
+            local package
+            for package in "${@:5}"; do echo "Purg $package [1.0]"; done
+            if [[ -s $WORK/also-removed ]]; then sed 's/^/Purg /; s/$/ [2.0]/' "$WORK/also-removed"; fi
+        elif [[ $1 == -s ]]; then
+            cat "$WORK/autoremove" 2>/dev/null || true
+        fi
+    }
+    rm -f "$WORK/also-removed" "$WORK/autoremove"
+}
+
 install_records_what_it_brought() (
     packages_load
     apt-get() {
@@ -842,12 +1059,10 @@ purge_only_what_seedtunnel_installed() (
     packages_load
     printf '%s\n' certbot libdep >>"$WORK/installed"
     printf '%s\n' certbot libdep >"$APP_STATE_DIR/packages"
-    apt-get() {
-        echo "apt-get $*" >>"$WORK/apt-calls"
-        # what nothing needs any more: a dependency of certbot, and a package
-        # that has nothing to do with seedtunnel
-        if [[ $1 == -s ]]; then printf 'Remv libdep [1.0]\nRemv unrelated [2.0]\n'; fi
-    }
+    apt_get_stub
+    # what nothing needs any more: a dependency of certbot, and a package
+    # that has nothing to do with seedtunnel
+    printf 'Remv libdep [1.0]\nRemv unrelated [2.0]\n' >"$WORK/autoremove"
     apt_purge nginx certbot &>"$WORK/purge.out" || {
         cat "$WORK/purge.out"
         return 1
@@ -861,10 +1076,52 @@ packages_from_older_version_still_removed() (
     packages_load
     # set up by a version without the list: what it installed is still removed
     echo "SEEDBOX_USER=lancelot" >"$APP_STATE_DIR/seedbox.conf"
-    apt-get() { echo "apt-get $*" >>"$WORK/apt-calls"; }
+    apt_get_stub
     apt_purge nginx certbot &>/dev/null || return 1
     cat "$WORK/apt-calls"
     grep -q " purge -y nginx$" "$WORK/apt-calls"
+)
+
+purge_kept_when_it_would_take_others() (
+    packages_load
+    printf '%s\n' certbot libdep other-app >>"$WORK/installed"
+    printf '%s\n' nginx certbot libdep >"$APP_STATE_DIR/packages"
+    apt_get_stub
+    # a program installed later depends on nginx: APT would remove it too
+    echo other-app >"$WORK/also-removed"
+    apt_purge nginx &>"$WORK/purge.out" || return 1
+    cat "$WORK/purge.out" "$WORK/apt-calls"
+    ! grep -q " purge -y" "$WORK/apt-calls" && grep -q "other-app" "$WORK/purge.out" || return 1
+    # the dependencies no longer needed are checked the same way
+    : >"$WORK/apt-calls"
+    rm -f "$WORK/also-removed"
+    printf 'Remv libdep [1.0]\n' >"$WORK/autoremove"
+    apt-get() {
+        echo "apt-get $*" >>"$WORK/apt-calls"
+        if [[ $1 == -s && $* == *" purge certbot"* ]]; then echo "Purg certbot [1.0]"; fi
+        if [[ $1 == -s && $* == *" purge libdep"* ]]; then printf 'Purg libdep [1.0]\nPurg other-app [2.0]\n'; fi
+        if [[ $1 == -s && $* == *autoremove* ]]; then cat "$WORK/autoremove"; fi
+    }
+    apt_purge certbot &>"$WORK/purge.out" || return 1
+    cat "$WORK/apt-calls"
+    grep -q " purge -y certbot$" "$WORK/apt-calls" && ! grep -q " purge -y libdep$" "$WORK/apt-calls"
+)
+
+registry_kept_when_list_unreadable() (
+    packages_load
+    printf '%s\n' certbot >>"$WORK/installed"
+    printf '%s\n' certbot libdep >"$APP_STATE_DIR/packages"
+    apt_get_stub
+    # dpkg-query fails after the removal
+    packages_installed_list() { return 1; }
+    apt_purge certbot &>/dev/null || return 1
+    [[ $(<"$APP_STATE_DIR/packages") == $'certbot\nlibdep' ]] || return 1
+    # at the installation, a list that cannot be read: only the packages asked for
+    rm -f "$APP_STATE_DIR/packages"
+    apt_get_stub
+    apt_install transmission-daemon &>/dev/null || return 1
+    cat "$APP_STATE_DIR/packages"
+    [[ $(<"$APP_STATE_DIR/packages") == transmission-daemon ]]
 )
 
 # --- Transmission: settings never half-written, Transmission not left stopped -----
@@ -1159,6 +1416,496 @@ restore_unfinished_says_how_to_go_back() (
         && [[ $(cat "$APP_STATE_DIR".before-restore-*/vpn.conf) == "VPN_PORT=1194" ]]
 )
 
+# --- SFTP (1.2.5): « keys only » really checked, resume checked, keys in one go ---
+
+sftp_keys_only_checked() (
+    sftp_load
+    SEEDBOX_SFTP_PASSWORD=no
+    mkdir -p "$SFTP_KEYS_DIR"
+    echo "ssh-ed25519 AAAAone laptop" >"$SFTP_KEYS_DIR/lancelot"
+    # an earlier Match block allows the password again for the account
+    sshd() { if [[ $1 == -T ]]; then sshd_rule_in_force | sed 's/^passwordauthentication no$/passwordauthentication yes/'; fi; }
+    if (seedbox_apply_sftp) &>"$WORK/sftp.out"; then return 1; fi
+    grep -qxF "usermod --expiredate 1 lancelot" "$WORK/user-calls" || return 1
+    # or keyboard-interactive (a password by another way)
+    : >"$WORK/user-calls"
+    rm -f "$WORK/expiry"
+    sshd() { if [[ $1 == -T ]]; then sshd_rule_in_force | sed 's/^kbdinteractiveauthentication no$/kbdinteractiveauthentication yes/'; fi; }
+    if (seedbox_apply_sftp) &>"$WORK/sftp.out"; then return 1; fi
+    grep -qxF "usermod --expiredate 1 lancelot" "$WORK/user-calls"
+)
+
+sftp_resume_checked() (
+    sftp_load
+    sshd() { if [[ $1 == -T ]]; then sshd_rule_in_force; fi; }
+    # suspended, and the account database refuses the change
+    printf 1 >"$WORK/expiry"
+    usermod() { echo "usermod $*" >>"$WORK/user-calls"; }
+    if (seedbox_apply_sftp) &>"$WORK/sftp.out"; then
+        cat "$WORK/sftp.out"
+        return 1
+    fi
+    cat "$WORK/sftp.out"
+    grep -q "could not be reactivated" "$WORK/sftp.out"
+)
+
+sftp_keys_load() {
+    sftp_load
+    SFTP_KEYS_DIR="$WORK/keys-$1"
+    rm -rf "$SFTP_KEYS_DIR"
+    mkdir -p "$SFTP_KEYS_DIR"
+    seedbox_apply_sftp() { :; }
+    seedbox_save() { :; }
+    # a key is valid if it looks like one
+    ssh-keygen() { [[ $(cat) == "ssh-ed25519 AAAA"* ]]; }
+}
+
+sftp_keys_import_all_or_nothing() (
+    sftp_keys_load import
+    : >"$SFTP_KEYS_DIR/lancelot"
+    printf '%s\n' "ssh-ed25519 AAAAone laptop" "ssh-ed25519 AAAAtwo phone" "not a key" >"$WORK/keys.txt"
+    if (sftp_keys_import "$WORK/keys.txt") &>"$WORK/keys.out"; then return 1; fi
+    # the third key is invalid: none was added
+    [[ ! -s $SFTP_KEYS_DIR/lancelot ]] || return 1
+    # all valid: all added, in one go
+    printf '%s\n' "ssh-ed25519 AAAAone laptop" "ssh-ed25519 AAAAtwo phone" >"$WORK/keys.txt"
+    sftp_keys_import "$WORK/keys.txt" &>"$WORK/keys.out" || return 1
+    [[ $(<"$SFTP_KEYS_DIR/lancelot") == $'ssh-ed25519 AAAAone laptop\nssh-ed25519 AAAAtwo phone' ]] \
+        && [[ $(stat -c %a "$SFTP_KEYS_DIR/lancelot") == 644 ]]
+)
+
+sftp_keys_remove_failure_keeps_file() (
+    sftp_keys_load remove
+    printf '%s\n' "ssh-ed25519 AAAAone laptop" "ssh-ed25519 AAAAtwo phone" >"$SFTP_KEYS_DIR/lancelot"
+    # the disk is full: the new content cannot be written
+    cat() { return 1; }
+    mv() { return 1; }
+    if (sftp_keys_remove 1) &>"$WORK/keys.out"; then return 1; fi
+    unset -f cat mv
+    [[ $(<"$SFTP_KEYS_DIR/lancelot") == $'ssh-ed25519 AAAAone laptop\nssh-ed25519 AAAAtwo phone' ]] \
+        && ! ls "$SFTP_KEYS_DIR"/.keys.* &>/dev/null
+)
+
+rename_group_undo_checked() (
+    sftp_load
+    SFTP_KEYS_DIR="$WORK/rename-keys2"
+    mkdir -p "$SFTP_KEYS_DIR"
+    touch "$SFTP_KEYS_DIR/lancelot"
+    seedbox_save() { echo "save" >>"$WORK/user-calls"; }
+    seedbox_apply() { echo "apply" >>"$WORK/user-calls"; }
+    # the group is renamed, the keys cannot be moved, and the group cannot
+    # get its old name back
+    groupmod() {
+        echo "groupmod $*" >>"$WORK/user-calls"
+        [[ $2 == galahad ]]
+    }
+    mv() { return 1; }
+    if (seedbox_set_credentials galahad) &>"$WORK/rename.out"; then return 1; fi
+    cat "$WORK/rename.out" "$WORK/user-calls"
+    # said, with what to type; the account stays suspended
+    grep -q "groupmod --new-name lancelot galahad" "$WORK/rename.out" \
+        && [[ $(<"$WORK/expiry") == 1 ]] && ! grep -qx "save\|apply" "$WORK/user-calls"
+)
+
+# --- restore (1.2.5): no link, no code in the settings ------------------------
+
+# restore_archive_load NAME — a backup made of $WORK/NAME-root, and the restore
+# stopped at its last question (« no »)
+restore_archive_load() {
+    load
+    RESTORE_ROOT="$WORK/$1-root"
+    rm -rf "$RESTORE_ROOT"
+    mkdir -p "$RESTORE_ROOT/etc/seedtunnel"
+    echo "VPN_PORT=51820" >"$RESTORE_ROOT/etc/seedtunnel/vpn.conf"
+    echo "a test passphrase" >"$WORK/$1-passphrase"
+    chmod 600 "$WORK/$1-passphrase"
+    OPT_PASSPHRASE_FILE="$WORK/$1-passphrase"
+    APP_STATE_DIR="$WORK/$1-state"
+    mkdir -p "$APP_STATE_DIR"
+    confirm() { return 1; }
+}
+
+restore_archive_make() {
+    local -a paths
+    # as backup_paths gives them: etc/seedtunnel, etc/letsencrypt…
+    mapfile -t paths < <(cd "$RESTORE_ROOT" && printf '%s\n' etc/*)
+    tar -czf - -C "$RESTORE_ROOT" "${paths[@]}" | openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt \
+        -pass pass:"a test passphrase" -out "$WORK/$1.enc"
+}
+
+restore_refuses_links() (
+    restore_archive_load links
+    mkdir -p "$RESTORE_ROOT/etc/seedtunnel/vpn/clients"
+    ln -s /etc/shadow "$RESTORE_ROOT/etc/seedtunnel/vpn/clients/phone.conf"
+    restore_archive_make links
+    if (restore_main "$WORK/links.enc") >"$WORK/links.out" 2>&1; then return 1; fi
+    cat "$WORK/links.out"
+    grep -q "is a link or a special file" "$WORK/links.out"
+)
+
+restore_accepts_letsencrypt_links() (
+    restore_archive_load le
+    mkdir -p "$RESTORE_ROOT/etc/letsencrypt/archive/seedbox.example.org" "$RESTORE_ROOT/etc/letsencrypt/live/seedbox.example.org"
+    echo cert >"$RESTORE_ROOT/etc/letsencrypt/archive/seedbox.example.org/cert1.pem"
+    ln -s ../../archive/seedbox.example.org/cert1.pem "$RESTORE_ROOT/etc/letsencrypt/live/seedbox.example.org/cert.pem"
+    restore_archive_make le
+    # goes as far as the last question
+    (restore_main "$WORK/le.enc") >"$WORK/le.out" 2>&1
+    cat "$WORK/le.out"
+    ! grep -q "refused" "$WORK/le.out" && grep -q "The backup contains" "$WORK/le.out"
+)
+
+restore_refuses_code_in_settings() (
+    restore_archive_load code
+    printf 'VPN_PORT=$(touch %s/pwned)\n' "$WORK" >"$RESTORE_ROOT/etc/seedtunnel/vpn.conf"
+    rm -f "$WORK/pwned"
+    restore_archive_make code
+    if (restore_main "$WORK/code.enc") >"$WORK/code.out" 2>&1; then return 1; fi
+    cat "$WORK/code.out"
+    grep -q "could run commands" "$WORK/code.out" && [[ ! -e $WORK/pwned ]]
+)
+
+state_files_round_trip_safe() (
+    load
+    local file="$WORK/round-trip.conf"
+    A="a b" B='$6$salt$hash/x.y' C="quote\"s and 'single'" D="" E='$(touch nothing)' F="~root"
+    state_write "$file" A B C D E F
+    state_file_is_safe "$file" || return 1
+    for bad in 'X=$(id)' 'X=`id`' 'X=a;id' 'X=~root' 'X=a b' 'id'; do
+        printf '%s\n' "$bad" >"$WORK/bad.conf"
+        if state_file_is_safe "$WORK/bad.conf"; then
+            echo "accepted: $bad"
+            return 1
+        fi
+    done
+)
+
+# --- backup (1.2.5): never a mix of two states, never an older backup replaced ----
+
+backup_consistency_load() {
+    load
+    BACKUP_PASSPHRASE="a test passphrase"
+    SETTINGS="$WORK/consistency/etc-seedtunnel"
+    rm -rf "$WORK/consistency"
+    mkdir -p "$SETTINGS" "$WORK/consistency/out"
+    echo "VPN_PORT=51820" >"$SETTINGS/vpn.conf"
+    : >"$WORK/attempts"
+}
+
+backup_redone_when_settings_change() (
+    backup_consistency_load
+    # the first archive is written while a setting changes (a restore, certbot…)
+    tar() {
+        if [[ $1 == -czf ]]; then
+            echo attempt >>"$WORK/attempts"
+            if (($(wc -l <"$WORK/attempts") == 1)); then echo "VPN_PORT=1194" >"$SETTINGS/vpn.conf"; fi
+        fi
+        command tar "$@"
+    }
+    backup_create_archive "$WORK/consistency/out/b.enc" "${SETTINGS#/}" &>/dev/null || return 1
+    (($(wc -l <"$WORK/attempts") == 2)) || return 1
+    # always changing: no archive kept, nothing left behind
+    rm -f "$WORK/consistency/out/b.enc"
+    : >"$WORK/attempts"
+    tar() {
+        if [[ $1 == -czf ]]; then echo "VPN_PORT=$RANDOM" >"$SETTINGS/vpn.conf"; fi
+        command tar "$@"
+    }
+    if backup_create_archive "$WORK/consistency/out/b.enc" "${SETTINGS#/}" &>/dev/null; then return 1; fi
+    [[ -z $(ls -A "$WORK/consistency/out") ]]
+)
+
+backup_never_replaces_older() (
+    backup_consistency_load
+    echo "older backup" >"$WORK/consistency/out/b.enc"
+    if backup_create_archive "$WORK/consistency/out/b.enc" "${SETTINGS#/}" &>/dev/null; then return 1; fi
+    [[ $(<"$WORK/consistency/out/b.enc") == "older backup" ]] || return 1
+    # refused at once by « seedtunnel backup --output »
+    backup_require_something() { :; }
+    clear() { :; }
+    OPT_OUTPUT_FILE="$WORK/consistency/out/b.enc"
+    if (backup_main) &>"$WORK/consistency.out"; then return 1; fi
+    grep -q "already exists" "$WORK/consistency.out" && [[ $(<"$WORK/consistency/out/b.enc") == "older backup" ]]
+)
+
+backup_passphrase_saved_whole() (
+    load
+    BACKUP_PASSPHRASE_FILE="$WORK/auto.passphrase"
+    echo "the old passphrase" >"$BACKUP_PASSPHRASE_FILE"
+    backup_require_something() { :; }
+    backup_read_passphrase() { BACKUP_PASSPHRASE="the new passphrase"; }
+    backup_auto_install_units() { :; }
+    clear() { :; }
+    # the disk is full when the new passphrase is written
+    printf() {
+        if [[ ${2-} == "the new passphrase" ]]; then return 1; fi
+        builtin printf "$@"
+    }
+    if (backup_auto_enable) &>"$WORK/auto.out"; then return 1; fi
+    unset -f printf
+    [[ $(<"$BACKUP_PASSPHRASE_FILE") == "the old passphrase" && ! -e $BACKUP_PASSPHRASE_FILE.tmp ]]
+)
+
+# --- every question of the menus can be left with an empty answer ----------------
+# (answers_load: the answers typed, in order; a question too many = no way out)
+
+back_load() {
+    load
+    answers_load
+    clear() { :; }
+    : >"$WORK/back-calls"
+    # what must not happen after going back
+    pause() { echo "pause" >>"$WORK/back-calls"; }
+    VPN_CLIENTS_DIR="$WORK/back-clients"
+    rm -rf "$VPN_CLIENTS_DIR"
+    mkdir -p "$VPN_CLIENTS_DIR"
+    VPN_PUBLIC_ADDRESS=203.0.113.10
+    VPN_PORT=51820
+    VPN_DNS=9.9.9.9
+    SEEDBOX_LETSENCRYPT=auto
+    SEEDBOX_LETSENCRYPT_SERVER=production
+}
+
+back_nothing_done() {
+    if [[ -s $WORK/back-calls ]]; then
+        cat "$WORK/back-calls"
+        return 1
+    fi
+}
+
+vpn_add_client_can_go_back() (
+    back_load
+    vpn_load() { :; }
+    vpn_installed() { return 0; }
+    service_state() { echo running; }
+    vpn_count_clients() { echo 0; }
+    vpn_connected_count() { echo 0; }
+    vpn_add_client() { echo "add $1" >>"$WORK/back-calls"; }
+    # « Add a client », an empty name, then Q
+    ANSWERS=("1" "" "q")
+    vpn_menu >/dev/null 2>&1 || return 1
+    back_nothing_done || return 1
+    # a wrong name is asked again, then empty: back
+    ANSWERS=("not valid!" "")
+    vpn_ask_client_name name "" >/dev/null 2>&1
+    (($? == 1))
+)
+
+vpn_client_actions_can_go_back() (
+    back_load
+    vpn_load() { :; }
+    vpn_installed() { return 0; }
+    seedbox_installed() { return 0; }
+    service_state() { echo running; }
+    vpn_count_clients() { echo 1; }
+    vpn_connected_count() { echo 0; }
+    touch "$VPN_CLIENTS_DIR/laptop.env"
+    vpn_client_names() { echo laptop; }
+    vpn_show_client() { echo "show $1" >>"$WORK/back-calls"; }
+    vpn_share_client() { echo "share $1" >>"$WORK/back-calls"; }
+    vpn_remove_client() { echo "revoke $1" >>"$WORK/back-calls"; }
+    # show, link, revoke: empty answer each time; revoke: « no » too
+    ANSWERS=("2" "" "3" "" "4" "" "4" "laptop" "q")
+    confirm() { return 1; }
+    vpn_menu >/dev/null 2>&1 || return 1
+    back_nothing_done
+)
+
+vpn_pick_client_asks_again() (
+    back_load
+    touch "$VPN_CLIENTS_DIR/laptop.env"
+    vpn_client_names() { echo laptop; }
+    # a number that does not exist is asked again
+    ANSWERS=("9" "laptop")
+    vpn_pick_client name "Client" >/dev/null 2>&1 && [[ $name == laptop ]] || return 1
+    ANSWERS=("")
+    vpn_pick_client name "Client" >/dev/null 2>&1
+    (($? == 1))
+)
+
+vpn_settings_can_go_back() (
+    back_load
+    vpn_port_is_free() { return 0; }
+    vpn_apply() { echo "apply" >>"$WORK/back-calls"; }
+    VPN_PUBLIC_ADDRESS=203.0.113.10
+    VPN_PORT=51820
+    # empty address
+    ANSWERS=("")
+    vpn_change_settings >/dev/null 2>&1 && return 1
+    # empty port, empty choice of DNS
+    ANSWERS=("203.0.113.10" "")
+    vpn_change_settings >/dev/null 2>&1 && return 1
+    ANSWERS=("203.0.113.10" "51820" "")
+    vpn_change_settings >/dev/null 2>&1 && return 1
+    # « no » to « Is that right? »
+    confirm() { return 1; }
+    ANSWERS=("203.0.113.10" "51820" "1")
+    vpn_change_settings >/dev/null 2>&1 && return 1
+    back_nothing_done
+)
+
+vpn_install_can_go_back() (
+    back_load
+    vpn_check_kernel() { :; }
+    base_setup() { :; }
+    public_ipv4() { echo 203.0.113.10; }
+    default_interface() { echo eth0; }
+    seedbox_installed() { return 1; }
+    vpn_port_is_free() { return 0; }
+    vpn_apply() { echo "apply" >>"$WORK/back-calls"; }
+    vpn_add_client() { echo "add $1" >>"$WORK/back-calls"; }
+    ANSWERS=("")
+    vpn_install_interactive >/dev/null 2>&1 || return 1
+    # the name of the first client, empty
+    ANSWERS=("203.0.113.10" "51820" "1" "")
+    confirm() { return 0; }
+    vpn_install_interactive >/dev/null 2>&1 || return 1
+    back_nothing_done
+)
+
+seedbox_install_can_go_back() (
+    back_load
+    seedbox_check_web_ports() { :; }
+    base_setup() { :; }
+    apt_install() { :; }
+    public_ipv4() { echo 203.0.113.10; }
+    seedbox_guess_domain() { echo 203.0.113.10; }
+    seedbox_default_data_dir() { echo "$WORK/data"; }
+    seedbox_check_data_dir() { return 0; }
+    ask_password() { printf -v "$1" '%s' 'a password of 20 chars'; }
+    seedbox_apply() { echo "apply" >>"$WORK/back-calls"; }
+    id() { return 1; }
+    # empty user, then empty domain, then empty data folder
+    ANSWERS=("")
+    seedbox_install_interactive >/dev/null 2>&1 || return 1
+    ANSWERS=("lancelot" "")
+    seedbox_install_interactive >/dev/null 2>&1 || return 1
+    ANSWERS=("lancelot" "203.0.113.10" "")
+    seedbox_install_interactive >/dev/null 2>&1 || return 1
+    # « no » to « Start the installation? »: nothing, and no password left
+    confirm() { return 1; }
+    ANSWERS=("lancelot" "203.0.113.10" "$WORK/data")
+    seedbox_install_interactive >/dev/null 2>&1 || return 1
+    [[ -z ${SEEDBOX_NEW_PASSWORD-} ]] && back_nothing_done
+)
+
+seedbox_credentials_can_go_back() (
+    back_load
+    SEEDBOX_USER=lancelot
+    ask_password() { printf -v "$1" '%s' 'a password of 20 chars'; }
+    seedbox_set_credentials() { echo "set $1" >>"$WORK/back-calls"; }
+    ANSWERS=("")
+    seedbox_change_credentials >/dev/null 2>&1 && return 1
+    # « no » to the last question
+    confirm() { return 1; }
+    ANSWERS=("lancelot")
+    seedbox_change_credentials >/dev/null 2>&1 && return 1
+    [[ -z ${SEEDBOX_NEW_PASSWORD-} ]] && back_nothing_done
+)
+
+sftp_keys_menu_can_go_back() (
+    back_load
+    seedbox_load() { :; }
+    SEEDBOX_USER=lancelot
+    SEEDBOX_SFTP_PASSWORD=yes
+    SFTP_KEYS_DIR="$WORK/back-keys"
+    mkdir -p "$SFTP_KEYS_DIR"
+    echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEWuSJMjcPMEGcGPXYQTMQwKBZWAmPq5xBrlCvTXnDEn laptop" >"$SFTP_KEYS_DIR/lancelot"
+    sftp_keys_import() { echo "import" >>"$WORK/back-calls"; }
+    sftp_keys_remove() { echo "remove $1" >>"$WORK/back-calls"; }
+    # add: a wrong key asked again, then empty; remove: a wrong number, then empty
+    ANSWERS=("1" "not a key" "" "3" "5" "" "q")
+    sftp_keys_menu >/dev/null 2>&1 || return 1
+    back_nothing_done
+)
+
+unban_can_go_back() (
+    back_load
+    fail2ban_bans_print() { :; }
+    fail2ban_unban() { echo "unban $1" >>"$WORK/back-calls"; }
+    # a wrong address is asked again, then empty
+    ANSWERS=("x;y" "")
+    fail2ban_bans_menu >/dev/null 2>&1 || return 1
+    back_nothing_done
+)
+
+seedbox_domain_install_can_go_back() (
+    back_load
+    SEEDBOX_DOMAIN=203.0.113.10
+    ANSWERS=("")
+    seedbox_ask_domain 203.0.113.10 >/dev/null 2>&1
+    (($? == 1))
+)
+
+backup_passphrase_can_go_back() (
+    load
+    OPT_PASSPHRASE_FILE=""
+    stdin_is_terminal() { return 0; }
+    # empty at once
+    backup_read_passphrase 1 <<<"" >/dev/null 2>&1
+    (($? == 1)) || return 1
+    # too short, then empty
+    backup_read_passphrase 1 >/dev/null 2>&1 <<<$'short\n'
+    (($? == 1)) || return 1
+    # typed twice differently, then empty
+    backup_read_passphrase 1 >/dev/null 2>&1 <<<$'a long passphrase\nanother passphrase\n'
+    (($? == 1)) || return 1
+    # typed twice the same: kept
+    backup_read_passphrase 1 >/dev/null 2>&1 <<<$'a long passphrase\na long passphrase'
+    [[ $BACKUP_PASSPHRASE == "a long passphrase" ]]
+)
+
+backup_create_and_weekly_can_go_back() (
+    back_load
+    OPT_PASSPHRASE_FILE=""
+    stdin_is_terminal() { return 0; }
+    BACKUP_DIR="$WORK/back-backups"
+    BACKUP_PASSPHRASE_FILE="$WORK/back-passphrase"
+    rm -f "$BACKUP_PASSPHRASE_FILE"
+    backup_auto_status() { :; }
+    backup_require_something() { :; }
+    backup_auto_enabled() { return 1; }
+    backup_write() { echo "backup $1" >>"$WORK/back-calls"; }
+    backup_auto_install_units() { echo "weekly on" >>"$WORK/back-calls"; }
+    # « backup now », then « weekly backup on »: empty passphrase both times
+    ANSWERS=("1" "3" "q")
+    backup_menu >/dev/null 2>&1 <<<$'\n\n' || return 1
+    back_nothing_done && [[ ! -e $BACKUP_PASSPHRASE_FILE ]]
+)
+
+backup_menu_can_go_back() (
+    back_load
+    backup_auto_status() { :; }
+    backup_list() { :; }
+    backup_latest() { echo "$WORK/none.enc"; }
+    restore_main() { echo "restore $1" >>"$WORK/back-calls"; }
+    # restore: a file that does not exist asked again, then empty
+    ANSWERS=("4" "$WORK/none.enc" "" "q")
+    backup_menu >/dev/null 2>&1 || return 1
+    back_nothing_done
+)
+
+restore_wrong_passphrase_asked_again() (
+    load
+    local root="$WORK/restore3-root"
+    rm -rf "$root" "$WORK/restore3-state"*
+    mkdir -p "$root/etc/seedtunnel"
+    echo "VPN_PORT=51820" >"$root/etc/seedtunnel/vpn.conf"
+    tar -czf - -C "$root" etc/seedtunnel | openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt \
+        -pass pass:"a test passphrase" -out "$WORK/restore3.enc"
+    OPT_PASSPHRASE_FILE=""
+    stdin_is_terminal() { return 0; }
+    APP_STATE_DIR="$WORK/restore3-state"
+    mkdir -p "$APP_STATE_DIR"
+    echo "VPN_PORT=1194" >"$APP_STATE_DIR/vpn.conf"
+    # a wrong passphrase: asked again; then empty: back, nothing touched
+    restore_main "$WORK/restore3.enc" >"$WORK/restore3.out" 2>&1 <<<$'wrong passphrase\n'
+    rc=$?
+    cat "$WORK/restore3.out"
+    ((rc == 1)) && grep -q "Cannot decrypt" "$WORK/restore3.out" \
+        && [[ $(<"$APP_STATE_DIR/vpn.conf") == "VPN_PORT=1194" && -z $BACKUP_TMP_DIR ]]
+)
+
 printf '\033[1m=== Unit tests\033[0m\n'
 check "vpn_sync: WireGuard refusing the configuration shows « failed »" vpn_sync_reports_wg_failure
 check "vpn_sync: a failure of « wg-quick strip » is seen" vpn_sync_reports_strip_failure
@@ -1187,6 +1934,11 @@ check "backup: a failed backup leaves no file, never « the latest »" backup_fa
 check "backup: complete archive, checked, then renamed" backup_complete_and_checked
 check "firewall: a failed undo is reported and the automatic undo kept" firewall_undo_failure_keeps_automatic_undo
 check "firewall: rules refused once are applied at the next run" firewall_refresh_retried_after_failure
+check "firewall: rules that cannot be removed → stays on, nothing deleted" firewall_disable_checked
+check "VPN removal: interface still running → keys kept" vpn_uninstall_checked
+check "firewall: automatic undo that cannot be cancelled → previous rules back" firewall_rollback_cancel_checked
+check "firewall: new rules refused → file loaded at boot unchanged" firewall_refresh_keeps_boot_file
+check "firewall: service at boot not enabled → put right by the next run" firewall_boot_service_put_right
 check "nginx: a reload that failed is done at the next run" nginx_reload_retried_after_failure
 check "SSH: a reload that failed is done at the next run" ssh_reload_retried_after_failure
 check "seedbox removal: account not deleted → SFTP restrictions kept" uninstall_stops_when_user_remains
@@ -1197,15 +1949,23 @@ check "diagnostics: no automatic backup since it was turned on → warning" doct
 check "restore: decrypted files deleted after a failure" restore_cleans_up_after_failure
 check "full disk: Transmission refused to start, allowed again with room" diskguard_refuses_start_on_full_disk
 check "update: new version failing → previous version back" update_failed_keeps_previous_version
+check "update: interrupted earlier (.previous left) → refused, nothing touched" update_refused_when_previous_left
+check "update: new version cannot be put in place → previous one back at once" update_second_rename_failure_puts_back
+check "update: previous version back but its apply fails → said so" update_old_apply_failure_reported
+check "update (git): new version failing → previous commit back and applied" update_git_failed_goes_back
+check "update (git): previous commit not back → stop, nothing applied" update_git_head_checked
 check "validation: addresses, ports and DNS out of range refused" validators_reject_out_of_range
 check "SFTP: restrictions not in force → account suspended, then back" sftp_rule_not_applied_suspends_account
 check "SFTP: renamed account suspended before its new name" rename_suspends_account_first
 check "one-time link: fingerprint of the self-signed certificate shown" share_shows_selfsigned_fingerprint
+check "one-time link: prepared halfway → deleted, no link" share_prepared_halfway_deleted
 check "files holding a secret: refused if others can read them" secret_files_must_be_private
 check "firewall: « yes » refused without a new SSH login" firewall_yes_needs_new_ssh_login
 check "packages: installed ones listed, dependencies included" install_records_what_it_brought
 check "packages: removal only takes what seedtunnel installed" purge_only_what_seedtunnel_installed
 check "packages: server set up by an older version → its packages still removed" packages_from_older_version_still_removed
+check "packages: kept if removing them would take another program" purge_kept_when_it_would_take_others
+check "packages: list kept when the installed packages cannot be read" registry_kept_when_list_unreadable
 check "Transmission: settings write failing → previous ones whole, Transmission started" transmission_settings_failure_keeps_them
 check "Transmission: waits for the disk of the data" transmission_waits_for_data_disk
 check "ports 80/443: another program beside nginx is seen" web_ports_other_program_beside_nginx
@@ -1223,6 +1983,32 @@ check "firewall: only the messages written by sshd are read" firewall_only_reads
 check "diagnostics: certificate served not checked → warning" doctor_says_certificate_not_checked
 check "validation: IPv6 addresses, valid and invalid forms" ipv6_forms
 check "restore stopped halfway: how to go back is said" restore_unfinished_says_how_to_go_back
+check "SFTP: « keys only » checked (password, keyboard-interactive)" sftp_keys_only_checked
+check "SFTP: reactivation of the account checked" sftp_resume_checked
+check "SFTP: keys imported all or none" sftp_keys_import_all_or_nothing
+check "SFTP: removing a key that cannot be written → file kept" sftp_keys_remove_failure_keeps_file
+check "SFTP: rename undone, group not back → said, account suspended" rename_group_undo_checked
+check "restore: archive with a link (to /etc/shadow) refused" restore_refuses_links
+check "restore: links of Let's Encrypt to its certificates accepted" restore_accepts_letsencrypt_links
+check "restore: settings that could run a command refused" restore_refuses_code_in_settings
+check "settings files: what state_write writes is accepted, code is not" state_files_round_trip_safe
+check "backup: settings changed meanwhile → archive made again, never mixed" backup_redone_when_settings_change
+check "backup: an older backup is never replaced" backup_never_replaces_older
+check "backup: passphrase that cannot be written → the previous one kept" backup_passphrase_saved_whole
+check "back: VPN, add a client (empty name)" vpn_add_client_can_go_back
+check "back: VPN, show, link and revoke a client (and « no »)" vpn_client_actions_can_go_back
+check "back: VPN, a client that does not exist is asked again" vpn_pick_client_asks_again
+check "back: VPN, change of settings (each question, and « no »)" vpn_settings_can_go_back
+check "back: VPN installation (address, name of the first client)" vpn_install_can_go_back
+check "back: seedbox installation (each question, and « no »)" seedbox_install_can_go_back
+check "back: seedbox, user and password (and « no »)" seedbox_credentials_can_go_back
+check "back: SSH keys, add and remove (wrong answers asked again)" sftp_keys_menu_can_go_back
+check "back: banned IP addresses (wrong address asked again)" unban_can_go_back
+check "back: domain name at the installation" seedbox_domain_install_can_go_back
+check "back: passphrase of a backup (wrong entries asked again)" backup_passphrase_can_go_back
+check "back: backup now and weekly backup (empty passphrase)" backup_create_and_weekly_can_go_back
+check "back: restore, path of the file (asked again if missing)" backup_menu_can_go_back
+check "back: restore, wrong passphrase asked again, then back" restore_wrong_passphrase_asked_again
 
 printf '\n\033[1m%s passed, %s failed\033[0m\n' "$PASS" "$FAIL"
 ((FAIL == 0))

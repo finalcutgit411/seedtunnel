@@ -56,19 +56,28 @@ update_from_release() {
 # Puts the new version (folder $1) in place of the installed one, which is kept
 # until the new one has applied the configuration; if that fails, the installed
 # version comes back. Renaming: the running script keeps its files open.
+# « mv -T »: never moves a folder into another one by mistake.
 update_switch() {
     local new=$1 version=$2 previous="$APP_DIR.previous"
-    rm -rf "$previous"
-    mv "$APP_DIR" "$previous"
-    mv "$new" "$APP_DIR"
+    # left by an update that did not finish: it may be the only working copy
+    [[ ! -e $previous ]] \
+        || die '%s exists: an earlier update did not finish. If seedtunnel works, delete it (rm -rf %s), then update again.' "$previous" "$previous"
+    mv -T "$APP_DIR" "$previous" 2>>"$APP_LOG" \
+        || die 'The new version could not be put in place: version %s kept (details in %s).' "$APP_VERSION" "$APP_LOG"
+    if ! mv -T "$new" "$APP_DIR" 2>>"$APP_LOG"; then
+        mv -T "$previous" "$APP_DIR" 2>>"$APP_LOG" \
+            || die 'The new version could not be put in place, nor the previous one put back (details in %s). By hand:  mv %s %s' "$APP_LOG" "$previous" "$APP_DIR"
+        die 'The new version could not be put in place: version %s kept (details in %s).' "$APP_VERSION" "$APP_LOG"
+    fi
     if update_apply_new; then
         rm -rf "$previous"
         ok 'seedtunnel updated to version %s (see %s).' "$version" "$APP_DIR/CHANGELOG.md"
         exit 0
     fi
     rm -rf "$APP_DIR.failed"
-    mv "$APP_DIR" "$APP_DIR.failed"
-    mv "$previous" "$APP_DIR"
+    if ! { mv -T "$APP_DIR" "$APP_DIR.failed" && mv -T "$previous" "$APP_DIR"; } 2>>"$APP_LOG"; then
+        die 'Version %s could not apply the configuration, and version %s could not be put back (details in %s). By hand:  mv %s %s.failed ; mv %s %s ; seedtunnel apply' "$version" "$APP_VERSION" "$APP_LOG" "$APP_DIR" "$APP_DIR" "$previous" "$APP_DIR"
+    fi
     update_back_to_previous "$version"
 }
 
@@ -83,7 +92,9 @@ update_apply_new() {
 # After a failed update: the installed version applies its configuration again
 update_back_to_previous() {
     warn 'Version %s could not apply the configuration: back to version %s.' "$1" "$APP_VERSION"
-    "$APP_DIR/seedtunnel.sh" apply >>"$APP_LOG" 2>&1 || true
+    if ! "$APP_DIR/seedtunnel.sh" apply >>"$APP_LOG" 2>&1; then
+        die 'Update cancelled: the files of version %s are back, but putting the configuration back into service failed too (details in %s). Run « seedtunnel doctor », then « seedtunnel apply ».' "$APP_VERSION" "$APP_LOG"
+    fi
     die 'Update cancelled, version %s kept (details in %s).' "$APP_VERSION" "$APP_LOG"
 }
 
@@ -112,7 +123,12 @@ update_from_git() {
         ok 'seedtunnel updated to version %s (see %s).' "${tag#v}" "$APP_DIR/CHANGELOG.md"
         exit 0
     fi
-    git -C "$APP_DIR" -c advice.detachedHead=false checkout --quiet "$previous" >>"$APP_LOG" 2>&1 || true
+    # back to the previous commit, checked: otherwise « apply » would run the
+    # version that just failed
+    if ! git -C "$APP_DIR" -c advice.detachedHead=false checkout --quiet "$previous" >>"$APP_LOG" 2>&1 \
+        || [[ $(git -C "$APP_DIR" rev-parse HEAD 2>>"$APP_LOG") != "$previous" ]]; then
+        die 'Version %s could not apply the configuration, and git could not go back to version %s (details in %s). By hand:  git -C %s checkout %s ; seedtunnel apply' "${tag#v}" "$APP_VERSION" "$APP_LOG" "$APP_DIR" "$previous"
+    fi
     update_back_to_previous "${tag#v}"
 }
 

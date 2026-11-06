@@ -243,10 +243,11 @@ seedbox_password_matches() {
 
 # --- Questions (interactive mode) ---------------------------------------------------
 
+# Status 1: the user went back (empty answer), nothing asked further
 seedbox_ask_user() {
     local current=${1-} name
     while true; do
-        ask name 'User name (web and SFTP)' "${SEEDBOX_USER:-lancelot}"
+        ask_back name 'User name (web and SFTP)' "${SEEDBOX_USER:-lancelot}" || return 1
         if ! seedbox_is_valid_user "$name"; then
             warn 'Lowercase letters, digits, - and _ only (32 characters at most).'
         elif [[ $name != "$current" ]] && id "$name" &>/dev/null; then
@@ -261,8 +262,8 @@ seedbox_ask_user() {
 
 # Asks for the domain name and checks that it points to this server.
 # Sets SEEDBOX_DOMAIN, and SEEDBOX_LETSENCRYPT: auto if Let's Encrypt has a
-# chance, otherwise no. With « change » (seedbox already installed): an empty
-# answer or Q goes back, with status 1, and nothing is changed.
+# chance, otherwise no. An empty answer or Q goes back, with status 1, and
+# nothing is changed. « change »: the seedbox is already installed.
 seedbox_ask_domain() {
     local ip=$1 mode=${2-} ips choice answer default=$SEEDBOX_DOMAIN
     if [[ $mode == change ]]; then default=""; fi
@@ -270,15 +271,14 @@ seedbox_ask_domain() {
     echo
     while true; do
         if [[ $mode == change ]]; then
-            ask answer 'New domain name or IP (empty to go back)' "$default"
+            ask_back answer 'New domain name or IP' "$default" || return 1
         else
-            ask answer 'Domain name or IP' "$default"
+            ask_back answer 'Domain name or IP' "$default" || return 1
         fi
         answer=${answer,,}
         answer=${answer#http://}
         answer=${answer#https://}
         answer=${answer%/}
-        if [[ -z $answer && $mode == change ]]; then return 1; fi
         if ! seedbox_is_valid_domain "$answer"; then
             warn 'Invalid domain name.'
             continue
@@ -303,7 +303,7 @@ seedbox_ask_domain() {
         say "  Let's Encrypt will not be able to issue a certificate for this name."
         say '  (after a DNS change, allow a few minutes to a few hours)'
         say '  R) Try again    C) Continue with a self-signed certificate'
-        if [[ $mode == change ]]; then say '  Q) Back, nothing is changed'; fi
+        say '  Q) Back, nothing is changed'
         ask choice 'Your choice' "R"
         case ${choice,,} in
             c)
@@ -311,7 +311,7 @@ seedbox_ask_domain() {
                 SEEDBOX_LETSENCRYPT=no
                 return 0
                 ;;
-            q) if [[ $mode == change ]]; then return 1; fi ;;
+            q) return 1 ;;
         esac
     done
 }
@@ -550,6 +550,8 @@ $(share_generate_nginx_http)
 server {
     listen 80;$ipv6_80
     server_name $SEEDBOX_DOMAIN;
+    # a link typed with http:// must not leave its token in the log either
+    access_log /var/log/nginx/access.log seedtunnel_share;
 
     # Let's Encrypt validation and renewal
     location ^~ /.well-known/acme-challenge/ {
@@ -674,6 +676,8 @@ seedbox_sshd_settings() { sshd -T -C "user=$SEEDBOX_USER,host=$1,addr=$1" 2>/dev
 # Are all the restrictions written for the account (sshd_generate_seedbox_conf)
 # in force, wherever it connects from? From the server itself, through the
 # VPN, from the Internet: a Match Address block could treat them differently.
+# The way to log in too: « keys only » must leave no password, not even
+# through keyboard-interactive, and the keys must be the ones of seedtunnel.
 seedbox_sftp_rule_applies() {
     local address settings line
     for address in 127.0.0.1 "$VPN_SUBNET.2" 203.0.113.1; do
@@ -681,9 +685,13 @@ seedbox_sftp_rule_applies() {
         grep -qxF "chrootdirectory $SEEDBOX_DATA_DIR" <<<"$settings" || return 1
         grep -q '^forcecommand internal-sftp' <<<"$settings" || return 1
         for line in 'permittty no' 'allowtcpforwarding no' 'allowagentforwarding no' \
-            'allowstreamlocalforwarding no' 'x11forwarding no' 'permittunnel no'; do
+            'allowstreamlocalforwarding no' 'x11forwarding no' 'permittunnel no' \
+            "passwordauthentication $SEEDBOX_SFTP_PASSWORD" 'kbdinteractiveauthentication no' \
+            'pubkeyauthentication yes'; do
             grep -qxF "$line" <<<"$settings" || return 1
         done
+        grep -qxF -e "authorizedkeysfile $SFTP_KEYS_DIR/%u" -e "authorizedkeysfile $SFTP_KEYS_DIR/$SEEDBOX_USER" \
+            <<<"$settings" || return 1
     done
 }
 
@@ -705,11 +713,13 @@ seedbox_user_suspend() {
     return 1
 }
 
-# Back to normal, if it was suspended by seedtunnel
+# Back to normal, if it was suspended by seedtunnel. Checked, not assumed:
+# status 1 if the account is still expired afterwards.
 seedbox_user_resume() {
     local user=${1:-$SEEDBOX_USER}
     if [[ $(getent shadow "$user" 2>/dev/null | cut -d: -f8 || true) == 1 ]]; then
         usermod --expiredate '' "$user" >>"$APP_LOG" 2>&1 || true
+        [[ $(getent shadow "$user" 2>/dev/null | cut -d: -f8 || true) != 1 ]] || return 1
     fi
 }
 
@@ -719,7 +729,7 @@ seedbox_user_resume() {
 seedbox_rename_account() {
     local old=$1 new=$2 group=0
     if ! seedbox_user_suspend "$old"; then
-        seedbox_user_resume "$old"
+        seedbox_user_resume "$old" || true
         die 'Cannot suspend %s before renaming it (details in %s): nothing was changed.' "$old" "$APP_LOG"
     fi
     usermod --login "$new" "$old" >>"$APP_LOG" 2>&1 || seedbox_rename_undo "$old" "$new" 0 0
@@ -737,11 +747,15 @@ seedbox_rename_account() {
 # rename failed: the old names come back, then stop
 seedbox_rename_undo() {
     local old=$1 new=$2
-    if (($4)); then groupmod --new-name "$old" "$new" >>"$APP_LOG" 2>&1 || true; fi
+    if (($4)) && ! groupmod --new-name "$old" "$new" >>"$APP_LOG" 2>&1; then
+        # the account stays suspended: half renamed, it must not be used
+        if (($3)); then usermod --login "$old" "$new" >>"$APP_LOG" 2>&1 || true; fi
+        die 'Renaming %s to %s failed, and so did putting the old name of the group back (details in %s). The account stays suspended. By hand:  groupmod --new-name %s %s ; usermod --login %s %s ; seedtunnel apply' "$old" "$new" "$APP_LOG" "$old" "$new" "$old" "$new"
+    fi
     if (($3)) && ! usermod --login "$old" "$new" >>"$APP_LOG" 2>&1; then
         die 'Renaming %s to %s failed, and so did putting the old name back (details in %s). By hand:  usermod --login %s %s' "$old" "$new" "$APP_LOG" "$old" "$new"
     fi
-    seedbox_user_resume "$old"
+    seedbox_user_resume "$old" || true
     die 'Renaming %s to %s failed (details in %s): the account keeps its name %s.' "$old" "$new" "$APP_LOG" "$old"
 }
 
@@ -753,6 +767,7 @@ Match User $SEEDBOX_USER
     ForceCommand internal-sftp -u 0002
     AuthorizedKeysFile $SFTP_KEYS_DIR/%u
     PasswordAuthentication $SEEDBOX_SFTP_PASSWORD
+    KbdInteractiveAuthentication no
     PermitTTY no
     AllowTcpForwarding no
     AllowAgentForwarding no
@@ -793,7 +808,7 @@ seedbox_apply_sftp() {
     # Match block before ours…)? If not, the account is suspended: no access
     # at all rather than an account without its restrictions.
     if seedbox_sftp_rule_applies; then
-        seedbox_user_resume
+        seedbox_user_resume || die 'The account %s could not be reactivated (details in %s): it stays suspended. By hand:  usermod --expiredate "" %s' "$SEEDBOX_USER" "$APP_LOG" "$SEEDBOX_USER"
     elif seedbox_user_suspend; then
         die 'The SFTP restrictions (chroot, SFTP only, no tunnel) do not apply to %s: the account is suspended. /etc/ssh/sshd_config must contain "Include /etc/ssh/sshd_config.d/*.conf" before any Match block; then run:  seedtunnel apply' "$SEEDBOX_USER"
     else
@@ -1071,8 +1086,12 @@ seedbox_sftp_config() {
 # --- SSH keys for SFTP ---------------------------------------------------------------
 
 # Adds the valid public keys of a file (- = standard input), without duplicates
+# The keys are all checked first, then added in one go: one invalid key, and
+# none is added.
 sftp_keys_import() {
     local source=$1 line tmp count=0 file="$SFTP_KEYS_DIR/$SEEDBOX_USER"
+    local -a keys=()
+    local -A seen=()
     install -d -m 755 "$SFTP_KEYS_DIR"
     if [[ ! -e $file ]]; then install -m 644 /dev/null "$file"; fi
     tmp=$(mktemp)
@@ -1084,17 +1103,75 @@ sftp_keys_import() {
             rm -f "$tmp"
             die 'Invalid SSH key: %s…' "${line:0:40}"
         fi
-        if ! grep -qxF -- "$line" "$file"; then
-            printf '%s\n' "$line" >>"$file"
-            count=$((count + 1))
-        fi
+        if [[ -z ${seen[$line]-} ]] && ! grep -qxF -- "$line" "$file"; then keys+=("$line"); fi
+        seen[$line]=1
     done <"$tmp"
     rm -f "$tmp"
+    count=${#keys[@]}
+    if ((count)); then
+        sftp_keys_write "$(cat -- "$file")" "${keys[@]}" || die 'Cannot write %s (disk full?).' "$file"
+    fi
     if ((count)); then
         ok '%s SSH key(s) added for %s.' "$count" "$SEEDBOX_USER"
     else
         ok 'Key(s) already saved for %s.' "$SEEDBOX_USER"
     fi
+}
+
+# sftp_keys_write CONTENT [KEY…] — the file of the keys becomes CONTENT, plus
+# the KEYs, replaced in one go: written next to it (same disk), readable by
+# sshd (644), then renamed. If writing fails, the file stays as it was.
+sftp_keys_write() {
+    local content=$1 file="$SFTP_KEYS_DIR/$SEEDBOX_USER" tmp
+    shift
+    tmp=$(mktemp "$SFTP_KEYS_DIR/.keys.XXXXXX") || return 1
+    if ! {
+        if [[ -n $content ]]; then printf '%s\n' "$content"; fi
+        if (($#)); then printf '%s\n' "$@"; fi
+    } >"$tmp" || ! chmod 644 "$tmp" || ! mv -f "$tmp" "$file"; then
+        rm -f "$tmp"
+        return 1
+    fi
+}
+
+# Number of SSH keys saved for the SFTP account
+sftp_keys_count() {
+    local count=0 line
+    [[ -s $SFTP_KEYS_DIR/$SEEDBOX_USER ]] || {
+        echo 0
+        return 0
+    }
+    while IFS= read -r line; do
+        [[ -z $line || $line == \#* ]] || count=$((count + 1))
+    done <"$SFTP_KEYS_DIR/$SEEDBOX_USER"
+    echo "$count"
+}
+
+# Menu questions: asked again when the answer is wrong. Status 1: back.
+sftp_ask_public_key() {
+    local _key_var=$1 _key
+    while true; do
+        ask_back _key 'Public key' "" || return 1
+        if ssh-keygen -l -f - <<<"$_key" &>/dev/null; then break; fi
+        warn 'Invalid SSH key: %s…' "${_key:0:40}"
+    done
+    printf -v "$_key_var" '%s' "$_key"
+}
+
+sftp_ask_key_number() {
+    local _number_var=$1 _number count
+    count=$(sftp_keys_count)
+    if ((count == 0)); then
+        warn 'No SSH key saved for %s.' "$SEEDBOX_USER"
+        pause
+        return 1
+    fi
+    while true; do
+        ask_back _number 'Number of the key to remove' "" || return 1
+        if [[ $_number =~ ^[0-9]+$ ]] && ((_number >= 1 && _number <= count)); then break; fi
+        warn 'Key number %s not found.' "$_number"
+    done
+    printf -v "$_number_var" '%s' "$_number"
 }
 
 sftp_keys_list() {
@@ -1128,7 +1205,10 @@ sftp_keys_remove() {
         rm -f "$tmp"
         die 'Key number %s not found.' "$number"
     fi
-    cat "$tmp" >"$file"
+    if ! sftp_keys_write "$(cat -- "$tmp")"; then
+        rm -f "$tmp"
+        die 'Cannot write %s (disk full?).' "$file"
+    fi
     rm -f "$tmp"
     if [[ $SEEDBOX_SFTP_PASSWORD == no ]] && ! sftp_has_keys; then
         SEEDBOX_SFTP_PASSWORD=yes
@@ -1208,21 +1288,21 @@ sftp_keys_menu() {
         ask choice 'Your choice' ""
         case ${choice,,} in
             1)
-                ask answer 'Public key' ""
-                if [[ -n $answer ]]; then
+                if sftp_ask_public_key answer; then
                     sftp_keys_import - <<<"$answer"
                     seedbox_apply_sftp
+                    pause
                 fi
-                pause
                 ;;
             2)
                 sftp_key_generate
                 pause
                 ;;
             3)
-                ask answer 'Number of the key to remove' ""
-                if [[ -n $answer ]]; then sftp_keys_remove "$answer"; fi
-                pause
+                if sftp_ask_key_number answer; then
+                    sftp_keys_remove "$answer"
+                    pause
+                fi
                 ;;
             4)
                 if [[ $SEEDBOX_SFTP_PASSWORD == yes ]]; then seedbox_set_sftp_password off; else seedbox_set_sftp_password on; fi
@@ -1235,8 +1315,33 @@ sftp_keys_menu() {
 
 # --- Actions ---------------------------------------------------------------------------
 
+# The questions of the installation. Status 1: the user went back.
+seedbox_install_questions() {
+    local ip=$1 certificate
+    seedbox_ask_user "" || return 1
+    SEEDBOX_USER=$OPT_NEW_USER
+    echo
+    seedbox_ask_domain "$ip" || return 1
+    echo
+    while true; do
+        ask_back SEEDBOX_DATA_DIR 'Data folder' "$SEEDBOX_DATA_DIR" || return 1
+        if seedbox_check_data_dir "$SEEDBOX_DATA_DIR"; then break; fi
+    done
+    certificate="Let's Encrypt"
+    if [[ $SEEDBOX_LETSENCRYPT_SERVER == staging ]]; then certificate=$(t "Let's Encrypt (test server)"); fi
+    if [[ $SEEDBOX_LETSENCRYPT == no ]]; then certificate=$(t 'self-signed'); fi
+    echo
+    say 'Summary:'
+    say '  User        : %s' "$SEEDBOX_USER"
+    say '  Address     : %s' "https://$SEEDBOX_DOMAIN/"
+    say '  Certificate : %s' "$certificate"
+    say '  Data        : %s' "$SEEDBOX_DATA_DIR"
+    echo
+    confirm 'Start the installation?' y
+}
+
 seedbox_install_interactive() {
-    local ip certificate
+    local ip
     banner
     section 'SEEDBOX INSTALLATION'
     seedbox_check_web_ports
@@ -1250,29 +1355,11 @@ seedbox_install_interactive() {
     SEEDBOX_DATA_DIR=$(seedbox_default_data_dir)
     if ((OPT_STAGING)); then SEEDBOX_LETSENCRYPT_SERVER=staging; fi
     echo
-    while true; do
-        seedbox_ask_user ""
-        SEEDBOX_USER=$OPT_NEW_USER
-        echo
-        seedbox_ask_domain "$ip"
-        echo
-        while true; do
-            ask SEEDBOX_DATA_DIR 'Data folder' "$SEEDBOX_DATA_DIR"
-            if seedbox_check_data_dir "$SEEDBOX_DATA_DIR"; then break; fi
-        done
-        certificate="Let's Encrypt"
-        if [[ $SEEDBOX_LETSENCRYPT_SERVER == staging ]]; then certificate=$(t "Let's Encrypt (test server)"); fi
-        if [[ $SEEDBOX_LETSENCRYPT == no ]]; then certificate=$(t 'self-signed'); fi
-        echo
-        say 'Summary:'
-        say '  User        : %s' "$SEEDBOX_USER"
-        say '  Address     : %s' "https://$SEEDBOX_DOMAIN/"
-        say '  Certificate : %s' "$certificate"
-        say '  Data        : %s' "$SEEDBOX_DATA_DIR"
-        echo
-        if confirm 'Start the installation?' y; then break; fi
-        echo
-    done
+    # going back (empty answer, or « no » at the end): the seedbox is not installed
+    if ! seedbox_install_questions "$ip"; then
+        SEEDBOX_NEW_PASSWORD=""
+        return 0
+    fi
     echo
     seedbox_apply
     echo
@@ -1365,10 +1452,16 @@ seedbox_set_credentials() {
     seedbox_apply
 }
 
+# Status 1: the user went back, nothing changed
 seedbox_change_credentials() {
     banner
     section 'USER AND PASSWORD'
-    seedbox_ask_user "$SEEDBOX_USER"
+    seedbox_ask_user "$SEEDBOX_USER" || return 1
+    echo
+    if ! confirm "$(t 'Save the user %s with this password?' "$OPT_NEW_USER")" y; then
+        SEEDBOX_NEW_PASSWORD=""
+        return 1
+    fi
     echo
     seedbox_set_credentials "$OPT_NEW_USER"
     echo
@@ -1422,10 +1515,7 @@ seedbox_change_domain() {
     ip=$(public_ipv4)
     echo "${ip:-$(t 'not found')}"
     echo
-    if ! seedbox_ask_domain "$ip" change; then
-        say 'Nothing changed.'
-        return 0
-    fi
+    seedbox_ask_domain "$ip" change || return 1
     if ((OPT_STAGING)); then server=staging; else server=production; fi
     echo
     if ((had_letsencrypt)); then
@@ -1445,8 +1535,7 @@ seedbox_change_domain() {
             SEEDBOX_DOMAIN=$old_domain
             SEEDBOX_LETSENCRYPT=$old_letsencrypt
             SEEDBOX_LETSENCRYPT_SERVER=$old_server
-            say 'Nothing changed.'
-            return 0
+            return 1
         fi
         echo
     fi
@@ -1482,11 +1571,13 @@ fail2ban_bans_menu() {
     section 'BANNED IP ADDRESSES (fail2ban)'
     fail2ban_bans_print
     echo
-    ask ip 'IP to unban (empty to go back)' ""
-    if [[ -n $ip ]]; then
-        fail2ban_unban "$ip"
-        pause
-    fi
+    while true; do
+        ask_back ip 'IP to unban' "" || return 0
+        if [[ $ip =~ ^[0-9A-Fa-f.:]+$ ]]; then break; fi
+        warn 'Invalid IP address: "%s"' "$ip"
+    done
+    fail2ban_unban "$ip"
+    pause
 }
 
 seedbox_restart() {
@@ -1606,14 +1697,16 @@ seedbox_menu() {
         ask choice 'Your choice' ""
         case ${choice,,} in
             1)
-                seedbox_change_credentials
-                echo
-                pause
+                if seedbox_change_credentials; then
+                    echo
+                    pause
+                fi
                 ;;
             2)
-                seedbox_change_domain
-                echo
-                pause
+                if seedbox_change_domain; then
+                    echo
+                    pause
+                fi
                 ;;
             3) sftp_keys_menu ;;
             4)

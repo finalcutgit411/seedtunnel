@@ -372,26 +372,21 @@ vpn_pick_client() {
         printf '  %2d) %s\n' "$_pick_index" "$_pick_name"
     done
     echo
-    ask _pick_answer "$(t '%s (number or name, empty to cancel)' "$_pick_question")" ""
-    [[ -n $_pick_answer ]] || return 1
-    if [[ ! $_pick_answer =~ ^[A-Za-z0-9_-]{1,15}$ ]]; then
-        warn 'Invalid name.'
-        return 1
-    fi
-    if [[ $_pick_answer =~ ^[0-9]+$ ]] && ((_pick_answer >= 1 && _pick_answer <= ${#_pick_names[@]})); then
-        _pick_answer=${_pick_names[_pick_answer - 1]}
-    fi
-    if [[ ! -e $VPN_CLIENTS_DIR/$_pick_answer.env ]]; then
+    while true; do
+        ask_back _pick_answer "$(t '%s (number or name)' "$_pick_question")" "" || return 1
+        if [[ $_pick_answer =~ ^[0-9]+$ ]] && ((_pick_answer >= 1 && _pick_answer <= ${#_pick_names[@]})); then
+            _pick_answer=${_pick_names[_pick_answer - 1]}
+        fi
+        if [[ $_pick_answer =~ ^[A-Za-z0-9_-]{1,15}$ && -e $VPN_CLIENTS_DIR/$_pick_answer.env ]]; then break; fi
         warn 'Client "%s" not found.' "$_pick_answer"
-        return 1
-    fi
+    done
     printf -v "$_pick_var" '%s' "$_pick_answer"
 }
 
 vpn_ask_client_name() {
     local _client_var=$1 _client_default=${2-} _client_name
     while true; do
-        ask _client_name 'Client name (e.g. phone, laptop)' "$_client_default"
+        ask_back _client_name 'Client name (e.g. phone, laptop)' "$_client_default" || return 1
         if ! vpn_is_valid_client_name "$_client_name"; then
             warn 'Letters, digits, - and _ only, 15 characters at most.'
         elif [[ -e $VPN_CLIENTS_DIR/$_client_name.env ]]; then
@@ -455,7 +450,7 @@ vpn_ask_dns() {
     say '  2) Cloudflare — usually the fastest'
     say '  3) Other      — type the addresses'
     while true; do
-        ask choice 'Your choice [1-3]' "1"
+        ask_back choice 'Your choice [1-3]' "1" || return 1
         case $choice in
             1)
                 VPN_DNS=$(vpn_dns_value quad9)
@@ -466,7 +461,7 @@ vpn_ask_dns() {
                 return 0
                 ;;
             3)
-                ask VPN_DNS 'DNS IP address(es), separated by commas' "$VPN_DNS"
+                ask_back VPN_DNS 'DNS IP address(es), separated by commas' "$VPN_DNS" || return 1
                 if vpn_is_valid_dns "$VPN_DNS"; then return 0; fi
                 warn 'Expected format: 9.9.9.9, 149.112.112.112'
                 ;;
@@ -474,33 +469,33 @@ vpn_ask_dns() {
     done
 }
 
-# Questions shared by the installation and the change of settings
+# Questions shared by the installation and the change of settings. Status 1:
+# the user went back (empty answer, or « no » at the end), nothing to change.
 vpn_ask_settings() {
     while true; do
-        ask VPN_PUBLIC_ADDRESS 'Public address of the server (IP or domain name)' "$VPN_PUBLIC_ADDRESS"
-        if ! vpn_is_valid_address "$VPN_PUBLIC_ADDRESS"; then
-            warn 'Invalid address.'
-            continue
-        fi
-        ask VPN_PORT 'UDP port of the VPN' "$VPN_PORT"
+        ask_back VPN_PUBLIC_ADDRESS 'Public address of the server (IP or domain name)' "$VPN_PUBLIC_ADDRESS" || return 1
+        if vpn_is_valid_address "$VPN_PUBLIC_ADDRESS"; then break; fi
+        warn 'Invalid address.'
+    done
+    while true; do
+        ask_back VPN_PORT 'UDP port of the VPN' "$VPN_PORT" || return 1
         if ! is_valid_port "$VPN_PORT"; then
             warn 'Invalid port (1 to 65535).'
-            continue
-        fi
-        if ! vpn_port_is_free "$VPN_PORT"; then
+        elif ! vpn_port_is_free "$VPN_PORT"; then
             warn 'UDP port %s is already used on this server.' "$VPN_PORT"
-            continue
+        else
+            break
         fi
-        vpn_ask_dns
-        echo
-        say 'Summary:'
-        say '  Address : %s' "$VPN_PUBLIC_ADDRESS"
-        say '  Port    : %s/udp' "$VPN_PORT"
-        say '  DNS     : %s' "$VPN_DNS"
-        say '  Out     : interface %s' "${VPN_OUT_INTERFACE:-?}"
-        echo
-        if confirm 'Is that right?' y; then return 0; fi
     done
+    vpn_ask_dns || return 1
+    echo
+    say 'Summary:'
+    say '  Address : %s' "$VPN_PUBLIC_ADDRESS"
+    say '  Port    : %s/udp' "$VPN_PORT"
+    say '  DNS     : %s' "$VPN_DNS"
+    say '  Out     : interface %s' "${VPN_OUT_INTERFACE:-?}"
+    echo
+    confirm 'Is that right?' y
 }
 
 vpn_install_interactive() {
@@ -519,9 +514,10 @@ vpn_install_interactive() {
     fi
     VPN_OUT_INTERFACE=$(default_interface)
     echo
-    vpn_ask_settings
+    # going back: the VPN is not installed
+    vpn_ask_settings || return 0
     echo
-    vpn_ask_client_name first "client1"
+    vpn_ask_client_name first "client1" || return 0
     echo
     vpn_apply
     vpn_add_client "$first"
@@ -566,7 +562,7 @@ vpn_change_settings() {
     section 'VPN SETTINGS'
     warn 'After a change, every client will have to import its configuration again.'
     echo
-    vpn_ask_settings
+    vpn_ask_settings || return 1
     vpn_apply
     ok 'Settings saved. Show the clients again to get their new QR codes.'
 }
@@ -579,6 +575,11 @@ vpn_uninstall() {
     echo
     systemctl disable --now "wg-quick@$VPN_INTERFACE" >>"$APP_LOG" 2>&1 || true
     nft delete table ip seedtunnel >>"$APP_LOG" 2>&1 || true
+    # A running interface keeps the clients it knows, files or not: the keys are
+    # only deleted once the VPN is really stopped
+    if ip link show "$VPN_INTERFACE" &>/dev/null || nft list table ip seedtunnel &>/dev/null; then
+        die 'The VPN could not be stopped (details in %s): nothing was deleted. Try again, or:  systemctl stop wg-quick@%s' "$APP_LOG" "$VPN_INTERFACE"
+    fi
     rm -rf "${VPN_STATE_DIR:?}" "$VPN_CONF_FILE" "$WIREGUARD_CONF" "$VPN_SYSCTL_FILE"
     net_hardening_cleanup
     apt_purge wireguard-tools qrencode
@@ -618,19 +619,21 @@ vpn_menu() {
                 section 'ADD A CLIENT'
                 if (($(vpn_count_clients) >= VPN_MAX_CLIENTS)); then
                     warn 'Maximum number of clients reached (%s).' "$VPN_MAX_CLIENTS"
-                else
-                    vpn_ask_client_name name ""
+                    pause
+                elif vpn_ask_client_name name ""; then
                     vpn_add_client "$name"
                     pause
                     vpn_show_client "$name"
+                    pause
                 fi
-                pause
                 ;;
             2)
                 banner
                 section 'SHOW A CLIENT'
-                if vpn_pick_client name "$(t 'Client to show')"; then vpn_show_client "$name"; fi
-                pause
+                if vpn_pick_client name "$(t 'Client to show')"; then
+                    vpn_show_client "$name"
+                    pause
+                fi
                 ;;
             3)
                 banner
@@ -638,10 +641,11 @@ vpn_menu() {
                 if ! seedbox_installed; then
                     warn 'Links go through the HTTPS site of the seedbox, which is not installed:'
                     warn 'use "Show a client" instead (QR code, or content to copy and paste).'
+                    pause
                 elif vpn_pick_client name "$(t 'Client to send')"; then
                     vpn_share_client "$name"
+                    pause
                 fi
-                pause
                 ;;
             4)
                 banner
@@ -649,8 +653,8 @@ vpn_menu() {
                 if vpn_pick_client name "$(t 'Client to revoke')" \
                     && confirm "$(t 'Revoke "%s" for good?' "$name")" n; then
                     vpn_remove_client "$name"
+                    pause
                 fi
-                pause
                 ;;
             5)
                 banner
@@ -660,8 +664,7 @@ vpn_menu() {
                 pause
                 ;;
             6)
-                vpn_change_settings
-                pause
+                if vpn_change_settings; then pause; fi
                 ;;
             7)
                 echo

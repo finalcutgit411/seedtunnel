@@ -90,14 +90,11 @@ fr: Rien à sauvegarder : ni VPN, ni seedbox, ni pare-feu installés.
 en: Passphrase file not found: %s
 fr: Fichier de passphrase introuvable : %s
 
-en: Passphrase of the backup:
-fr: Passphrase de la sauvegarde :
+en: Passphrase of the backup (empty = back):
+fr: Passphrase de la sauvegarde (vide = retour) :
 
 en: Type it again:
 fr: Confirmez-la :
-
-en: The two entries differ.
-fr: Les deux saisies sont différentes.
 
 en: Without a terminal, give the passphrase with --passphrase-file FILE.
 fr: Sans terminal, indiquez la passphrase avec --passphrase-file FICHIER.
@@ -255,6 +252,18 @@ fr: Anciens réglages mis de côté dans %s
 en: Restore finished.
 fr: Restauration terminée.
 
+en: %s already exists: choose another name, or delete it first.
+fr: %s existe déjà : choisissez un autre nom, ou supprimez-le d'abord.
+
+en: Cannot save the passphrase (disk full? details in %s): the weekly backup was not changed.
+fr: Impossible d'enregistrer la passphrase (disque plein ? détails dans %s) : la sauvegarde hebdomadaire n'a pas été modifiée.
+
+en: Archive refused: "%s" is a link or a special file
+fr: Archive refusée : « %s » est un lien ou un fichier spécial
+
+en: Archive refused: %s holds something else than settings (it could run commands)
+fr: Archive refusée : %s contient autre chose que des réglages (cela pourrait lancer des commandes)
+
 # --- Bibliothèque commune ---------------------------------------------------------------
 
 en: WireGuard VPN + seedbox
@@ -394,6 +403,12 @@ fr: o
 
 en: Restart the server now?
 fr: Redémarrer le serveur maintenant ?
+
+en: Kept: %s (cannot check what removing them would take, details in %s).
+fr: Conservés : %s (impossible de vérifier ce que leur suppression emporterait, détails dans %s).
+
+en: Kept: removing %s would also remove %s, which seedtunnel did not install.
+fr: Conservés : supprimer %s supprimerait aussi %s, que seedtunnel n'a pas installé.
 
 # --- Protection du disque -----------------------------------------------------------------
 
@@ -725,6 +740,12 @@ fr: Sans terminal :  seedtunnel firewall enable --yes
 en: Usage: seedtunnel firewall enable|disable|status
 fr: Utilisation : seedtunnel firewall enable|disable|status
 
+en: The automatic undo could not be cancelled: the previous rules are back, nothing was kept (details in %s).
+fr: Le retour arrière automatique n'a pas pu être annulé : les règles précédentes sont revenues, rien n'a été conservé (détails dans %s).
+
+en: The firewall rules could not be removed (details in %s): the firewall stays on, nothing was deleted.
+fr: Les règles du pare-feu n'ont pas pu être retirées (détails dans %s) : le pare-feu reste actif, rien n'a été supprimé.
+
 # --- Langue ------------------------------------------------------------------------------
 
 en: Language: %s   (change it with: seedtunnel language en|fr)
@@ -777,8 +798,8 @@ fr: « %s » existe déjà sur ce système : choisissez un autre nom.
 en: Domain name or IP
 fr: Nom de domaine ou IP
 
-en: New domain name or IP (empty to go back)
-fr: Nouveau nom de domaine ou IP (vide pour revenir)
+en: New domain name or IP
+fr: Nouveau nom de domaine ou IP
 
 en: Invalid domain name.
 fr: Nom de domaine invalide.
@@ -1104,9 +1125,6 @@ fr: Actuellement : %s (certificat %s)
 en:   valid until %s, renewed automatically
 fr:   valable jusqu'au %s, renouvelé automatiquement
 
-en: Nothing changed.
-fr: Rien n'a été changé.
-
 en: Nothing to change: %s keeps its certificate.
 fr: Rien à changer : %s garde son certificat.
 
@@ -1137,8 +1155,8 @@ fr: Débannissement de %s
 en: BANNED IP ADDRESSES (fail2ban)
 fr: ADRESSES IP BANNIES (fail2ban)
 
-en: IP to unban (empty to go back)
-fr: IP à débannir (vide pour revenir)
+en: IP to unban
+fr: IP à débannir
 
 en: Restarting %s
 fr: Redémarrage de %s
@@ -1221,6 +1239,12 @@ fr: Utilisation : seedtunnel seedbox sftp-key add|new|list|remove
 en: Unknown command: seedbox %s   (help: seedtunnel help)
 fr: Commande inconnue : seedbox %s   (aide : seedtunnel help)
 
+en: Renaming %s to %s failed, and so did putting the old name of the group back (details in %s). The account stays suspended. By hand:  groupmod --new-name %s %s ; usermod --login %s %s ; seedtunnel apply
+fr: Le renommage de %s en %s a échoué, et la remise de l'ancien nom du groupe aussi (détails dans %s). Le compte reste suspendu. À la main :  groupmod --new-name %s %s ; usermod --login %s %s ; seedtunnel apply
+
+en: The account %s could not be reactivated (details in %s): it stays suspended. By hand:  usermod --expiredate "" %s
+fr: Le compte %s n'a pas pu être réactivé (détails dans %s) : il reste suspendu. À la main :  usermod --expiredate "" %s
+
 # --- Liens de téléchargement ----------------------------------------------------------------
 
 en: Download links go through the HTTPS site of the seedbox, which is not installed.\n  %s
@@ -1240,6 +1264,9 @@ fr: Lien de téléchargement (%sune seule fois, pendant %s minutes%s) :
 
 en: Self-signed certificate: the browser shows a warning. Before accepting it, check that the certificate it shows has this SHA-256 fingerprint:
 fr: Certificat auto-signé : le navigateur affiche une alerte. Avant de l'accepter, vérifiez que le certificat qu'il montre a cette empreinte SHA-256 :
+
+en: Cannot prepare the link (disk full? details in %s).
+fr: Impossible de préparer le lien (disque plein ? détails dans %s).
 
 # --- Mise à jour -------------------------------------------------------------------------
 
@@ -1299,6 +1326,24 @@ fr: Configuration à jour (seedtunnel %s).
 
 en: Nothing to apply: neither VPN, nor seedbox, nor firewall.
 fr: Rien à appliquer : ni VPN, ni seedbox, ni pare-feu.
+
+en: %s exists: an earlier update did not finish. If seedtunnel works, delete it (rm -rf %s), then update again.
+fr: %s existe : une mise à jour précédente ne s'est pas terminée. Si seedtunnel fonctionne, supprimez-le (rm -rf %s), puis relancez la mise à jour.
+
+en: The new version could not be put in place: version %s kept (details in %s).
+fr: La nouvelle version n'a pas pu être mise en place : version %s conservée (détails dans %s).
+
+en: The new version could not be put in place, nor the previous one put back (details in %s). By hand:  mv %s %s
+fr: La nouvelle version n'a pas pu être mise en place, ni la précédente remise (détails dans %s). À la main :  mv %s %s
+
+en: Version %s could not apply the configuration, and version %s could not be put back (details in %s). By hand:  mv %s %s.failed ; mv %s %s ; seedtunnel apply
+fr: La version %s n'a pas pu appliquer la configuration, et la version %s n'a pas pu être remise (détails dans %s). À la main :  mv %s %s.failed ; mv %s %s ; seedtunnel apply
+
+en: Update cancelled: the files of version %s are back, but putting the configuration back into service failed too (details in %s). Run « seedtunnel doctor », then « seedtunnel apply ».
+fr: Mise à jour annulée : les fichiers de la version %s sont revenus, mais la remise en service de la configuration a échoué elle aussi (détails dans %s). Lancez « seedtunnel doctor », puis « seedtunnel apply ».
+
+en: Version %s could not apply the configuration, and git could not go back to version %s (details in %s). By hand:  git -C %s checkout %s ; seedtunnel apply
+fr: La version %s n'a pas pu appliquer la configuration, et git n'a pas pu revenir à la version %s (détails dans %s). À la main :  git -C %s checkout %s ; seedtunnel apply
 
 # --- VPN ---------------------------------------------------------------------------------
 
@@ -1365,11 +1410,8 @@ fr: Ce fichier contient la clé secrète de « %s » : supprimez-le une fois imp
 en: No client yet.
 fr: Aucun client pour l'instant.
 
-en: %s (number or name, empty to cancel)
-fr: %s (numéro ou nom, vide pour annuler)
-
-en: Invalid name.
-fr: Nom invalide.
+en: %s (number or name)
+fr: %s (numéro ou nom)
 
 en: Client "%s" not found.
 fr: Client « %s » introuvable.
@@ -1655,3 +1697,12 @@ fr: La restauration ne s'est pas terminée (détails dans %s). Vos réglages pr�
 
 en: Certificate served for %s not checked: HTTPS unreachable through the public IP (curl code %s)
 fr: Certificat servi pour %s non vérifié : HTTPS injoignable par l'IP publique (code curl %s)
+
+en: %s (empty = back)
+fr: %s (vide = retour)
+
+en: Save the user %s with this password?
+fr: Enregistrer l'utilisateur %s avec ce mot de passe ?
+
+en: The VPN could not be stopped (details in %s): nothing was deleted. Try again, or:  systemctl stop wg-quick@%s
+fr: Le VPN n'a pas pu être arrêté (détails dans %s) : rien n'a été supprimé. Réessayez, ou :  systemctl stop wg-quick@%s

@@ -80,21 +80,29 @@ backup_require_something() {
 
 # backup_read_passphrase 1|0 — 1: new passphrase (typed twice, 12 characters
 # at least). Read from --passphrase-file, from the terminal, or (backups only)
-# from the passphrase saved for the weekly backups.
+# from the passphrase saved for the weekly backups. In a terminal, a wrong
+# entry is asked again, and an empty one goes back: status 1.
 backup_read_passphrase() {
     local again
     if [[ -n $OPT_PASSPHRASE_FILE ]]; then
         [[ -r $OPT_PASSPHRASE_FILE ]] || die 'Passphrase file not found: %s' "$OPT_PASSPHRASE_FILE"
         secret_file_check "$OPT_PASSPHRASE_FILE"
         IFS= read -r BACKUP_PASSPHRASE <"$OPT_PASSPHRASE_FILE" || true
-    elif [[ -t 0 ]]; then
-        IFS= read -r -s -p "$(t 'Passphrase of the backup:') " BACKUP_PASSPHRASE || exit 130
-        echo
-        if (($1)); then
+    elif stdin_is_terminal; then
+        while true; do
+            IFS= read -r -s -p "$(t 'Passphrase of the backup (empty = back):') " BACKUP_PASSPHRASE || exit 130
+            echo
+            [[ -n $BACKUP_PASSPHRASE ]] || return 1
+            if ! (($1)); then break; fi
+            if ((${#BACKUP_PASSPHRASE} < 12)); then
+                warn 'Passphrase: at least 12 characters.'
+                continue
+            fi
             IFS= read -r -s -p "$(t 'Type it again:') " again || exit 130
             echo
-            [[ $BACKUP_PASSPHRASE == "$again" ]] || die 'The two entries differ.'
-        fi
+            if [[ $BACKUP_PASSPHRASE == "$again" ]]; then break; fi
+            warn 'The two entries differ, try again.'
+        done
     elif (($1)) && [[ -r $BACKUP_PASSPHRASE_FILE ]]; then
         IFS= read -r BACKUP_PASSPHRASE <"$BACKUP_PASSPHRASE_FILE" || true
     else
@@ -110,18 +118,65 @@ backup_read_passphrase() {
 # never an existing file or link), checked by decrypting it, and only renamed
 # once complete: a backup that fails never becomes « the latest backup ».
 backup_create_archive() {
-    local out=$1 partial
+    local out=$1 folder partial marker attempt changed
     shift
-    partial=$(mktemp "$(dirname -- "$out")/.seedtunnel-backup.XXXXXX") || return 1
-    if tar -czf - --numeric-owner -C / "$@" \
-        | openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt -pass fd:3 -out "$partial" 3<<<"$BACKUP_PASSPHRASE" \
-        && openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass fd:3 -in "$partial" 3<<<"$BACKUP_PASSPHRASE" \
-        | tar -tzf - >/dev/null; then
-        mv -f "$partial" "$out"
-    else
+    folder=$(dirname -- "$out")
+    # A setting changed while the archive was written (a restore, certbot,
+    # an apply…): it is made again, 3 times at most. An archive mixing two
+    # states of the settings is never kept.
+    for attempt in 1 2 3; do
+        marker=$(mktemp "$folder/.seedtunnel-mark.XXXXXX") || return 1
+        # dated one second back: file times move by steps of a few
+        # milliseconds, a change in the same step would not look newer
+        touch -d '1 second ago' "$marker"
+        partial=$(mktemp "$folder/.seedtunnel-backup.XXXXXX") || {
+            rm -f "$marker"
+            return 1
+        }
+        if ! tar -czf - --numeric-owner -C / "$@" \
+            | openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt -pass fd:3 -out "$partial" 3<<<"$BACKUP_PASSPHRASE" \
+            || ! openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass fd:3 -in "$partial" 3<<<"$BACKUP_PASSPHRASE" \
+            | tar -tzf - >/dev/null; then
+            rm -f "$partial" "$marker"
+            return 1
+        fi
+        if ! changed=$(backup_settings_changed_since "$marker" "$@"); then
+            rm -f "$partial" "$marker"
+            return 1
+        fi
+        rm -f "$marker"
+        if [[ -z $changed ]]; then
+            # « ln » refuses an existing name: an older backup is never replaced
+            if ln -- "$partial" "$out"; then
+                rm -f "$partial"
+                return 0
+            fi
+            rm -f "$partial"
+            return 1
+        fi
+        printf 'backup, attempt %s: %s changed meanwhile, made again\n' "$attempt" "$changed" >>"$APP_LOG"
         rm -f "$partial"
-        return 1
-    fi
+        # time for the change to end
+        sleep 2
+    done
+    echo "backup: the settings kept changing, no archive kept" >>"$APP_LOG"
+    return 1
+}
+
+# backup_settings_changed_since MARKER PATH… — the first file or folder of the
+# settings saved (not the state of Transmission, which changes all the time)
+# changed after MARKER was created. The change time (ctime) is used: « cp -a »
+# keeps the modification time, not that one. A file deleted or renamed changes
+# the folder it was in. Status 1: they could not be looked at.
+backup_settings_changed_since() {
+    local marker=$1 path
+    local -a settings=()
+    shift
+    for path in "$@"; do
+        if [[ $path != *transmission-daemon* ]]; then settings+=("/$path"); fi
+    done
+    ((${#settings[@]})) || return 0
+    find "${settings[@]}" -cnewer "$marker" -print -quit 2>>"$APP_LOG"
 }
 
 # The folder of a backup must belong to root and be writable by root only:
@@ -143,7 +198,8 @@ backup_write() {
     install -d -m 700 "$BACKUP_DIR"
     backup_check_folder "$(dirname -- "$out")"
     # left by a backup interrupted the hard way (power cut)
-    find "$(dirname -- "$out")" -maxdepth 1 -name '.seedtunnel-backup.*' -mmin +1440 -delete 2>/dev/null || true
+    find "$(dirname -- "$out")" -maxdepth 1 \( -name '.seedtunnel-backup.*' -o -name '.seedtunnel-mark.*' \) \
+        -mmin +1440 -delete 2>/dev/null || true
     old_umask=$(umask)
     umask 077
     run 'Creating the encrypted archive' backup_create_archive "$out" "${paths[@]}"
@@ -176,9 +232,13 @@ backup_main() {
     section 'BACKUP'
     backup_require_something
     out=${OPT_OUTPUT_FILE:-$(backup_file_name)}
+    # an older backup is never replaced
+    if [[ -e $out || -L $out ]]; then
+        die '%s already exists: choose another name, or delete it first.' "$out"
+    fi
     text backup_contents
     echo
-    backup_read_passphrase 1
+    backup_read_passphrase 1 || return 0
     backup_write "$out"
     echo
     ok 'Backup: %s' "$out"
@@ -265,8 +325,15 @@ backup_auto_enable() {
     backup_require_something
     text backup_auto_help
     echo
-    backup_read_passphrase 1
-    (umask 077 && printf '%s\n' "$BACKUP_PASSPHRASE" >"$BACKUP_PASSPHRASE_FILE")
+    backup_read_passphrase 1 || return 1
+    # written next to it, then renamed: if writing fails, the passphrase saved
+    # before stays whole
+    if ! (umask 077 && printf '%s\n' "$BACKUP_PASSPHRASE" >"$BACKUP_PASSPHRASE_FILE.tmp") \
+        || ! mv -f "$BACKUP_PASSPHRASE_FILE.tmp" "$BACKUP_PASSPHRASE_FILE"; then
+        rm -f "$BACKUP_PASSPHRASE_FILE.tmp"
+        BACKUP_PASSPHRASE=""
+        die 'Cannot save the passphrase (disk full? details in %s): the weekly backup was not changed.' "$APP_LOG"
+    fi
     BACKUP_PASSPHRASE=""
     backup_auto_install_units
     ok 'Weekly backup on: the last %s are kept in %s.' "$BACKUP_KEEP" "$BACKUP_DIR"
@@ -326,7 +393,8 @@ backup_cli() {
         share) backup_share ;;
         auto)
             case ${2-} in
-                on) backup_auto_enable ;;
+                # status 1: empty passphrase, back without doing anything
+                on) backup_auto_enable || true ;;
                 off) backup_auto_disable ;;
                 run) backup_auto_run ;;
                 "" | status) backup_auto_status ;;
@@ -335,6 +403,18 @@ backup_cli() {
             ;;
         *) die 'Usage: seedtunnel backup [list|share|auto on|off|status]' ;;
     esac
+}
+
+# Path of a backup to restore, asked again while it cannot be read. Status 1:
+# back.
+backup_ask_file() {
+    local _file_var=$1 _file
+    while true; do
+        ask_back _file 'Path of the backup file' "$(backup_latest || true)" || return 1
+        if [[ -r $_file ]]; then break; fi
+        warn 'File not found: %s' "$_file"
+    done
+    printf -v "$_file_var" '%s' "$_file"
 }
 
 backup_menu() {
@@ -359,17 +439,17 @@ backup_menu() {
                 pause
                 ;;
             3)
-                if backup_auto_enabled; then backup_auto_disable; else backup_auto_enable; fi
-                pause
+                if backup_auto_enabled; then
+                    backup_auto_disable
+                    pause
+                elif backup_auto_enable; then
+                    pause
+                fi
                 ;;
             4)
                 backup_list
                 echo
-                ask file 'Path of the backup file' "$(backup_latest || true)"
-                if [[ -n $file ]]; then
-                    restore_main "$file"
-                    pause
-                fi
+                if backup_ask_file file && restore_main "$file"; then pause; fi
                 ;;
             q) return 0 ;;
         esac
@@ -407,23 +487,61 @@ restore_transmission_state() {
     ok 'List of torrents restored (%s torrent(s)).' "$count"
 }
 
+# First entry of the archive that is neither a file nor a folder (link, device,
+# hard link…), apart from the links of Let's Encrypt to its own certificates
+# (live/NAME/cert.pem → ../../archive/NAME/cert1.pem). Nothing: all fine.
+backup_unsafe_entry() {
+    local entries
+    entries=$(tar -tvzf "$1" 2>>"$APP_LOG") || return 1
+    awk '
+        { type = substr($1, 1, 1); name = $6 }
+        type == "-" || type == "d" { next }
+        type == "l" && NF == 8 && $7 == "->" &&
+            name ~ /^etc\/letsencrypt\/live\/[^\/]+\/[^\/]+$/ &&
+            $8 ~ /^\.\.\/\.\.\/archive\/[^\/]+\/[^\/]+$/ &&
+            substr($8, 15) !~ /(^|\/)\.\.?(\/|$)/ { next }
+        { print name; exit }' <<<"$entries"
+}
+
+# First settings file (read by « . ») under the folder $1 that could run
+# something. Nothing: all fine.
+backup_unsafe_state_file() {
+    local file
+    [[ -d $1 ]] || return 0
+    while IFS= read -r -d '' file; do
+        if ! state_file_is_safe "$file"; then
+            printf '%s' "$file"
+            return 0
+        fi
+    done < <(find "$1" -type f \( -name '*.conf' -o -name '*.env' -o -name '*.secrets' \) -print0)
+}
+
 restore_main() {
     local file=${1-} list bad stamp was=$INTERACTIVE
     [[ -n $file ]] || die 'Usage: seedtunnel restore FILE'
     [[ -r $file ]] || die 'File not found: %s' "$file"
     banner
     section 'RESTORE'
-    backup_read_passphrase 0
+    backup_read_passphrase 0 || return 1
     BACKUP_TMP_DIR=$(mktemp -d)
     # the decrypted archive holds secrets: deleted whatever happens (an error
     # that stops the script, Ctrl+C)
     trap 'restore_unfinished; backup_cleanup' EXIT
     trap 'exit 130' INT TERM
-    if ! openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -in "$file" -out "$BACKUP_TMP_DIR/backup.tar.gz" \
-        -pass fd:3 3<<<"$BACKUP_PASSPHRASE" 2>>"$APP_LOG"; then
-        backup_cleanup
-        die 'Cannot decrypt: wrong passphrase or damaged file.'
-    fi
+    while ! openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -in "$file" -out "$BACKUP_TMP_DIR/backup.tar.gz" \
+        -pass fd:3 3<<<"$BACKUP_PASSPHRASE" 2>>"$APP_LOG"; do
+        if [[ -n $OPT_PASSPHRASE_FILE ]] || ! stdin_is_terminal; then
+            backup_cleanup
+            die 'Cannot decrypt: wrong passphrase or damaged file.'
+        fi
+        # typed in a terminal: asked again, or back
+        warn 'Cannot decrypt: wrong passphrase or damaged file.'
+        if ! backup_read_passphrase 0; then
+            backup_cleanup
+            trap - EXIT INT TERM
+            return 1
+        fi
+    done
     BACKUP_PASSPHRASE=""
     if ! list=$(tar -tzf "$BACKUP_TMP_DIR/backup.tar.gz" 2>>"$APP_LOG"); then
         backup_cleanup
@@ -435,6 +553,24 @@ restore_main() {
         backup_cleanup
         die 'Archive refused: unexpected path "%s"' "${bad%%$'\n'*}"
     fi
+    # Only files and folders: a link could point anywhere (/etc/shadow…), and
+    # root would follow it later
+    if ! bad=$(backup_unsafe_entry "$BACKUP_TMP_DIR/backup.tar.gz"); then
+        backup_cleanup
+        die 'Unreadable archive.'
+    fi
+    if [[ -n $bad ]]; then
+        backup_cleanup
+        die 'Archive refused: "%s" is a link or a special file' "$bad"
+    fi
+    mkdir "$BACKUP_TMP_DIR/x"
+    run 'Extracting the archive' tar -xzf "$BACKUP_TMP_DIR/backup.tar.gz" --numeric-owner -C "$BACKUP_TMP_DIR/x"
+    # The settings are read by « . »: nothing in them may run a command
+    bad=$(backup_unsafe_state_file "$BACKUP_TMP_DIR/x/etc/seedtunnel")
+    if [[ -n $bad ]]; then
+        backup_cleanup
+        die 'Archive refused: %s holds something else than settings (it could run commands)' "${bad#"$BACKUP_TMP_DIR/x/"}"
+    fi
     say 'The backup contains:'
     if grep -qx 'etc/seedtunnel/vpn.conf' <<<"$list"; then say '  - the VPN and its clients'; fi
     if grep -qx 'etc/seedtunnel/seedbox.conf' <<<"$list"; then say '  - the seedbox (settings, passwords, certificates)'; fi
@@ -444,11 +580,9 @@ restore_main() {
     if ! confirm 'Restore? The current settings of seedtunnel will be replaced' n; then
         backup_cleanup
         trap - EXIT INT TERM
-        return 0
+        return 1
     fi
     echo
-    mkdir "$BACKUP_TMP_DIR/x"
-    run 'Extracting the archive' tar -xzf "$BACKUP_TMP_DIR/backup.tar.gz" --numeric-owner -C "$BACKUP_TMP_DIR/x"
     stamp=$(date +%Y%m%d-%H%M%S)
     # the list of the packages installed by seedtunnel describes this server,
     # not the one that was backed up: it stays

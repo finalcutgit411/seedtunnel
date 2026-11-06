@@ -24,7 +24,7 @@ FUNCTIONS = r"(?:t|say|section|ok|warn|err|die|run|confirm|doctor_ok|doctor_warn
 LITERAL = r"""('[^']*'|"(?:[^"\\]|\\.)*")"""
 # lookahead: calls inside other calls are found too
 CALL = re.compile(r"(?<![\w-])" + FUNCTIONS + r"\s+(?=" + LITERAL + ")")
-ASK = re.compile(r"(?<![\w-])ask\s+[A-Za-z_]+\s+(?=" + LITERAL + ")")
+ASK = re.compile(r"(?<![\w-])ask(?:_back)?\s+[A-Za-z_]+\s+(?=" + LITERAL + ")")
 TEXT_CALL = re.compile(r"(?<![\w-])text\s+([a-z_]+)")
 PLACEHOLDER = re.compile(r"%[-0-9.]*[sd]")
 

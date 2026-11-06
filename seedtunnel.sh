@@ -216,7 +216,8 @@ case ${1-} in
         ((DOCTOR_ERRORS == 0)) || exit 1
         ;;
     backup) backup_cli "${@:2}" ;;
-    restore) restore_main "${2-}" ;;
+    # status 1: empty passphrase or « no », back without doing anything
+    restore) restore_main "${2-}" || true ;;
     update) update_main ;;
     apply) apply_main ;;
     language) language_cli "${2-}" ;;

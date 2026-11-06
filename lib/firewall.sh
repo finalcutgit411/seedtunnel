@@ -130,12 +130,14 @@ EOF
 firewall_activate() {
     run 'Applying the rules' nft -f "$FIREWALL_RULES"
     pending_clear firewall
+    # noted before the service loaded at boot: if enabling it fails, the next
+    # « seedtunnel apply » puts it right (firewall_refresh)
+    FIREWALL_ENABLED=1
+    state_write "$FIREWALL_CONF_FILE" FIREWALL_ENABLED
     if write_if_changed "$FIREWALL_UNIT" 644 root:root firewall_generate_unit; then
         run 'Reloading systemd' systemctl daemon-reload
     fi
     run 'Enabling at boot' systemctl enable --now seedtunnel-firewall.service
-    FIREWALL_ENABLED=1
-    state_write "$FIREWALL_CONF_FILE" FIREWALL_ENABLED
 }
 
 # Puts the firewall back as it was before a trial: the previous rules (1) or no
@@ -256,6 +258,13 @@ firewall_enable() {
         say 'Now open a NEW SSH connection to this server, without closing this one.'
         if firewall_wait_confirmation "$start"; then
             systemctl stop "$FIREWALL_ROLLBACK_UNIT.timer" &>/dev/null || true
+            # the automatic undo must really be cancelled before the new rules
+            # are kept: otherwise it would put the old ones back later
+            if systemctl is-active --quiet "$FIREWALL_ROLLBACK_UNIT.timer"; then
+                firewall_undo "$was_on" || true
+                rm -f "$FIREWALL_CANDIDATE"
+                die 'The automatic undo could not be cancelled: the previous rules are back, nothing was kept (details in %s).' "$APP_LOG"
+            fi
         else
             echo
             if ! firewall_undo "$was_on"; then
@@ -284,8 +293,12 @@ firewall_disable() {
     banner
     section 'FIREWALL'
     if ! confirm 'Turn the firewall off?' n; then return 0; fi
-    systemctl disable --now seedtunnel-firewall.service >>"$APP_LOG" 2>&1 || true
     nft delete table inet "$FIREWALL_TABLE" >>"$APP_LOG" 2>&1 || true
+    # the rules must really be gone before anything is deleted
+    if nft list table inet "$FIREWALL_TABLE" &>/dev/null; then
+        die 'The firewall rules could not be removed (details in %s): the firewall stays on, nothing was deleted.' "$APP_LOG"
+    fi
+    systemctl disable --now seedtunnel-firewall.service >>"$APP_LOG" 2>&1 || true
     rm -f "$FIREWALL_UNIT" "$FIREWALL_RULES" "$FIREWALL_CANDIDATE" "$FIREWALL_CONF_FILE"
     pending_clear firewall
     systemctl daemon-reload 2>/dev/null || true
@@ -294,12 +307,27 @@ firewall_disable() {
 }
 
 # Called after every change of the VPN or of the seedbox
+# Puts the rules in line with the settings (port of the VPN, seedbox…). The
+# new rules are applied first (nft -f takes all of them or none); the file
+# loaded at boot only changes once nftables has taken them. If they are
+# refused, nothing changed, and the next run tries again.
 firewall_refresh() {
+    local next="$FIREWALL_RULES.next"
     firewall_enabled || return 0
-    if write_if_changed "$FIREWALL_RULES" 600 root:root firewall_generate_rules; then pending_set firewall; fi
-    if pending firewall; then
-        run 'Updating the firewall' nft -f "$FIREWALL_RULES"
+    (umask 077 && firewall_generate_rules >"$next") || die 'Cannot write %s (disk full?).' "$next"
+    if cmp -s "$next" "$FIREWALL_RULES" && ! pending firewall; then
+        rm -f "$next"
+    else
+        run 'Updating the firewall' nft -f "$next"
+        mv -f "$next" "$FIREWALL_RULES"
         pending_clear firewall
+    fi
+    # on in the settings: also at boot (enabling it may have failed before)
+    if write_if_changed "$FIREWALL_UNIT" 644 root:root firewall_generate_unit; then
+        run 'Reloading systemd' systemctl daemon-reload
+    fi
+    if ! systemctl is-enabled --quiet seedtunnel-firewall.service 2>/dev/null; then
+        run 'Enabling at boot' systemctl enable seedtunnel-firewall.service
     fi
 }
 
