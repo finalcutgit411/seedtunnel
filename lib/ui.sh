@@ -300,6 +300,10 @@ ui_status_show() {
     else
         ui_status_list
     fi
+    ui_status_reset
+}
+
+ui_status_reset() {
     UI_STATUS_LEVELS=()
     UI_STATUS_LABELS=()
     UI_STATUS_STATES=()

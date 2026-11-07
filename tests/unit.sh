@@ -3069,6 +3069,227 @@ ui_choice_and_pause_answers() (
     ui_pause </dev/null
 )
 
+# --- 2.0.0: menus (lib/menu.sh, ui_action) ----------------------------------------
+
+# A server with everything in order, for the menus run in a process of their
+# own (strict): stdin gives the answers, the real « read » of the menus
+fake_server() {
+    error_trap_on
+    INTERACTIVE=1
+    UI_COLUMNS=${COLUMNS_TEST:-80}
+    i18n_load "${LANGUAGE_TEST:-en}"
+    clear() { :; }
+    vpn_load() { :; }
+    seedbox_load() { :; }
+    vpn_installed() { return 0; }
+    seedbox_installed() { return 0; }
+    systemctl() { [[ $1 != is-failed ]]; }
+    vpn_connected_count() { echo 2; }
+    vpn_count_clients() { echo 3; }
+    diskguard_stopped() { return 1; }
+    firewall_enabled() { return 0; }
+    nft() { printf 'table inet seedtunnel {\n chain input { type filter hook input priority 0; policy drop; }\n}\n'; }
+    firewall_rules_missing() { :; }
+    df() {
+        if [[ $* == *target* ]]; then printf 'Mounted on\n/\n'; else printf 'Size Avail\n%s %s\n' $((100 * 1024 ** 3)) $((40 * 1024 ** 3)); fi
+    }
+    backup_latest() { echo "$WORK/backup.enc"; }
+    touch -d '3 days ago' "$WORK/backup.enc"
+    backup_auto_enabled() { return 0; }
+    BACKUP_PASSPHRASE_FILE="$WORK/passphrase"
+    echo x >"$BACKUP_PASSPHRASE_FILE"
+    restore_interrupted() { return 1; }
+    VPN_PUBLIC_ADDRESS=203.0.113.10
+    VPN_PORT=51820
+    VPN_INTERFACE=wg0
+    SEEDBOX_DOMAIN=seed.example.net
+    SEEDBOX_DATA_DIR=$WORK
+    SEEDBOX_CERTIFICATE=letsencrypt
+    SEEDBOX_LETSENCRYPT_SERVER=production
+    SEEDBOX_USER=neil
+    UI_SERVER=vps-test
+    UI_SYSTEM="Debian 13"
+}
+
+menus() { strict "$(declare -f fake_server); fake_server; $1"; }
+
+# B or an empty answer goes back, R refreshes, a wrong answer is ignored, Q
+# leaves seedtunnel from a submenu (« See you soon! », status 0)
+menus_keys_b_r_q() (
+    local out
+    out=$(printf '1\nr\nb\n1\n\nzz\n1\nq\n' | menus 'main_menu; echo "after the menu"' 2>&1) || {
+        echo "status $?"
+        return 1
+    }
+    [[ $out == *"See you soon!"* && $out != *"after the menu"* ]] || return 1
+    # home screen 1 + VPN 1 + refresh + home 2 + VPN 2 + home 3 (zz) + home 4 + VPN 3
+    (($(grep -c "seedtunnel › VPN" <<<"$out") == 4)) || {
+        grep -c "seedtunnel › VPN" <<<"$out"
+        return 1
+    }
+)
+
+# An action that fails comes back to the menu after « Enter » (it no longer
+# leaves seedtunnel); « set -e » works inside the action; Q after it quits
+action_error_comes_back_to_menu() (
+    local out
+    out=$(printf '\n\n' | menus '
+        broken() { false; echo "went on after an error"; }
+        stopped() { die "Stopped by %s" "the test"; }
+        ui_action broken
+        echo "back 1"
+        ui_action stopped
+        echo "back 2"' 2>&1) || return 1
+    [[ $out == *"Unexpected error"* && $out != *"went on after an error"* && $out == *"back 1"* ]] || {
+        echo "$out"
+        return 1
+    }
+    [[ $out == *"Stopped by the test"* && $out == *"back 2"* ]] || return 1
+    # Q at the pause after the error: seedtunnel stops there
+    out=$(printf 'q\n' | menus 'broken() { false; }; ui_action broken; echo "not left"' 2>&1) || return 1
+    [[ $out == *"See you soon!"* && $out != *"not left"* ]]
+)
+
+# Q inside an action of a submenu: passed on up to the main menu
+quit_from_an_action() (
+    local out
+    out=$(printf '1\n5\nq\n' | menus 'vpn_status_table() { echo "TABLE"; }; main_menu; echo "after the menu"' 2>&1) || return 1
+    [[ $out == *TABLE* && $out == *"See you soon!"* && $out != *"after the menu"* ]]
+)
+
+# Each state of the home screen, with its color
+home_states() (
+    load
+    local -a levels
+    systemctl() { return 1; }
+    vpn_installed() { return 1; }
+    seedbox_installed() { return 1; }
+    home_vpn
+    home_seedbox
+    [[ ${UI_STATUS_LEVELS[*]} == "off off" && ${UI_STATUS_STATES[*]} == "missing absent" ]] || return 1
+    ui_status_reset
+    vpn_installed() { return 0; }
+    seedbox_installed() { return 0; }
+    vpn_connected_count() { echo 1; }
+    vpn_count_clients() { echo 2; }
+    diskguard_stopped() { return 1; }
+    home_vpn
+    home_seedbox
+    systemctl() { [[ $* != *nginx* ]]; }
+    home_seedbox
+    systemctl() { [[ $* != *transmission* ]]; }
+    home_seedbox
+    diskguard_stopped() { return 0; }
+    home_seedbox
+    systemctl() { return 0; }
+    diskguard_stopped() { return 1; }
+    home_vpn
+    home_seedbox
+    [[ ${UI_STATUS_LEVELS[*]} == "bad bad bad bad bad ok ok" ]] || {
+        echo "${UI_STATUS_LEVELS[*]} / ${UI_STATUS_STATES[*]}"
+        return 1
+    }
+    [[ ${UI_STATUS_STATES[*]} == "stopped halted problem halted halted running running" && ${UI_STATUS_DETAILS[5]} == "1 of 2 clients connected" ]] || return 1
+    # firewall: off, on, rules missing, rules that refuse nothing by default
+    ui_status_reset
+    firewall_enabled() { return 1; }
+    home_firewall
+    firewall_enabled() { return 0; }
+    firewall_rules_missing() { :; }
+    nft() { printf 'type filter hook input priority 0; policy drop;\n'; }
+    home_firewall
+    firewall_rules_missing() { echo "SSH 22/tcp" >&2; }
+    home_firewall
+    firewall_rules_missing() { :; }
+    nft() { printf 'type filter hook input priority 0; policy accept;\n'; }
+    home_firewall
+    nft() { :; }
+    home_firewall
+    [[ ${UI_STATUS_LEVELS[*]} == "warn ok bad bad bad" && ${UI_STATUS_STATES[*]} == "off on problem problem problem" ]] || {
+        echo "${UI_STATUS_LEVELS[*]} / ${UI_STATUS_STATES[*]}"
+        return 1
+    }
+    # disk: pink while there is room, then yellow, then red; used part in %
+    ui_status_reset
+    seedbox_installed() { return 1; }
+    DF_FREE=$((40 * 1024 ** 3))
+    df() { printf 'Size Avail\n%s %s\n' $((100 * 1024 ** 3)) "$DF_FREE"; }
+    home_disk
+    DF_FREE=$((4 * 1024 ** 3))
+    home_disk
+    DF_FREE=$((1 * 1024 ** 3))
+    home_disk
+    [[ ${UI_STATUS_LEVELS[*]} == "info warn bad" && ${UI_STATUS_STATES[0]} == "60%" && ${UI_STATUS_DETAILS[0]} == "40GB free" ]] || {
+        echo "${UI_STATUS_LEVELS[*]} / ${UI_STATUS_STATES[*]} / ${UI_STATUS_DETAILS[*]}"
+        return 1
+    }
+    # backup: weekly failed, without passphrase, none, recent, old
+    ui_status_reset
+    seedbox_installed() { return 0; }
+    BACKUP_PASSPHRASE_FILE="$WORK/home-passphrase"
+    echo x >"$BACKUP_PASSPHRASE_FILE"
+    backup_auto_enabled() { return 0; }
+    backup_latest() { return 1; }
+    systemctl() { [[ $1 == is-failed ]]; }
+    home_backup
+    systemctl() { return 1; }
+    rm -f "$BACKUP_PASSPHRASE_FILE"
+    home_backup
+    backup_auto_enabled() { return 1; }
+    home_backup
+    touch -d '2 days ago' "$WORK/home-backup.enc"
+    backup_latest() { echo "$WORK/home-backup.enc"; }
+    home_backup
+    touch -d '9 days ago' "$WORK/home-backup.enc"
+    home_backup
+    [[ ${UI_STATUS_LEVELS[*]} == "bad bad warn ok warn" && ${UI_STATUS_STATES[*]} == "failed failed none yet recent old" ]] || {
+        echo "${UI_STATUS_LEVELS[*]} / ${UI_STATUS_STATES[*]}"
+        return 1
+    }
+    [[ ${UI_STATUS_DETAILS[3]} == "last backup 2 days ago" && ${UI_STATUS_SHORT[3]} == "2 days ago" ]]
+)
+
+# The words of the blocks fit in them (9 characters), in English and in French
+home_state_words_fit_blocks() (
+    load
+    local language word
+    for language in en fr; do
+        i18n_load "$language"
+        for word in missing running stopped absent halted problem on off failed 'none yet' recent old; do
+            ui_len "$(t "$word")"
+            if ((UI_LEN > 9)); then
+                echo "$language: « $(t "$word") » is $UI_LEN characters long"
+                return 1
+            fi
+        done
+    done
+)
+
+# The real screens of the menus fit the screen too (EN/FR, 40 and 80 columns)
+menus_fit_the_screen() (
+    local language columns out line width
+    load
+    for language in en fr; do
+        for columns in 40 80; do
+            width=$((columns - 1))
+            out=$(printf '1\nb\n2\nb\n3\nb\n5\nb\nl\nb\nq\n' | COLUMNS_TEST=$columns LANGUAGE_TEST=$language menus '
+                firewall_status() { :; }
+                backup_auto_status() { :; }
+                main_menu' 2>&1) || {
+                echo "$out" | tail -n 5
+                return 1
+            }
+            while IFS= read -r line; do
+                ui_len "$line"
+                if ((UI_LEN > width)); then
+                    echo "$language, $columns columns: $UI_LEN > $width: $line"
+                    return 1
+                fi
+            done <<<"$out"
+        done
+    done
+)
+
 printf '\033[1m=== Unit tests\033[0m\n'
 check "vpn_sync: WireGuard refusing the configuration shows « failed »" vpn_sync_reports_wg_failure
 check "vpn_sync: a failure of « wg-quick strip » is seen" vpn_sync_reports_strip_failure
@@ -3224,6 +3445,12 @@ check "interface: same screens whether the locale counts characters or bytes" pr
 check "interface: blocks from 80 columns, list below; menu in two columns from 71" preview_layout_follows_width
 check "interface: table columns aligned with accents and colors" ui_table_aligned_with_accents
 check "interface: answer without spaces, Q after an action, no question outside menus" ui_choice_and_pause_answers
+check "menus: B or empty goes back, R refreshes, Q leaves seedtunnel from a submenu" menus_keys_b_r_q
+check "menus: an action that fails comes back to the menu (set -e works inside)" action_error_comes_back_to_menu
+check "menus: Q after an action of a submenu leaves seedtunnel" quit_from_an_action
+check "home screen: each state of VPN, seedbox, firewall, disk and backup" home_states
+check "home screen: every state fits its block (9 characters, EN/FR)" home_state_words_fit_blocks
+check "menus: the real screens fit the screen (EN/FR, 40 and 80 columns)" menus_fit_the_screen
 
 printf '\n\033[1m%s passed, %s failed\033[0m\n' "$PASS" "$FAIL"
 ((FAIL == 0))
