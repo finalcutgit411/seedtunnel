@@ -2961,7 +2961,13 @@ colors_follow_terminal_and_no_color() (
     ui_width
     local header
     header=$(ui_header)
-    [[ $header == *"$C_BADGE v$APP_VERSION $C_RESET"* ]]
+    [[ $header == *"$C_BADGE v$APP_VERSION $C_RESET"* ]] || return 1
+    # keys of the bottom line (B, R, Q): white on pink, like the version
+    ui_footer r Refresh q Quit >/dev/null
+    [[ $UI_PROMPT == "  $C_BADGE R $C_RESET Refresh    $C_BADGE Q $C_RESET Quit "* ]] || return 1
+    colors_init off
+    ui_footer r Refresh q Quit >/dev/null
+    [[ $UI_PROMPT == "  [R] Refresh    [Q] Quit "* ]]
 )
 
 # No line wider than the screen, in English and in French, with and without

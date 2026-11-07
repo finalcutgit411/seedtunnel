@@ -370,10 +370,16 @@ ui_fields_show() {
 
 # --- Menus ------------------------------------------------------------------------
 
-# ui_key KEY → UI_KEY: [K], the brackets in grey and the key in pink (no
-# background: choice of Neil, 7 Nov. 2026)
+# ui_key KEY → UI_KEY: key of a menu entry, [K] with the brackets in grey and
+# the key in pink (no background). ui_keycap KEY: key of the bottom line (B,
+# R, Q), white on pink like the version; [K] without colors. 3 characters
+# either way. (Choices of Neil, 7 Nov. 2026.)
 ui_key() {
     UI_KEY="${C_GREY}[$C_RESET$C_BRAND${1^^}$C_RESET$C_GREY]$C_RESET"
+}
+
+ui_keycap() {
+    if [[ -n $C_BADGE ]]; then UI_KEY="$C_BADGE ${1^^} $C_RESET"; else UI_KEY="[${1^^}]"; fi
 }
 
 # ui_menu_add KEY TEXT / ui_menu_gap / ui_menu_show — entries of a menu. Two
@@ -437,7 +443,7 @@ ui_menu_show() {
 ui_footer() {
     local shown="" prompt size
     while (($# >= 2)); do
-        ui_key "$1"
+        ui_keycap "$1"
         shown+="${shown:+    }$UI_KEY $2"
         shift 2
     done
