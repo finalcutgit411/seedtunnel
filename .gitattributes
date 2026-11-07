@@ -1,9 +1,11 @@
 # Unix line endings required: a bash script saved on Windows (CRLF) no longer
 # works on the server.
 * text=auto eol=lf
+*.png binary
 
 # Left out of the release archives (git archive): only useful for development.
 .github export-ignore
 tests export-ignore
 Makefile export-ignore
+docs export-ignore
 .gitattributes export-ignore

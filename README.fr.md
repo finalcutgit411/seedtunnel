@@ -26,7 +26,7 @@ On télécharge une version publiée et on vérifie son checksum (SHA-256) avant
 
 ```bash
 apt update && apt full-upgrade -y
-V=1.2.8
+V=2.1.1
 cd "$(mktemp -d)"
 curl -fLO https://github.com/finalcutgit411/seedtunnel/releases/download/v$V/seedtunnel-$V.tar.gz \
   && curl -fLO https://github.com/finalcutgit411/seedtunnel/releases/download/v$V/SHA256SUMS \
