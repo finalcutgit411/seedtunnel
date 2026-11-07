@@ -3299,6 +3299,8 @@ log_rotation_rule() (
     load
     LOGROTATE_FILE="$WORK/logrotate-seedtunnel"
     apt_install() { echo "apt $*" >>"$WORK/logrotate-calls"; }
+    # the tests do not run as root (root:root cannot be given)
+    chown() { :; }
     rm -f "$LOGROTATE_FILE" "$WORK/logrotate-calls"
     log_rotation_apply
     grep -qx "apt logrotate" "$WORK/logrotate-calls" || return 1
