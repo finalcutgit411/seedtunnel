@@ -3,6 +3,22 @@
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 
+## [1.2.8] - 2026-11-07
+
+After a cross-module review: the restore on a server that already has seedtunnel, and two new tools.
+
+### Security
+- **Restore and the SFTP account**: restoring a backup with another SFTP account than the seedbox of the server left the old account with its password, but **without its SFTP restrictions** (SSH tunnels possible when SSH accepts passwords). And on a new server, an account of the backup that already existed (an administration account of the same name) was taken over: password changed, shut in SFTP. The restore now checks the account as the installation does, **before anything is replaced**, and stops, saying what to do. On a new server, the web ports 80/443 are checked too.
+
+### Added
+- **`seedtunnel firewall rules`** (and « Show the rules » in the firewall menu): the rules nftables really has loaded, in words, and the ports forwarded to each VPN client. What differs from the settings is pointed out; the raw rules can be shown too.
+- **Report to ask for help**: `seedtunnel doctor --link`, or the question at the end of the diagnostics in the menu. The diagnostics and the end of the log in one file, sent by a one-time link (saved in your home folder without a seedbox). Domain, name of the server, public IP addresses, SFTP account, SSH keys and names of the VPN clients are replaced by generic words; the ports and the addresses inside the VPN stay. No password, passphrase or key: the automatic tests check it after a full installation.
+
+### Fixed
+- **Restore of a backup without a part the server has**: a VPN or a seedbox of the server missing from the backup kept running without seedtunnel knowing it (the VPN no longer started after a restart, the full disk protection stopped, the seedbox could no longer be removed). The restore now refuses first, saying what to do. A firewall of the server missing from the backup stays on, its rules made again for the settings restored (it used to vanish at the next restart while still loaded).
+- **Restore cut short** (power cut): the next runs said nothing. `seedtunnel doctor` and the menu now point it out, with the way back.
+- **Firewall at boot**: if `nftables.service` is on, its « flush ruleset » could come after the firewall of seedtunnel and remove it. The firewall is now loaded after it.
+
 ## [1.2.7] - 2026-11-06
 
 ### Fixed

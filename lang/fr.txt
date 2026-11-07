@@ -7,6 +7,9 @@
 
 # --- Menu principal ---------------------------------------------------------------
 
+en: A restore did not finish: the settings may be incomplete. See  seedtunnel doctor
+fr: Une restauration ne s'est pas terminée : les réglages sont peut-être incomplets. Voir  seedtunnel doctor
+
 en: %s connected of %s client(s)
 fr: %s connecté(s) sur %s client(s)
 
@@ -86,6 +89,21 @@ en: Too many arguments for « seedtunnel %s »: %s   (help: seedtunnel help)
 fr: Arguments en trop pour « seedtunnel %s » : %s   (aide : seedtunnel help)
 
 # --- Sauvegarde et restauration -----------------------------------------------------
+
+en: This server has a VPN, the backup has none: it would keep running without seedtunnel knowing it. Remove it first (seedtunnel vpn uninstall), or restore on a new server.
+fr: Ce serveur a un VPN, la sauvegarde n'en a pas : il continuerait à tourner sans que seedtunnel le sache. Supprimez-le d'abord (seedtunnel vpn uninstall), ou restaurez sur un serveur neuf.
+
+en: This server has a seedbox, the backup has none: it would keep running without seedtunnel knowing it. Remove it first (seedtunnel seedbox uninstall, the downloads are kept), or restore on a new server.
+fr: Ce serveur a une seedbox, la sauvegarde n'en a pas : elle continuerait à tourner sans que seedtunnel le sache. Supprimez-la d'abord (seedtunnel seedbox uninstall, les téléchargements sont gardés), ou restaurez sur un serveur neuf.
+
+en: The seedbox of this server uses the account %s, the backup the account %s: %s would stay without its SFTP restrictions. Rename it first (seedtunnel seedbox password --user %s), or remove the seedbox first.
+fr: La seedbox de ce serveur utilise le compte %s, la sauvegarde le compte %s : %s resterait sans ses restrictions SFTP. Renommez-le d'abord (seedtunnel seedbox password --user %s), ou supprimez d'abord la seedbox.
+
+en: The account %s of the backup already exists on this server: restoring would change its password and shut it in SFTP. Restore on a server without this account.
+fr: Le compte %s de la sauvegarde existe déjà sur ce serveur : la restauration changerait son mot de passe et l'enfermerait en SFTP. Restaurez sur un serveur sans ce compte.
+
+en: The firewall of this server stays on (the backup restored has none): its rules were made again for the settings restored.
+fr: Le pare-feu de ce serveur reste actif (la sauvegarde restaurée n'en a pas) : ses règles ont été refaites pour les réglages restaurés.
 
 en: Nothing to back up: neither VPN, nor seedbox, nor firewall installed.
 fr: Rien à sauvegarder : ni VPN, ni seedbox, ni pare-feu installés.
@@ -447,6 +465,72 @@ fr: Transmission arrêté : disque presque plein (%s Go libres).
 
 # --- Diagnostic ---------------------------------------------------------------------------
 
+en: A restore did not finish: the settings of seedtunnel may be incomplete. To go back to those from before it:  rm -rf %s && mv %s %s && rm -f %s && seedtunnel apply
+fr: Une restauration ne s'est pas terminée : les réglages de seedtunnel sont peut-être incomplets. Pour revenir à ceux d'avant :  rm -rf %s && mv %s %s && rm -f %s && seedtunnel apply
+
+en: A restore did not finish: the settings of seedtunnel may be incomplete. Run it again:  seedtunnel restore FILE
+fr: Une restauration ne s'est pas terminée : les réglages de seedtunnel sont peut-être incomplets. Relancez-la :  seedtunnel restore FICHIER
+
+en: Create a one-time link to send this report? Domain, name of the server, public IP addresses, SFTP account, SSH keys and names of the VPN clients are replaced.
+fr: Créer un lien à usage unique pour envoyer ce rapport ? Le domaine, le nom du serveur, les adresses IP publiques, le compte SFTP, les clés SSH et les noms des clients VPN sont remplacés.
+
+en: Save this report to send it? Domain, name of the server, public IP addresses, SFTP account, SSH keys and names of the VPN clients are replaced.
+fr: Enregistrer ce rapport pour l'envoyer ? Le domaine, le nom du serveur, les adresses IP publiques, le compte SFTP, les clés SSH et les noms des clients VPN sont remplacés.
+
+en: <domain>
+fr: <domaine>
+
+en: <server>
+fr: <serveur>
+
+en: <server-ip>
+fr: <ip-serveur>
+
+en: <sftp-user>
+fr: <utilisateur-sftp>
+
+en: <client-%s>
+fr: <client-%s>
+
+en: <former-client>
+fr: <ancien-client>
+
+en: <ssh-key>
+fr: <clé-ssh>
+
+en: <fingerprint>
+fr: <empreinte>
+
+en: <ip>
+fr: <ip>
+
+en: seedtunnel report of %s
+fr: Rapport seedtunnel du %s
+
+en: Replaced: domain, name of the server, public IP addresses, SFTP account, SSH keys, names of the VPN clients.
+fr: Remplacés : domaine, nom du serveur, adresses IP publiques, compte SFTP, clés SSH, noms des clients VPN.
+
+en: Diagnostics
+fr: Diagnostic
+
+en: End of the log (last %s lines)
+fr: Fin du journal (%s dernières lignes)
+
+en: Preparing the report (the diagnostics run once more)…
+fr: Préparation du rapport (le diagnostic tourne une deuxième fois)…
+
+en: seedtunnel report
+fr: Rapport seedtunnel
+
+en: Domain, name of the server, public IP addresses, SFTP account, SSH keys and names of the VPN clients are replaced. No password, no key.
+fr: Le domaine, le nom du serveur, les adresses IP publiques, le compte SFTP, les clés SSH et les noms des clients VPN sont remplacés. Aucun mot de passe, aucune clé.
+
+en: Report saved: %s
+fr: Rapport enregistré : %s
+
+en: Without a seedbox there is no download link: fetch it with WinSCP, FileZilla or scp, logged in as %s.
+fr: Sans seedbox, pas de lien de téléchargement : récupérez-le avec WinSCP, FileZilla ou scp, connecté en tant que %s.
+
 en: An update did not finish: %s is still there. If seedtunnel works, delete it:  rm -rf %s
 fr: Une mise à jour ne s'est pas terminée : %s est toujours là. Si seedtunnel fonctionne, supprimez-le :  rm -rf %s
 
@@ -710,6 +794,84 @@ fr: Tout est en ordre.
 
 # --- Pare-feu ---------------------------------------------------------------------------
 
+en: Replies to the connections already open
+fr: Réponses aux connexions déjà ouvertes
+
+en: The server talking to itself
+fr: Le serveur vers lui-même
+
+en: Everything coming from the VPN clients
+fr: Tout ce qui vient des clients du VPN
+
+en: IPv6 address given by the provider (DHCPv6)
+fr: Adresse IPv6 donnée par l'hébergeur (DHCPv6)
+
+en: Ping and ICMP messages (IPv4 and IPv6)
+fr: Ping et messages ICMP (IPv4 et IPv6)
+
+en: Other rule: %s
+fr: Autre règle : %s
+
+en: SSH / SFTP: port %s/tcp
+fr: SSH / SFTP : port %s/tcp
+
+en: Web site: ports %s/tcp
+fr: Site web : ports %s/tcp
+
+en: Other port open: %s/tcp
+fr: Autre port ouvert : %s/tcp
+
+en: VPN WireGuard: port %s/udp
+fr: VPN WireGuard : port %s/udp
+
+en: Other port open: %s/udp
+fr: Autre port ouvert : %s/udp
+
+en: BitTorrent: port %s (TCP and UDP)
+fr: BitTorrent : port %s (TCP et UDP)
+
+en: Other port open: %s (TCP and UDP)
+fr: Autre port ouvert : %s (TCP et UDP)
+
+en: Missing from the rules loaded, although the settings need it: %s   → seedtunnel apply
+fr: Absent des règles chargées, alors que les réglages le demandent : %s   → seedtunnel apply
+
+en: port %s (TCP and UDP) → %s (%s)
+fr: port %s (TCP et UDP) → %s (%s)
+
+en: none: the VPN is not running
+fr: aucun : le VPN ne tourne pas
+
+en: none: no client yet
+fr: aucun : pas encore de client
+
+en: Firewall off: nothing is refused, every port of the server can be reached.
+fr: Pare-feu désactivé : rien n'est refusé, tous les ports du serveur sont joignables.
+
+en: Allowed towards the server (rules loaded right now):
+fr: Autorisé vers le serveur (règles chargées en ce moment) :
+
+en: Everything else is refused.
+fr: Tout le reste est refusé.
+
+en: Everything else is accepted: these rules refuse nothing by default   → seedtunnel firewall enable --yes
+fr: Tout le reste est accepté : ces règles ne refusent rien par défaut   → seedtunnel firewall enable --yes
+
+en: Ports forwarded to the VPN clients (they can be reached from the Internet, the firewall does not filter them):
+fr: Ports redirigés vers les clients du VPN (joignables depuis Internet, le pare-feu ne les filtre pas) :
+
+en: FIREWALL RULES
+fr: RÈGLES DU PARE-FEU
+
+en: Show the raw rules (nftables)?
+fr: Afficher les règles brutes (nftables) ?
+
+en: 3) Show the rules
+fr: 3) Afficher les règles
+
+en: Raw rules:  nft list table inet %s ; nft list table ip seedtunnel
+fr: Règles brutes :  nft list table inet %s ; nft list table ip seedtunnel
+
 en: Firewall rules loaded, but they do not refuse what is not allowed:  seedtunnel firewall enable --yes
 fr: Règles du pare-feu chargées, mais elles ne refusent pas ce qui n'est pas autorisé :  seedtunnel firewall enable --yes
 
@@ -791,8 +953,8 @@ fr: 2) Désactiver le pare-feu
 en: Without a terminal:  seedtunnel firewall enable --yes
 fr: Sans terminal :  seedtunnel firewall enable --yes
 
-en: Usage: seedtunnel firewall enable|disable|status
-fr: Utilisation : seedtunnel firewall enable|disable|status
+en: Usage: seedtunnel firewall enable|disable|status|rules
+fr: Usage : seedtunnel firewall enable|disable|status|rules
 
 en: The automatic undo could not be cancelled: the previous rules are back, nothing was kept (details in %s).
 fr: Le retour arrière automatique n'a pas pu être annulé : les règles précédentes sont revenues, rien n'a été conservé (détails dans %s).

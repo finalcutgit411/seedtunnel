@@ -34,7 +34,9 @@ Seedbox
 
 Serveur
   firewall enable|disable|status     pare-feu (tout refusé sauf le nécessaire)
+  firewall rules                     les règles chargées en ce moment, en clair
   doctor                             diagnostic complet (code 1 si problème)
+  doctor --link                      rapport sans données privées, lien unique
   backup [--output FICHIER] [--passphrase-file FICHIER]
   backup list | share                liste des sauvegardes / lien de téléchargement
   backup auto on|off|status          sauvegarde chiffrée chaque semaine
@@ -171,6 +173,14 @@ text_fr_backup_after() {
     cat <<'EOF'
   Récupérez-la sur votre ordinateur, hors de ce serveur :  seedtunnel backup share
   Sans la passphrase, elle est irrécupérable.
+EOF
+}
+
+text_fr_share_steps_report() {
+    cat <<'EOF'
+<li>Envoyez ce fichier à la personne qui vous aide (forum, e-mail…) : il s'ouvre avec n'importe quel éditeur de texte.</li>
+<li>Votre domaine, le nom et les adresses de votre serveur, votre compte SFTP, vos clés SSH et les noms de vos clients VPN ont été remplacés par des termes génériques. Il ne contient aucun mot de passe ni aucune clé.</li>
+<li>Pour en refaire un : <code>seedtunnel doctor --link</code>.</li>
 EOF
 }
 

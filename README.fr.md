@@ -26,7 +26,7 @@ On télécharge une version publiée et on vérifie son checksum (SHA-256) avant
 
 ```bash
 apt update && apt full-upgrade -y
-V=1.2.7
+V=1.2.8
 cd "$(mktemp -d)"
 curl -fLO https://github.com/finalcutgit411/seedtunnel/releases/download/v$V/seedtunnel-$V.tar.gz \
   && curl -fLO https://github.com/finalcutgit411/seedtunnel/releases/download/v$V/SHA256SUMS \
@@ -81,7 +81,8 @@ seedtunnel vpn show telephone               seedtunnel seedbox sftp-key add ma-c
 seedtunnel vpn share pc-bureau              seedtunnel seedbox sftp-key new
                                             seedtunnel seedbox sftp-password off
                                             seedtunnel seedbox bans | unban IP
-seedtunnel firewall enable|disable|status   seedtunnel doctor
+seedtunnel firewall enable|disable|status   seedtunnel doctor [--link]
+seedtunnel firewall rules
 seedtunnel backup [--passphrase-file F]     seedtunnel backup list | share
 seedtunnel backup auto on|off|status        seedtunnel restore FICHIER [--passphrase-file F]
 seedtunnel update                           seedtunnel apply
@@ -167,6 +168,8 @@ Cela concerne ce qui arrive sur le serveur lui-même. Les clients du VPN sont co
 
 Dans un terminal, chaque changement est d'abord **à l'essai** : sans confirmation depuis une nouvelle connexion SSH dans les 2 minutes, les règles précédentes reviennent (ou aucune règle, la première fois). « oui » ne compte qu'une fois que sshd a accepté une nouvelle connexion depuis l'application des règles : depuis Internet, elle compte toujours ; par le VPN, seulement si votre session passe aussi par le VPN ; depuis le serveur lui-même, jamais. Une confirmation depuis Internet ne prouve rien pour le VPN : son port est vérifié par les tests automatiques, avec un nouveau tunnel à travers le pare-feu. Les règles chargées au démarrage ne changent qu'après confirmation.
 
+`seedtunnel firewall rules` (ou « Afficher les règles » dans le menu) liste en clair les règles que nftables a réellement chargées en ce moment, et les ports redirigés vers chaque client VPN (ils sont joignables depuis Internet). Ce qui diffère des réglages est signalé. Les règles brutes peuvent aussi être affichées.
+
 ### Diagnostic
 
 `seedtunnel doctor` vérifie, avec pour chaque problème la commande qui le corrige :
@@ -177,10 +180,12 @@ Dans un terminal, chaque changement est d'abord **à l'essai** : sans confirmati
 - le NAT du VPN, fait pour la carte réseau qu'utilise le serveur aujourd'hui ;
 - les réglages réseau du noyau (IPv4, et IPv6 si le serveur l'a) ;
 - l'espace disque, la protection contre le disque plein (dont un Transmission qui ne redémarre pas alors qu'il y a de la place) et l'horloge ;
-- une mise à jour qui ne s'est pas terminée ;
+- une mise à jour ou une restauration qui ne s'est pas terminée ;
 - les sauvegardes (voir plus bas), dont le minuteur et la passphrase de la sauvegarde hebdomadaire.
 
 Il renvoie le code 1 s'il trouve un problème : il peut tourner dans une tâche planifiée.
+
+Pour demander de l'aide, `seedtunnel doctor --link` (ou la question à la fin du diagnostic, dans le menu) prépare un **rapport** — le diagnostic et la fin du journal — et un lien à usage unique pour l'envoyer. Ce qui est privé est remplacé par un terme générique : domaine, nom du serveur, adresses IP publiques, compte SFTP, clés SSH, noms des clients VPN (`<client-1>`…). Les ports et les adresses internes du VPN (10.8.0.x, les mêmes sur tous les serveurs) restent. Il ne contient jamais de mot de passe, de passphrase ni de clé. Sans seedbox, le rapport est enregistré dans votre dossier personnel.
 
 ### Sauvegardes
 
@@ -198,6 +203,8 @@ Si un réglage change pendant l'écriture de l'archive (renouvellement d'un cert
 Une sauvegarde restée sur le serveur disparaît avec lui : `seedtunnel backup share` donne un lien à usage unique pour télécharger la dernière sur votre ordinateur. `seedtunnel doctor` vous le rappelle quand la sauvegarde hebdomadaire est désactivée ou échoue, et quand aucune sauvegarde n'a été téléchargée depuis un mois.
 
 Sur un serveur neuf, `seedtunnel restore FICHIER` remet tout en place. L'archive est d'abord vérifiée : seulement des fichiers et des dossiers (et les liens de Let's Encrypt), et des fichiers de réglages qui ne peuvent lancer aucune commande. Les clients VPN se reconnectent sans rien changer si `VPN_PUBLIC_ADDRESS` est un nom de domaine qui pointe vers le nouveau serveur.
+
+Sur un serveur qui a déjà seedtunnel, la sauvegarde doit lui correspondre, ce qui est vérifié avant de rien remplacer : un VPN ou une seedbox du serveur absent de la sauvegarde, un autre compte SFTP que celui de la seedbox, ou un compte de la sauvegarde qui existe déjà sur le serveur, et la restauration s'arrête en disant quoi faire. Le pare-feu et la sauvegarde hebdomadaire du serveur restent actifs si la sauvegarde n'en a pas. Une restauration coupée net (coupure de courant) est signalée par `seedtunnel doctor` et par le menu, avec le moyen de revenir en arrière.
 
 Les fichiers téléchargés ne sont pas dans la sauvegarde : copiez-les avec `rsync`.
 

@@ -2515,6 +2515,328 @@ restore_weekly_without_passphrase_off() (
     grep -qx disable "$WORK/weekly-none-calls" && grep -q "it was turned off" "$WORK/weekly-none.out"
 )
 
+# --- 1.2.8: a restore checks the server first; firewall rules; report ---------------
+
+# What a restore would do afterwards: only recorded (never run in a test)
+restore_record_steps() {
+    : >"$WORK/$1-steps"
+    RESTORE_STEPS="$WORK/$1-steps"
+    vpn_check_kernel() { echo kernel >>"$RESTORE_STEPS"; }
+    base_setup() { echo base >>"$RESTORE_STEPS"; }
+    vpn_apply() { echo vpn >>"$RESTORE_STEPS"; }
+    seedbox_apply() { echo seedbox >>"$RESTORE_STEPS"; }
+    restore_transmission_state() { :; }
+    firewall_enable() { echo firewall >>"$RESTORE_STEPS"; }
+    backup_auto_install_units() { :; }
+    backup_auto_enabled() { return 1; }
+    i18n_init() { i18n_load en; }
+    RESTORE_MARKER="$APP_STATE_DIR.restore-unfinished"
+    FIREWALL_CONF_FILE="$APP_STATE_DIR/firewall.conf"
+    FIREWALL_RULES="$APP_STATE_DIR/firewall.nft"
+    BACKUP_PASSPHRASE_FILE="$APP_STATE_DIR/backup.passphrase"
+    confirm() {
+        echo "asked" >>"$RESTORE_STEPS"
+        return 0
+    }
+}
+
+# Refused before the question, and nothing of this server changed
+restore_refused_first() {
+    local name=$1 message=$2
+    printf 'SERVER=settings\n' >"$APP_STATE_DIR/server.conf"
+    if (restore_main "$WORK/$name.enc") >"$WORK/$name.out" 2>&1; then
+        cat "$WORK/$name.out"
+        return 1
+    fi
+    cat "$WORK/$name.out" "$RESTORE_STEPS"
+    grep -qF "$message" "$WORK/$name.out" && [[ ! -s $RESTORE_STEPS && -f $APP_STATE_DIR/server.conf && ! -e $RESTORE_MARKER ]]
+}
+
+restore_refuses_other_sftp_account() (
+    restore_archive_load account
+    printf 'SEEDBOX_USER=lancelot\n' >"$RESTORE_ROOT/etc/seedtunnel/seedbox.conf"
+    restore_archive_make account
+    restore_record_steps account
+    # this server: a VPN, and a seedbox with the account neil
+    vpn_installed() { return 0; }
+    seedbox_installed() { return 0; }
+    SEEDBOX_USER=neil
+    restore_refused_first account "uses the account neil, the backup the account lancelot"
+)
+
+restore_refuses_existing_account() (
+    restore_archive_load existing
+    # an account this server already has (here, the one running the tests)
+    printf 'SEEDBOX_USER=%s\n' "$(id -un)" >"$RESTORE_ROOT/etc/seedtunnel/seedbox.conf"
+    restore_archive_make existing
+    restore_record_steps existing
+    vpn_installed() { return 0; }
+    seedbox_installed() { return 1; }
+    seedbox_check_web_ports() { :; }
+    restore_refused_first existing "already exists on this server" || return 1
+    # free account, but the web ports used by another program: refused too
+    restore_archive_load webports
+    printf 'SEEDBOX_USER=lancelot-test-free\n' >"$RESTORE_ROOT/etc/seedtunnel/seedbox.conf"
+    restore_archive_make webports
+    restore_record_steps webports
+    vpn_installed() { return 0; }
+    seedbox_installed() { return 1; }
+    ss() { printf '%s\n' 'LISTEN 0 511 0.0.0.0:80 0.0.0.0:* users:(("apache2",pid=1,fd=4))'; }
+    restore_refused_first webports "Ports 80/443 are already used by another program"
+)
+
+restore_refuses_missing_parts() (
+    # the server has a VPN, the backup none
+    restore_archive_load novpn
+    rm -rf "$RESTORE_ROOT/etc/seedtunnel/vpn.conf" "$RESTORE_ROOT/etc/seedtunnel/vpn"
+    printf 'FIREWALL_ENABLED=1\n' >"$RESTORE_ROOT/etc/seedtunnel/firewall.conf"
+    restore_archive_make novpn
+    restore_record_steps novpn
+    vpn_installed() { return 0; }
+    seedbox_installed() { return 1; }
+    restore_refused_first novpn "This server has a VPN, the backup has none" || return 1
+    # the server has a seedbox, the backup none
+    restore_archive_load noseedbox
+    restore_archive_make noseedbox
+    restore_record_steps noseedbox
+    vpn_installed() { return 0; }
+    seedbox_installed() { return 0; }
+    SEEDBOX_USER=neil
+    restore_refused_first noseedbox "This server has a seedbox, the backup has none"
+)
+
+restore_keeps_firewall() (
+    restore_archive_load keepfw
+    restore_archive_make keepfw
+    restore_record_steps keepfw
+    vpn_installed() { return 0; }
+    seedbox_installed() { return 1; }
+    # the firewall of this server is on; the backup has none
+    printf 'FIREWALL_ENABLED=1\n' >"$FIREWALL_CONF_FILE"
+    restore_main "$WORK/keepfw.enc" >"$WORK/keepfw.out" 2>&1 || {
+        cat "$WORK/keepfw.out"
+        return 1
+    }
+    cat "$WORK/keepfw.out" "$RESTORE_STEPS"
+    # still on, made again for the settings restored, and said
+    firewall_enabled && grep -qx firewall "$RESTORE_STEPS" && grep -q "The firewall of this server stays on" "$WORK/keepfw.out"
+)
+
+restore_marks_until_finished() (
+    restore_archive_load marker
+    restore_archive_make marker
+    restore_record_steps marker
+    vpn_installed() { return 0; }
+    seedbox_installed() { return 1; }
+    printf 'SERVER=settings\n' >"$APP_STATE_DIR/server.conf"
+    # while the settings are being put back, the marker says where the old ones went
+    vpn_apply() { if [[ -e $RESTORE_MARKER ]]; then cat "$RESTORE_MARKER" >>"$RESTORE_STEPS"; fi; }
+    restore_main "$WORK/marker.enc" >"$WORK/marker.out" 2>&1 || {
+        cat "$WORK/marker.out"
+        return 1
+    }
+    cat "$RESTORE_STEPS"
+    grep -q "^$APP_STATE_DIR.before-restore-" "$RESTORE_STEPS" && [[ ! -e $RESTORE_MARKER ]]
+)
+
+doctor_reports_interrupted_restore() (
+    load
+    timedatectl() { echo yes; }
+    RESTORE_MARKER="$WORK/interrupted.restore-unfinished"
+    mkdir -p "$WORK/interrupted-before"
+    printf '%s\n' "$WORK/interrupted-before" >"$RESTORE_MARKER"
+    DOCTOR_ERRORS=0
+    doctor_system >"$WORK/interrupted.out" 2>&1
+    cat "$WORK/interrupted.out"
+    # the way back, with the folder of the settings from before
+    ((DOCTOR_ERRORS == 1)) && grep -q "A restore did not finish" "$WORK/interrupted.out" \
+        && grep -qF "mv $WORK/interrupted-before $APP_STATE_DIR" "$WORK/interrupted.out" || return 1
+    # nothing from before: restore again
+    printf 'none\n' >"$RESTORE_MARKER"
+    doctor_system >"$WORK/interrupted.out" 2>&1
+    grep -q "Run it again" "$WORK/interrupted.out"
+)
+
+firewall_after_nftables_service() (
+    load
+    firewall_generate_unit | grep -qx 'After=nftables.service'
+)
+
+# Rules as « nft list » shows them
+firewall_rules_sample() {
+    cat <<EOF
+table inet seedtunnel_fw {
+	chain input {
+		type filter hook input priority filter; policy $1;
+		ct state established,related accept
+		ct state invalid drop
+		iifname "lo" accept
+		meta l4proto { icmp, ipv6-icmp } accept
+		ip6 saddr fe80::/10 udp dport 546 accept
+		tcp dport $2 accept
+		udp dport 51820 accept
+		iifname "wg0" accept
+		tcp dport { 80, 443 } accept
+		meta l4proto { tcp, udp } th dport 60000 accept
+		tcp dport 8080 accept
+	}
+}
+EOF
+}
+
+firewall_rules_load() {
+    load
+    FIREWALL_CONF_FILE="$WORK/rules-fw.conf"
+    printf 'FIREWALL_ENABLED=1\n' >"$FIREWALL_CONF_FILE"
+    VPN_CLIENTS_DIR="$WORK/rules-clients"
+    mkdir -p "$VPN_CLIENTS_DIR"
+    printf 'CLIENT_NUMBER=2\n' >"$VPN_CLIENTS_DIR/laptop.env"
+    VPN_PORT=51820
+    vpn_installed() { return 0; }
+    seedbox_installed() { return 0; }
+    sshd() { printf 'port 22\n'; }
+    unset SSH_CONNECTION
+    RULES_POLICY=drop
+    RULES_SSH=22
+    nft() {
+        case "$*" in
+            "list table inet seedtunnel_fw") firewall_rules_sample "$RULES_POLICY" "$RULES_SSH" ;;
+            "list table ip seedtunnel") printf '%s\n' 'table ip seedtunnel {' '	chain prerouting {' \
+                '		iifname "eth0" meta l4proto { tcp, udp } th dport 60002 dnat to 10.8.0.3' '	}' '}' ;;
+        esac
+    }
+}
+
+firewall_rules_in_plain_words() (
+    firewall_rules_load
+    firewall_rules_show >"$WORK/rules.out" 2>&1
+    cat "$WORK/rules.out"
+    local expected
+    for expected in "Replies to the connections already open" "Ping and ICMP messages" "SSH / SFTP: port 22/tcp" \
+        "VPN WireGuard: port 51820/udp" "Everything coming from the VPN clients" "Web site: ports 80, 443/tcp" \
+        "BitTorrent: port 60000 (TCP and UDP)" "Everything else is refused." \
+        "port 60002 (TCP and UDP) → laptop (10.8.0.3)"; do
+        grep -qF "$expected" "$WORK/rules.out" || {
+            echo "missing: $expected"
+            return 1
+        }
+    done
+    # a rule the settings did not ask for is pointed out
+    grep -qF "Other port open: 8080/tcp" "$WORK/rules.out"
+)
+
+firewall_rules_differences_said() (
+    firewall_rules_load
+    # the loaded rules accept everything, and no longer have the SSH port
+    RULES_POLICY=accept
+    RULES_SSH=2222
+    firewall_rules_show >"$WORK/rules-diff.out" 2>&1
+    cat "$WORK/rules-diff.out"
+    grep -q "Everything else is accepted" "$WORK/rules-diff.out" \
+        && grep -q "Missing from the rules loaded, although the settings need it: SSH 22/tcp" "$WORK/rules-diff.out"
+)
+
+firewall_rules_when_off() (
+    firewall_rules_load
+    printf 'FIREWALL_ENABLED=0\n' >"$FIREWALL_CONF_FILE"
+    firewall_rules_show >"$WORK/rules-off.out" 2>&1
+    cat "$WORK/rules-off.out"
+    # the ports of the clients can still be reached
+    grep -q "Firewall off: nothing is refused" "$WORK/rules-off.out" && grep -qF "port 60002" "$WORK/rules-off.out"
+)
+
+# A log with what the report must not carry, and what it must keep
+report_load() {
+    load
+    SEEDBOX_DOMAIN=seedbox.example.org
+    SEEDBOX_USER=neil
+    VPN_PUBLIC_ADDRESS=vpn.example.org
+    VPN_CLIENTS_DIR="$WORK/report-clients"
+    rm -rf "$VPN_CLIENTS_DIR"
+    mkdir -p "$VPN_CLIENTS_DIR"
+    printf 'CLIENT_NUMBER=2\n' >"$VPN_CLIENTS_DIR/laptop.env"
+    printf 'CLIENT_NUMBER=3\n' >"$VPN_CLIENTS_DIR/phone.env"
+    vpn_installed() { return 0; }
+    seedbox_installed() { return 0; }
+    hostname() { if [[ ${1-} == -f ]]; then echo vps-1234.example.net; else echo vps-1234; fi; }
+    ip() { printf '%s\n' '2: eth0    inet 203.0.113.10/24 brd 203.0.113.255 scope global eth0'; }
+    cat >"$WORK/report.txt" <<'EOF'
+Looking for the public IP address… 203.0.113.10
+✔ « seedbox.example.org » points to this server (203.0.113.10)
+✔ Clients: 2, 1 connected right now (VPN at vpn.example.org:51820)
+=== 2026-11-06 19:16:38 · download link for laptop.conf
+=== 2026-11-06 19:17:01 · download link for tablet.conf
+$ rm -f /etc/seedtunnel/vpn/clients/watch.env /etc/seedtunnel/vpn/clients/watch.conf
+$ usermod -aG debian-transmission neil
+peer phone 10.8.0.4 port 60003, laptop 10.8.0.3 port 60002 (from 192.168.1.5)
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBx7Lk7v9h2m neil@desktop
+banned 198.51.100.7 and 2001:db8::10, server vps-1234 (vps-1234.example.net)
+/var/backups/seedtunnel/seedtunnel-vps-1234-20261106-191708-auto.tar.gz.enc
+EOF
+}
+
+report_replaces_private_values() (
+    report_load
+    report_anonymize "$WORK/report.txt"
+    cat "$WORK/report.txt"
+    local private kept
+    for private in seedbox.example.org vpn.example.org vps-1234 203.0.113.10 198.51.100.7 2001:db8::10 \
+        neil laptop phone tablet watch desktop AAAAC3NzaC1lZDI1NTE5; do
+        if grep -qw -- "$private" "$WORK/report.txt"; then
+            echo "still in the report: $private"
+            return 1
+        fi
+    done
+    for kept in "<domain>" "<server>" "<server-ip>" "<ip>" "<sftp-user>" "<client-2>" "<client-3>" "<former-client>" \
+        "<ssh-key>" 10.8.0.3 192.168.1.5 51820 60002 19:16:38 debian-transmission "seedtunnel-<server>-20261106"; do
+        grep -qF -- "$kept" "$WORK/report.txt" || {
+            echo "missing from the report: $kept"
+            return 1
+        }
+    done
+)
+
+report_saved_without_seedbox() (
+    report_load
+    seedbox_installed() { return 1; }
+    mkdir -p "$WORK/report-home"
+    SUDO_USER=$(id -un)
+    getent() { printf '%s:x:0:0::%s:/bin/sh\n' "$SUDO_USER" "$WORK/report-home"; }
+    report_generate() { cp "$WORK/report.txt" "$1"; }
+    rm -f "$WORK"/report-home/*
+    report_send >"$WORK/report-send.out" 2>&1 || {
+        cat "$WORK/report-send.out"
+        return 1
+    }
+    cat "$WORK/report-send.out"
+    local saved
+    saved=$(find "$WORK/report-home" -name 'seedtunnel-report-*.txt')
+    [[ -n $saved && $(stat -c %a "$saved") == 600 ]] && grep -q "Report saved: $saved" "$WORK/report-send.out"
+)
+
+report_longest_first_common_words_kept() (
+    report_load
+    # the account neil, the client neil-laptop, a client named like a word
+    printf 'CLIENT_NUMBER=4\n' >"$VPN_CLIENTS_DIR/neil-laptop.env"
+    printf 'CLIENT_NUMBER=5\n' >"$VPN_CLIENTS_DIR/vpn.env"
+    # the server is also 10.8.0.1 in its VPN: an address of every server
+    ip() { printf '%s\n' '2: eth0    inet 203.0.113.10/24 scope global eth0' '3: wg0    inet 10.8.0.1/24 scope global wg0'; }
+    printf '%s\n' 'peer neil-laptop of neil, the vpn listens on 10.8.0.1 and 203.0.113.10' >"$WORK/report.txt"
+    report_anonymize "$WORK/report.txt"
+    cat "$WORK/report.txt"
+    [[ $(<"$WORK/report.txt") == 'peer <client-4> of <sftp-user>, the vpn listens on 10.8.0.1 and <server-ip>' ]]
+)
+
+restore_failure_says_marker() (
+    load
+    RESTORE_PREVIOUS="$WORK/failure-before"
+    RESTORE_MARKER="$WORK/failure.restore-unfinished"
+    restore_unfinished 2>"$WORK/failure.out"
+    cat "$WORK/failure.out"
+    # the way back also removes the marker, or « doctor » would say it forever
+    grep -qF "mv $WORK/failure-before $APP_STATE_DIR && rm -f $RESTORE_MARKER && seedtunnel apply" "$WORK/failure.out"
+)
+
 printf '\033[1m=== Unit tests\033[0m\n'
 check "vpn_sync: WireGuard refusing the configuration shows « failed »" vpn_sync_reports_wg_failure
 check "vpn_sync: a failure of « wg-quick strip » is seen" vpn_sync_reports_strip_failure
@@ -2646,6 +2968,20 @@ check "seedbox: the home page asks for the password first" nginx_home_asks_passw
 check "dates: today, yesterday, N days ago (EN, FR)" backup_dates_in_words
 check "restore of an older backup: the weekly backup keeps its passphrase" restore_keeps_weekly_passphrase
 check "restore: weekly backup without any passphrase → turned off, said" restore_weekly_without_passphrase_off
+check "restore: another SFTP account than this server → refused first" restore_refuses_other_sftp_account
+check "restore: account already on this server, or web ports taken → refused" restore_refuses_existing_account
+check "restore: VPN or seedbox of this server missing from the backup → refused" restore_refuses_missing_parts
+check "restore: backup without firewall → the firewall of this server stays on" restore_keeps_firewall
+check "restore: marked while the settings are replaced, until the end" restore_marks_until_finished
+check "diagnostics: restore cut short → said, with the way back" doctor_reports_interrupted_restore
+check "firewall at boot: loaded after nftables.service" firewall_after_nftables_service
+check "firewall rules: loaded rules in words, client ports" firewall_rules_in_plain_words
+check "firewall rules: what differs from the settings is said" firewall_rules_differences_said
+check "firewall rules: off → said, client ports still listed" firewall_rules_when_off
+check "report: private values replaced, the useful ones kept" report_replaces_private_values
+check "report: without a seedbox, saved for the account of sudo (600)" report_saved_without_seedbox
+check "report: longest names first, common words and VPN addresses kept" report_longest_first_common_words_kept
+check "restore that fails: the way back also removes its marker" restore_failure_says_marker
 
 printf '\n\033[1m%s passed, %s failed\033[0m\n' "$PASS" "$FAIL"
 ((FAIL == 0))

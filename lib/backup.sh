@@ -29,6 +29,10 @@ BACKUP_KEEP=4
 BACKUP_PASSPHRASE_FILE="$APP_STATE_DIR/backup.passphrase"
 # date of the last download of a backup (see backup_share)
 BACKUP_DOWNLOADED_MARK="$APP_STATE_DIR/backup.downloaded"
+# written while a restore replaces the settings, removed at its end: left
+# there by a restore cut short (power cut…), it says where the settings from
+# before it are (or « none »)
+RESTORE_MARKER="$APP_STATE_DIR.restore-unfinished"
 BACKUP_SERVICE="/etc/systemd/system/seedtunnel-backup.service"
 BACKUP_TIMER="/etc/systemd/system/seedtunnel-backup.timer"
 BACKUP_PASSPHRASE=""
@@ -43,8 +47,59 @@ backup_cleanup() {
     BACKUP_PASSPHRASE=""
 }
 
+# A restore cut short: its marker is still there
+restore_interrupted() { [[ -e $RESTORE_MARKER ]]; }
+
+# Settings from before the restore cut short (empty if there were none)
+restore_interrupted_previous() {
+    local previous=""
+    read -r previous 2>/dev/null <"$RESTORE_MARKER" || true
+    if [[ $previous != none ]]; then printf '%s' "$previous"; fi
+}
+
+# Value of one setting in a settings file of the backup, read in a subshell:
+# the settings of this server stay as they are. The file was checked before
+# (backup_unsafe_state_file): reading it runs nothing.
+restore_backup_setting() {
+    (
+        state_read "$1"
+        printf '%s' "${!2-}"
+    )
+}
+
+# What the backup brings must fit this server, checked before anything is
+# replaced. What lives outside the settings (a running VPN or seedbox, a
+# system account, its SSH rule) is not in a backup: a mismatch would leave
+# it running without seedtunnel knowing it, or take over an account.
+restore_check_server() {
+    local settings="$1/etc/seedtunnel" user
+    if vpn_installed && [[ ! -f $settings/vpn.conf ]]; then
+        die 'This server has a VPN, the backup has none: it would keep running without seedtunnel knowing it. Remove it first (seedtunnel vpn uninstall), or restore on a new server.'
+    fi
+    if seedbox_installed && [[ ! -f $settings/seedbox.conf ]]; then
+        die 'This server has a seedbox, the backup has none: it would keep running without seedtunnel knowing it. Remove it first (seedtunnel seedbox uninstall, the downloads are kept), or restore on a new server.'
+    fi
+    [[ -f $settings/seedbox.conf ]] || return 0
+    user=$(restore_backup_setting "$settings/seedbox.conf" SEEDBOX_USER)
+    if seedbox_installed; then
+        # the SSH rule follows the account of the backup: the other one would
+        # stay, with its password, without its SFTP restrictions
+        if [[ $user != "$SEEDBOX_USER" ]]; then
+            die 'The seedbox of this server uses the account %s, the backup the account %s: %s would stay without its SFTP restrictions. Rename it first (seedtunnel seedbox password --user %s), or remove the seedbox first.' \
+                "$SEEDBOX_USER" "$user" "$SEEDBOX_USER" "$user"
+        fi
+    else
+        # as for an installation: an account of the system is never taken over
+        if id -u "$user" &>/dev/null; then
+            die 'The account %s of the backup already exists on this server: restoring would change its password and shut it in SFTP. Restore on a server without this account.' "$user"
+        fi
+        seedbox_check_web_ports
+    fi
+}
+
 # A restore that stops halfway (error, Ctrl+C) says how to get back to where
-# it started: the server may be partly restored
+# it started: the server may be partly restored. Its marker stays, so that
+# « doctor » and the menu say it too, until the way back removes it.
 restore_unfinished() {
     case $RESTORE_PREVIOUS in
         "") return 0 ;;
@@ -53,7 +108,8 @@ restore_unfinished() {
             ;;
         *)
             warn 'The restore did not finish (details in %s). Your previous settings are kept in %s. To go back to them:' "$APP_LOG" "$RESTORE_PREVIOUS"
-            printf '  rm -rf %s && mv %s %s && seedtunnel apply\n' "$APP_STATE_DIR" "$RESTORE_PREVIOUS" "$APP_STATE_DIR" >&2
+            printf '  rm -rf %s && mv %s %s && rm -f %s && seedtunnel apply\n' \
+                "$APP_STATE_DIR" "$RESTORE_PREVIOUS" "$APP_STATE_DIR" "$RESTORE_MARKER" >&2
             ;;
     esac
 }
@@ -522,7 +578,7 @@ backup_unsafe_state_file() {
 }
 
 restore_main() {
-    local file=${1-} list bad stamp was=$INTERACTIVE kept_passphrase=0
+    local file=${1-} list bad stamp was=$INTERACTIVE kept_passphrase=0 kept_firewall=0
     [[ -n $file ]] || die 'Usage: seedtunnel restore FILE'
     [[ -r $file ]] || die 'File not found: %s' "$file"
     banner
@@ -576,6 +632,7 @@ restore_main() {
         backup_cleanup
         die 'Archive refused: %s holds something else than settings (it could run commands)' "${bad#"$BACKUP_TMP_DIR/x/"}"
     fi
+    restore_check_server "$BACKUP_TMP_DIR/x"
     say 'The backup contains:'
     if grep -qx 'etc/seedtunnel/vpn.conf' <<<"$list"; then say '  - the VPN and its clients'; fi
     if grep -qx 'etc/seedtunnel/seedbox.conf' <<<"$list"; then say '  - the seedbox (settings, passwords, certificates)'; fi
@@ -601,11 +658,22 @@ restore_main() {
         cp -p "$BACKUP_PASSPHRASE_FILE" "$BACKUP_TMP_DIR/x/etc/seedtunnel/"
         kept_passphrase=1
     fi
+    # The firewall of this server stays on when the backup has none: its
+    # rules stay loaded and it is loaded at boot (neither is in a backup);
+    # without its settings, seedtunnel would no longer see it nor update it
+    if [[ ! -e $BACKUP_TMP_DIR/x/etc/seedtunnel/firewall.conf ]] && firewall_enabled; then
+        cp -p "$FIREWALL_CONF_FILE" "$BACKUP_TMP_DIR/x/etc/seedtunnel/"
+        if [[ -f $FIREWALL_RULES ]]; then cp -p "$FIREWALL_RULES" "$BACKUP_TMP_DIR/x/etc/seedtunnel/"; fi
+        kept_firewall=1
+    fi
+    # from here on, a restore cut short is said by « doctor » and the menu
     if [[ -n $(find "$APP_STATE_DIR" -mindepth 1 -maxdepth 1 ! -name packages 2>/dev/null || true) ]]; then
+        printf '%s\n' "$APP_STATE_DIR.before-restore-$stamp" >"$RESTORE_MARKER"
         mv "$APP_STATE_DIR" "$APP_STATE_DIR.before-restore-$stamp"
         RESTORE_PREVIOUS="$APP_STATE_DIR.before-restore-$stamp"
         warn 'Previous settings moved to %s' "$RESTORE_PREVIOUS"
     else
+        printf 'none\n' >"$RESTORE_MARKER"
         rm -rf "$APP_STATE_DIR"
         RESTORE_PREVIOUS=none
     fi
@@ -639,12 +707,16 @@ restore_main() {
         warn 'Neither the backup restored nor this server has a passphrase for the weekly backup: it was turned off. To turn it on again:  seedtunnel backup auto on'
     fi
     RESTORE_PREVIOUS=""
+    rm -f "$RESTORE_MARKER"
     backup_cleanup
     trap - EXIT INT TERM
     INTERACTIVE=$was
     echo
     if ((kept_passphrase)); then
         ok 'The weekly backup of this server is kept, with its passphrase (the backup restored was made before it was turned on).'
+    fi
+    if ((kept_firewall)); then
+        ok 'The firewall of this server stays on (the backup restored has none): its rules were made again for the settings restored.'
     fi
     ok 'Restore finished.'
     if seedbox_installed; then text restore_after; fi

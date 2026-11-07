@@ -26,7 +26,7 @@ Download a published version and check its fingerprint before running it. The co
 
 ```bash
 apt update && apt full-upgrade -y
-V=1.2.7
+V=1.2.8
 cd "$(mktemp -d)"
 curl -fLO https://github.com/finalcutgit411/seedtunnel/releases/download/v$V/seedtunnel-$V.tar.gz \
   && curl -fLO https://github.com/finalcutgit411/seedtunnel/releases/download/v$V/SHA256SUMS \
@@ -81,7 +81,8 @@ seedtunnel vpn show phone                   seedtunnel seedbox sftp-key add my-k
 seedtunnel vpn share laptop                 seedtunnel seedbox sftp-key new
                                             seedtunnel seedbox sftp-password off
                                             seedtunnel seedbox bans | unban IP
-seedtunnel firewall enable|disable|status   seedtunnel doctor
+seedtunnel firewall enable|disable|status   seedtunnel doctor [--link]
+seedtunnel firewall rules
 seedtunnel backup [--passphrase-file F]     seedtunnel backup list | share
 seedtunnel backup auto on|off|status        seedtunnel restore FILE [--passphrase-file F]
 seedtunnel update                           seedtunnel apply
@@ -167,6 +168,8 @@ This concerns what reaches the server itself. The VPN clients are trusted: what 
 
 In a terminal, every change is **tried first**: without a confirmation from a new SSH connection within 2 minutes, the previous rules come back (or no rules, the first time). « yes » only counts once sshd has accepted a new login since the rules were applied: from the Internet, it always counts; through the VPN, only if your session comes through the VPN too; from the server itself, never. A confirmation from the Internet proves nothing for the VPN: its port is checked by the automatic tests, with a new tunnel through the firewall. The rules loaded at boot only change once confirmed.
 
+`seedtunnel firewall rules` (or « Show the rules » in the menu) lists, in words, the rules nftables really has loaded right now, and the ports forwarded to each VPN client (they can be reached from the Internet). What differs from the settings is pointed out. The raw rules can be shown too.
+
 ### Diagnostics
 
 `seedtunnel doctor` checks, giving for every problem the command that fixes it:
@@ -177,10 +180,12 @@ In a terminal, every change is **tried first**: without a confirmation from a ne
 - the NAT of the VPN, made for the network interface the server uses now;
 - the kernel network settings (IPv4, and IPv6 if the server has it);
 - the disk space, the full disk protection (including a Transmission that does not start again although there is room) and the clock;
-- an update that did not finish;
+- an update or a restore that did not finish;
 - the backups (see below), including the timer and the passphrase of the weekly backup.
 
 It exits with status 1 when it finds a problem, so it can run in a scheduled task.
+
+To ask for help, `seedtunnel doctor --link` (or the question at the end of the diagnostics, in the menu) makes a **report** — the diagnostics and the end of the log — and a one-time link to send it. What is private is replaced by a generic word: domain, name of the server, public IP addresses, SFTP account, SSH keys, names of the VPN clients (`<client-1>`…). The ports and the addresses inside the VPN (10.8.0.x, the same on every server) stay. It never holds a password, a passphrase or a key. Without a seedbox, the report is saved in your home folder.
 
 ### Backups
 
@@ -198,6 +203,8 @@ If a setting changes while the archive is written (renewal of a certificate, for
 A backup that stays on the server disappears with it: `seedtunnel backup share` gives a one-time link to download the latest one onto your computer. `seedtunnel doctor` reminds you when the weekly backup is off or fails, and when no backup was downloaded for a month.
 
 On a new server, `seedtunnel restore FILE` puts everything back. The archive is checked first: only files and folders (and the links of Let's Encrypt), and settings files that cannot run any command. The VPN clients connect again without any change if `VPN_PUBLIC_ADDRESS` is a domain name pointing to the new server.
+
+On a server that already has seedtunnel, the backup must fit it, checked before anything is replaced: a VPN or a seedbox of the server missing from the backup, another SFTP account than the one of the seedbox, or an account of the backup that already exists on the server, and the restore stops, saying what to do. The firewall and the weekly backup of the server stay on when the backup has none. A restore cut short (power cut) is pointed out by `seedtunnel doctor` and the menu, with the way back.
 
 Downloaded files are not in the backup: copy them with `rsync`.
 

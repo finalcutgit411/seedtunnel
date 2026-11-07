@@ -35,7 +35,9 @@ Seedbox
 
 Server
   firewall enable|disable|status     firewall (everything refused but the needed)
+  firewall rules                     the rules loaded right now, in words
   doctor                             full diagnostics (status 1 if a problem)
+  doctor --link                      report without private details, one-time link
   backup [--output FILE] [--passphrase-file FILE]
   backup list | share                list the backups / one-time download link
   backup auto on|off|status          weekly encrypted backup
@@ -172,6 +174,14 @@ text_en_backup_after() {
     cat <<'EOF'
   Get it onto your computer, outside this server:  seedtunnel backup share
   Without the passphrase, it cannot be recovered.
+EOF
+}
+
+text_en_share_steps_report() {
+    cat <<'EOF'
+<li>Send this file to the person who helps you (forum, e-mail…): it opens with any text editor.</li>
+<li>Your domain, the name and the addresses of your server, your SFTP account, your SSH keys and the names of your VPN clients were replaced by generic words. It holds no password and no key.</li>
+<li>To make a new one: <code>seedtunnel doctor --link</code>.</li>
 EOF
 }
 

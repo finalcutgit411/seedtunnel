@@ -295,6 +295,16 @@ vpn_reconcile() {
     fi
 }
 
+# Number of the client of a file of clients/: address 10.8.0.(N+1), port 60000+N
+vpn_client_number() {
+    (
+        CLIENT_NUMBER=""
+        # shellcheck source=/dev/null
+        . "$1"
+        printf '%s' "$CLIENT_NUMBER"
+    )
+}
+
 vpn_next_client_number() {
     local number file used=" "
     for file in "$VPN_CLIENTS_DIR"/*.env; do

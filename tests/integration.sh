@@ -205,6 +205,65 @@ nothing_changed() {
     ! grep -E 'Starting|Restarting|Reloading|Stopping|Applying|Installing|Creating|Enabling|Updating' <<<"$out"
 }
 
+# « seedtunnel firewall rules » reads the rules nftables really has: every
+# part in words, the port of the client, nothing unknown nor missing
+firewall_rules_test() {
+    local out expected
+    out=$(app firewall rules 2>&1) || {
+        printf '%s\n' "$out"
+        return 1
+    }
+    printf '%s\n' "$out"
+    for expected in "Replies to the connections already open" "Ping and ICMP messages" "SSH / SFTP: port 22/tcp" \
+        "VPN WireGuard: port 51820/udp" "Everything coming from the VPN clients" "Web site: ports 80, 443/tcp" \
+        "BitTorrent: port 60000 (TCP and UDP)" "Everything else is refused." "port 60001 (TCP and UDP) → phone (10.8.0.2)"; do
+        [[ $out == *"$expected"* ]] || {
+            echo "missing: $expected"
+            return 1
+        }
+    done
+    [[ $out != *"Other rule"* && $out != *"Other port open"* && $out != *"Missing from"* ]]
+}
+
+# « seedtunnel doctor --link »: the report downloaded by its link holds none
+# of the private values of this server, no password, no key
+report_link_test() {
+    local out path page name value
+    out=$(app doctor --link 2>&1) || true
+    path=$(share_path "$out") || {
+        printf 'no link:\n%s\n' "$out"
+        return 1
+    }
+    page=$(curl -sk --max-time 10 "https://127.0.0.1$path")
+    name=$(grep -oE 'seedtunnel-report-[0-9-]+\.txt' <<<"$page" | head -n 1)
+    [[ -n $name ]] || return 1
+    curl -skf --max-time 10 -o "$W/report.txt" "https://127.0.0.1${path}$name" || return 1
+    grep -q "=== Diagnostics" "$W/report.txt" && grep -q "End of the log" "$W/report.txt" || return 1
+    for value in "$SBU" phone laptop "$(hostname)"; do
+        if grep -qw -- "$value" "$W/report.txt"; then
+            echo "still in the report: $value"
+            grep -nw -- "$value" "$W/report.txt" | head -5
+            return 1
+        fi
+    done
+    for value in "$PW1" "$PW2" "PrivateKey" "PRIVATE KEY" "$(awk '{ print $2 }' "$W/key.pub")"; do
+        if grep -qF -- "$value" "$W/report.txt"; then
+            echo "a secret is in the report"
+            return 1
+        fi
+    done
+    link_gone "${path}$name"
+}
+
+# A backup made when the server had its VPN only, restored now that it also
+# has a seedbox: refused before anything is replaced
+restore_missing_part_test() {
+    output_has "This server has a seedbox, the backup has none" \
+        app restore "$W/vpn-only.enc" --passphrase-file "$W/vpn-only.pass" --yes || return 1
+    test -s /etc/seedtunnel/seedbox.conf && id "$SBU" >/dev/null && test -e /etc/ssh/sshd_config.d/seedtunnel-seedbox.conf \
+        && ! test -e /etc/seedtunnel.restore-unfinished
+}
+
 # The first backup of phase 2 was made by hand, before the weekly backup was
 # turned on: it holds no passphrase for it
 restore_older_backup_test() {
@@ -644,6 +703,10 @@ EOF
 
     step "VPN: end-to-end tunnel"
     check "a client connects and reaches 10.8.0.1" tunnel_test
+    # for phase 2: a backup of this server while it has its VPN only
+    printf 'a test passphrase\n' >"$W/vpn-only.pass"
+    chmod 600 "$W/vpn-only.pass"
+    check "backup of the VPN alone (used in phase 2)" app backup --output "$W/vpn-only.enc" --passphrase-file "$W/vpn-only.pass"
 
     step "Seedbox: installation from a configuration file"
     check "installation" app seedbox install --config "$W/ci.conf"
@@ -721,6 +784,9 @@ EOF
     check "default policy: drop" grep -q 'policy drop' "$W/fw.txt"
     check "loaded again at boot" systemctl is-enabled --quiet seedtunnel-firewall.service
     check "WireGuard tunnel through the firewall" tunnel_test
+    check "loaded at boot after nftables.service" output_has "nftables.service" systemctl show seedtunnel-firewall.service -p After
+    check "firewall rules: what is loaded, in words, with the port of the client" firewall_rules_test
+    check "report by link: nothing private, no password, no key, link used once" report_link_test
     check "confirmation: real SSH login recognised, fake message refused" firewall_proof_test
 
     step "Full disk protection"
@@ -755,6 +821,7 @@ phase2() {
     cp "$(ls -1t /var/backups/seedtunnel/*-auto.tar.gz.enc | head -n 1)" "$W/backup.enc"
 
     step "Removal, then restore"
+    check "backup without the seedbox of this server: refused, nothing changed" restore_missing_part_test
     check "removing the seedbox" app seedbox uninstall --yes
     check "removing the VPN" app vpn uninstall --yes
     check "turning the firewall off" app firewall disable --yes

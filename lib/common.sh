@@ -6,7 +6,7 @@
 # =============================================================================
 
 APP_NAME="seedtunnel"
-APP_VERSION="1.2.7"
+APP_VERSION="1.2.8"
 # GitHub repository used by « seedtunnel update » (owner/project)
 APP_REPO="finalcutgit411/seedtunnel"
 # Server state and secrets (readable by root only)
@@ -28,6 +28,7 @@ OPT_OUTPUT_FILE=""
 OPT_PASSPHRASE_FILE=""
 OPT_PURGE_DATA=0
 OPT_QR=0
+OPT_LINK=0
 OPT_NEW_USER=""
 
 # --- Colors (off when the output is not a terminal) ---------------------------

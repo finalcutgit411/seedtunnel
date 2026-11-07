@@ -77,6 +77,10 @@ menu_status() {
     printf '  %-10s: %s\n' "Seedbox" "$seedbox_text"
     printf '  %-10s: %s\n' "$(t 'Disk')" "$disk_text"
     printf '  %-10s: %s\n\n' "$(t 'Firewall')" "$firewall_text"
+    if restore_interrupted; then
+        warn 'A restore did not finish: the settings may be incomplete. See  seedtunnel doctor'
+        echo
+    fi
 }
 
 main_menu() {
@@ -135,6 +139,7 @@ while (($#)); do
             ;;
         --staging) OPT_STAGING=1 ;;
         --qr) OPT_QR=1 ;;
+        --link) OPT_LINK=1 ;;
         --purge-data) OPT_PURGE_DATA=1 ;;
         --output)
             need_value "$1" "${2-}"
@@ -197,7 +202,14 @@ check_system
 # Commands that change nothing (or only add a backup file) do not wait for the
 # lock: they work even if a menu was left open in another window.
 case "${1-} ${2-} ${3-}" in
-    "doctor  " | "diskguard-check  " | "diskguard-prestart  " | "backup  " | "backup list " | "backup auto run" | "backup auto status" | "backup auto ") ;;
+    "diskguard-check  " | "diskguard-prestart  " | "backup  " | "backup list " | "backup auto run" | "backup auto status" | "backup auto " | "firewall rules ") ;;
+    # a link to the report changes the site of the seedbox: it waits
+    "doctor  ")
+        if ((OPT_LINK)); then
+            take_lock
+            packages_record_init
+        fi
+        ;;
     *)
         take_lock
         packages_record_init

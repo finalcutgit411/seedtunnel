@@ -61,6 +61,162 @@ firewall_open_tcp_ports() {
 # chain, refusing by default what is not allowed?
 firewall_refuses_by_default() { grep -qE 'type filter hook input priority [^;]*; policy drop;'; }
 
+# --- The rules in words (« seedtunnel firewall rules ») -------------------------------
+# What nftables really has loaded, not what the settings say: what differs
+# from the settings is said. Nothing is changed.
+
+# One allowed line of the list (text already translated)
+firewall_rule_line() { printf '  %s✔%s %s\n' "$C_GREEN" "$C_RESET" "$1"; }
+
+# Numbers in a rule: « tcp dport { 22, 2222 } accept » → 22 2222
+firewall_rule_numbers() { grep -oE '[0-9]+' <<<"${1#*dport}" | paste -sd' ' -; }
+
+# The allowed lines of loaded rules (« nft list » on standard input), in words
+firewall_rules_in_words() {
+    local line port ssh web other
+    local -a ssh_ports
+    read -r -a ssh_ports <<<"$(firewall_ssh_ports | tr -d ',')"
+    while IFS= read -r line; do
+        line=${line#"${line%%[![:space:]]*}"}
+        case $line in
+            *" accept") ;;
+            *) continue ;;
+        esac
+        case $line in
+            "ct state established,related accept") firewall_rule_line "$(t 'Replies to the connections already open')" ;;
+            'iifname "lo" accept') firewall_rule_line "$(t 'The server talking to itself')" ;;
+            "iifname \"$VPN_INTERFACE\" accept") firewall_rule_line "$(t 'Everything coming from the VPN clients')" ;;
+            "ip6 saddr fe80::/10 udp dport 546 accept") firewall_rule_line "$(t 'IPv6 address given by the provider (DHCPv6)')" ;;
+            "meta l4proto {"*"} accept")
+                if [[ $line == *icmp* || $line == *"1, 58"* ]]; then
+                    firewall_rule_line "$(t 'Ping and ICMP messages (IPv4 and IPv6)')"
+                else
+                    printf '  %s!%s %s\n' "$C_YELLOW" "$C_RESET" "$(t 'Other rule: %s' "$line")"
+                fi
+                ;;
+            "tcp dport "*" accept")
+                ssh="" web="" other=""
+                for port in $(firewall_rule_numbers "$line"); do
+                    if [[ " ${ssh_ports[*]} " == *" $port "* ]]; then
+                        ssh+="${ssh:+, }$port"
+                    elif [[ $port == 80 || $port == 443 ]]; then
+                        web+="${web:+, }$port"
+                    else
+                        other+="${other:+, }$port"
+                    fi
+                done
+                if [[ -n $ssh ]]; then firewall_rule_line "$(t 'SSH / SFTP: port %s/tcp' "$ssh")"; fi
+                if [[ -n $web ]]; then firewall_rule_line "$(t 'Web site: ports %s/tcp' "$web")"; fi
+                if [[ -n $other ]]; then printf '  %s!%s %s\n' "$C_YELLOW" "$C_RESET" "$(t 'Other port open: %s/tcp' "$other")"; fi
+                ;;
+            "udp dport "*" accept")
+                port=$(firewall_rule_numbers "$line")
+                if vpn_installed && [[ $port == "$VPN_PORT" ]]; then
+                    firewall_rule_line "$(t 'VPN WireGuard: port %s/udp' "$port")"
+                else
+                    printf '  %s!%s %s\n' "$C_YELLOW" "$C_RESET" "$(t 'Other port open: %s/udp' "$port")"
+                fi
+                ;;
+            "meta l4proto { "*" } th dport "*" accept")
+                port=$(firewall_rule_numbers "$line")
+                if seedbox_installed && [[ $port == "$TORRENT_PORT" ]]; then
+                    firewall_rule_line "$(t 'BitTorrent: port %s (TCP and UDP)' "$port")"
+                else
+                    printf '  %s!%s %s\n' "$C_YELLOW" "$C_RESET" "$(t 'Other port open: %s (TCP and UDP)' "$port")"
+                fi
+                ;;
+            *) printf '  %s!%s %s\n' "$C_YELLOW" "$C_RESET" "$(t 'Other rule: %s' "$line")" ;;
+        esac
+    done
+}
+
+# Ports the settings want open but that the loaded rules ($1) do not have
+firewall_rules_missing() {
+    local rules=$1 port missing="" open
+    open=" $(firewall_open_tcp_ports <<<"$rules" | paste -sd' ' -) "
+    for port in $(firewall_ssh_ports | tr -d ','); do
+        if [[ $open != *" $port "* ]]; then missing+="${missing:+, }SSH $port/tcp"; fi
+    done
+    if vpn_installed && ! grep -qE "udp dport $VPN_PORT accept" <<<"$rules"; then missing+="${missing:+, }VPN $VPN_PORT/udp"; fi
+    if seedbox_installed; then
+        for port in 80 443; do
+            if [[ $open != *" $port "* ]]; then missing+="${missing:+, }web $port/tcp"; fi
+        done
+        if ! grep -qE "th dport $TORRENT_PORT accept" <<<"$rules"; then missing+="${missing:+, }BitTorrent $TORRENT_PORT"; fi
+    fi
+    if [[ -n $missing ]]; then
+        err 'Missing from the rules loaded, although the settings need it: %s   → seedtunnel apply' "$missing"
+    fi
+}
+
+# Ports forwarded to the clients of the VPN (NAT of the VPN, loaded right now)
+firewall_forwarded_ports() {
+    local nat line port address number name file found=0
+    nat=$(nft list table ip seedtunnel 2>/dev/null || true)
+    while IFS= read -r line; do
+        [[ $line =~ th\ dport\ ([0-9]+)\ dnat\ (ip\ )?to\ ([0-9.]+) ]] || continue
+        port=${BASH_REMATCH[1]}
+        address=${BASH_REMATCH[3]}
+        # client number N: address 10.8.0.(N+1), port 60000+N
+        number=$((${address##*.} - 1))
+        name="?"
+        for file in "$VPN_CLIENTS_DIR"/*.env; do
+            [[ -e $file ]] || continue
+            if [[ $(vpn_client_number "$file") == "$number" ]]; then
+                name=${file##*/}
+                name=${name%.env}
+            fi
+        done
+        printf '  %s●%s %s\n' "$C_GREEN" "$C_RESET" "$(t 'port %s (TCP and UDP) → %s (%s)' "$port" "$name" "$address")"
+        found=1
+    done <<<"$nat"
+    if [[ -z $nat ]]; then
+        printf '  %s\n' "$(t 'none: the VPN is not running')"
+    elif ((!found)); then
+        printf '  %s\n' "$(t 'none: no client yet')"
+    fi
+}
+
+firewall_rules_show() {
+    local rules
+    if ! firewall_enabled; then
+        warn 'Firewall off: nothing is refused, every port of the server can be reached.'
+    else
+        rules=$(nft list table inet "$FIREWALL_TABLE" 2>/dev/null || true)
+        if [[ -z $rules ]]; then
+            err 'Firewall enabled but rules missing:  seedtunnel firewall enable --yes'
+        else
+            say 'Allowed towards the server (rules loaded right now):'
+            firewall_rules_in_words <<<"$rules"
+            if firewall_refuses_by_default <<<"$rules"; then
+                printf '  %s\n' "$(t 'Everything else is refused.')"
+            else
+                err 'Everything else is accepted: these rules refuse nothing by default   → seedtunnel firewall enable --yes'
+            fi
+            firewall_rules_missing "$rules"
+        fi
+    fi
+    if vpn_installed; then
+        echo
+        say 'Ports forwarded to the VPN clients (they can be reached from the Internet, the firewall does not filter them):'
+        firewall_forwarded_ports
+    fi
+}
+
+# From the menu: the list, then the raw rules on request
+firewall_rules_menu() {
+    banner
+    section 'FIREWALL RULES'
+    firewall_rules_show
+    echo
+    if confirm 'Show the raw rules (nftables)?' n; then
+        echo
+        nft list table inet "$FIREWALL_TABLE" 2>/dev/null || true
+        nft list table ip seedtunnel 2>/dev/null || true
+    fi
+    pause
+}
+
 # What is open, in words
 firewall_summary() {
     local summary
@@ -115,6 +271,8 @@ firewall_generate_unit() {
 Description=seedtunnel firewall (nftables)
 Wants=network-pre.target
 Before=network-pre.target shutdown.target
+# if nftables.service is on, its « flush ruleset » comes first, not after
+After=nftables.service
 Conflicts=shutdown.target
 DefaultDependencies=no
 
@@ -358,6 +516,7 @@ firewall_menu() {
         echo
         say '1) Enable / update the firewall'
         say '2) Turn the firewall off'
+        say '3) Show the rules'
         echo
         say 'Q) Back'
         echo
@@ -365,6 +524,7 @@ firewall_menu() {
         case ${choice,,} in
             1) firewall_enable ;;
             2) firewall_disable ;;
+            3) firewall_rules_menu ;;
             q) return 0 ;;
         esac
     done
@@ -388,6 +548,11 @@ firewall_cli() {
             ;;
         disable) firewall_disable ;;
         status) firewall_status ;;
-        *) die 'Usage: seedtunnel firewall enable|disable|status' ;;
+        rules)
+            firewall_rules_show
+            echo
+            say 'Raw rules:  nft list table inet %s ; nft list table ip seedtunnel' "$FIREWALL_TABLE"
+            ;;
+        *) die 'Usage: seedtunnel firewall enable|disable|status|rules' ;;
     esac
 }

@@ -70,6 +70,7 @@ doctor_system() {
     if [[ -e $APP_DIR.previous ]]; then
         doctor_warn 'An update did not finish: %s is still there. If seedtunnel works, delete it:  rm -rf %s' "$APP_DIR.previous" "$APP_DIR.previous"
     fi
+    doctor_restore_interrupted
     if [[ -e /run/reboot-required ]]; then
         doctor_warn 'Restart advised (update of the kernel or of a library)'
     fi
@@ -113,6 +114,20 @@ doctor_vpn() {
     doctor_ok 'Clients: %s, %s connected right now' "$(vpn_count_clients)" "$(vpn_connected_count)"
     say "  (the UDP port cannot be tested from outside by the server itself: if in"
     say "   doubt, check the firewall in the control panel of the provider)"
+}
+
+# Left by a restore cut short (power cut…): the settings may be half there.
+# Back to those from before it, if there were some; otherwise, restore again.
+doctor_restore_interrupted() {
+    local previous
+    restore_interrupted || return 0
+    previous=$(restore_interrupted_previous)
+    if [[ -n $previous && -d $previous ]]; then
+        doctor_error 'A restore did not finish: the settings of seedtunnel may be incomplete. To go back to those from before it:  rm -rf %s && mv %s %s && rm -f %s && seedtunnel apply' \
+            "$APP_STATE_DIR" "$previous" "$APP_STATE_DIR" "$RESTORE_MARKER"
+    else
+        doctor_error 'A restore did not finish: the settings of seedtunnel may be incomplete. Run it again:  seedtunnel restore FILE'
+    fi
 }
 
 # The clients go out to the Internet through the masquerade rule: it must be
@@ -346,5 +361,188 @@ doctor_main() {
     else
         ok 'Everything is fine.'
     fi
+    # a report to send to someone who helps: asked from the menu, done with --link
+    if ((OPT_LINK)); then
+        echo
+        report_send
+    elif ((INTERACTIVE)); then
+        echo
+        if report_by_link; then
+            if confirm 'Create a one-time link to send this report? Domain, name of the server, public IP addresses, SFTP account, SSH keys and names of the VPN clients are replaced.' n; then report_send; fi
+        elif confirm 'Save this report to send it? Domain, name of the server, public IP addresses, SFTP account, SSH keys and names of the VPN clients are replaced.' n; then
+            report_send
+        fi
+    fi
     pause
+}
+
+# --- Report to send for help (« seedtunnel doctor --link ») -----------------------
+# The diagnostics and the end of the log in one text file, where what is
+# private is replaced by a generic word: domain, name of the server, public IP
+# addresses, SFTP account, SSH keys, names of the VPN clients. The ports and
+# the addresses of the VPN (10.8.0.x, the same on every server) stay: they
+# help. Passwords, passphrases and private keys never go into the log.
+REPORT_LOG_LINES=500
+# names (of the server, the SFTP account, the clients) that are also common
+# words of a report: kept, they say nothing about anyone (« debian » would
+# change « debian-transmission » too, a client « vpn » every « vpn »)
+REPORT_COMMON_WORDS=" backup client clients debian firewall localhost nginx root seedbox seedtunnel server sftp ssh transmission vpn vps web wg0 "
+REPORT_SCRIPT=""
+
+report_common_word() { [[ $REPORT_COMMON_WORDS == *" ${1,,} "* ]]; }
+
+# One known private value, as « length<TAB>value<TAB>replacement »: they are
+# replaced longest first (the client « neil-laptop » before the account « neil »)
+report_known() {
+    if [[ -n $1 ]]; then printf '%s\t%s\t%s\n' "${#1}" "$1" "$2"; fi
+}
+
+# A link needs the site of the seedbox; otherwise the report is saved
+report_by_link() { seedbox_installed && systemctl is-active --quiet nginx; }
+
+# Adds to the sed script: the whole VALUE (not inside a longer word) →
+# REPLACEMENT. Twice: two values next to each other share the character
+# between them.
+report_replace() {
+    local value=$1 replacement=$2 pattern
+    [[ -n $value ]] || return 0
+    pattern="(^|[^[:alnum:]_])$(sed 's/[][\.*^$/+?(){}|]/\\&/g' <<<"$value")([^[:alnum:]_]|\$)"
+    REPORT_SCRIPT+="s/$pattern/\\1$replacement\\2/g;s/$pattern/\\1$replacement\\2/g;"
+}
+
+# Public addresses only: the private networks (10.x of the VPN, 192.168.x…)
+# say nothing about anyone
+report_ipv4_is_public() {
+    local a b _rest
+    IFS=. read -r a b _rest <<<"$1"
+    if ((a == 0 || a == 10 || a == 127 || a >= 224)); then return 1; fi
+    if ((a == 100 && b >= 64 && b <= 127)) || ((a == 169 && b == 254)); then return 1; fi
+    if ((a == 172 && b >= 16 && b <= 31)) || ((a == 192 && b == 168)); then return 1; fi
+}
+report_ipv6_is_public() {
+    local address=${1,,}
+    [[ $address != fe80:* && $address != fc* && $address != fd* && $address != ::* ]]
+}
+
+# Public addresses of this server: of its interfaces, and the one of the VPN
+# (its private ones, like 10.8.0.1 in the VPN, stay: the same everywhere)
+report_server_addresses() {
+    local address
+    while IFS= read -r address; do
+        if { is_ipv4 "$address" && report_ipv4_is_public "$address"; } \
+            || { is_ipv6 "$address" && report_ipv6_is_public "$address"; }; then
+            printf '%s\n' "$address"
+        fi
+    done < <(
+        ip -o addr show scope global 2>/dev/null | awk '{ sub("/.*", "", $4); print $4 }' || true
+        if is_ipv4 "${VPN_PUBLIC_ADDRESS-}" || is_ipv6 "${VPN_PUBLIC_ADDRESS-}"; then printf '%s\n' "$VPN_PUBLIC_ADDRESS"; fi
+        if is_ipv4 "${SEEDBOX_DOMAIN-}"; then printf '%s\n' "$SEEDBOX_DOMAIN"; fi
+    )
+}
+
+# The private values seedtunnel knows, with what replaces them (report_known)
+report_known_values() {
+    local file=$1 host fqdn address name number client
+    if seedbox_installed && ! is_ipv4 "$SEEDBOX_DOMAIN"; then report_known "$SEEDBOX_DOMAIN" "$(t '<domain>')"; fi
+    if vpn_installed && ! is_ipv4 "$VPN_PUBLIC_ADDRESS" && ! is_ipv6 "$VPN_PUBLIC_ADDRESS"; then
+        report_known "$VPN_PUBLIC_ADDRESS" "$(t '<domain>')"
+    fi
+    fqdn=$(hostname -f 2>/dev/null || true)
+    host=$(hostname 2>/dev/null || true)
+    host=${host%%.*}
+    if [[ $fqdn == *.* ]]; then report_known "$fqdn" "$(t '<server>')"; fi
+    if ! report_common_word "$host"; then report_known "$host" "$(t '<server>')"; fi
+    while IFS= read -r address; do
+        report_known "$address" "$(t '<server-ip>')"
+    done < <(report_server_addresses | sort -u)
+    if seedbox_installed && ! report_common_word "$SEEDBOX_USER"; then report_known "$SEEDBOX_USER" "$(t '<sftp-user>')"; fi
+    # each client by its number: the same in every report, as its address
+    # 10.8.0.(N+1) and its port 60000+N
+    for client in "$VPN_CLIENTS_DIR"/*.env; do
+        [[ -e $client ]] || continue
+        name=${client##*/}
+        name=${name%.env}
+        number=$(vpn_client_number "$client")
+        if ! report_common_word "$name"; then report_known "$name" "$(t '<client-%s>' "$number")"; fi
+    done
+    # clients removed since, as the log names them: their link, their files
+    while IFS= read -r name; do
+        if [[ ! -e $VPN_CLIENTS_DIR/$name.env ]] && ! report_common_word "$name"; then
+            report_known "$name" "$(t '<former-client>')"
+        fi
+    done < <(grep -oE '(download link for |clients/)[A-Za-z0-9_-]+\.(conf|env)' "$file" \
+        | sed -E 's/^(download link for |clients\/)//; s/\.(conf|env)$//' | sort -u || true)
+}
+
+# Replaces what is private in FILE
+report_anonymize() {
+    local file=$1 _length value replacement address
+    # colors first, then the known values, longest first (the name of the
+    # server is often part of a domain, an account part of a client name)
+    REPORT_SCRIPT='s/\x1b\[[0-9;]*m//g;'
+    while IFS=$'\t' read -r _length value replacement; do
+        report_replace "$value" "$replacement"
+    done < <(report_known_values "$file" | sort -t $'\t' -k1,1nr)
+    # SSH public keys with their comment, and fingerprints
+    REPORT_SCRIPT+='s/(ssh-(ed25519|rsa|dss)|ecdsa-sha2-nistp[0-9]+|sk-[a-z0-9@.-]+) [A-Za-z0-9+\/=]+( [^ ]+)?/'"$(t '<ssh-key>')"'/g;'
+    REPORT_SCRIPT+='s/SHA256:[A-Za-z0-9+\/]{43}/'"$(t '<fingerprint>')"'/g;'
+    sed -E -i "$REPORT_SCRIPT" "$file"
+    # the other public addresses, as found in what is left
+    REPORT_SCRIPT=""
+    while IFS= read -r address; do
+        if is_ipv4 "$address" && report_ipv4_is_public "$address"; then report_replace "$address" "$(t '<ip>')"; fi
+    done < <(grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' "$file" | sort -u || true)
+    while IFS= read -r address; do
+        if is_ipv6 "$address" && report_ipv6_is_public "$address"; then report_replace "$address" "$(t '<ip>')"; fi
+    done < <(grep -oiE '([0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}' "$file" | sort -u || true)
+    if [[ -n $REPORT_SCRIPT ]]; then sed -E -i "$REPORT_SCRIPT" "$file"; fi
+}
+
+# Writes the report into FILE: the diagnostics run again, without colors
+report_generate() {
+    local file=$1
+    {
+        t 'seedtunnel report of %s' "$(date '+%F %R %Z')"
+        printf '\nseedtunnel %s · %s\n' "$APP_VERSION" "${APP_OS_DESCRIPTION:-Debian}"
+        t 'Replaced: domain, name of the server, public IP addresses, SFTP account, SSH keys, names of the VPN clients.'
+        printf '\n\n=== %s\n' "$(t 'Diagnostics')"
+        (
+            C_RED="" C_GREEN="" C_YELLOW="" C_BLUE="" C_BOLD="" C_DIM="" C_RESET=""
+            INTERACTIVE=0
+            OPT_LINK=0
+            doctor_main
+        ) 2>&1
+        printf '\n=== %s\n' "$(t 'End of the log (last %s lines)' "$REPORT_LOG_LINES")"
+        tail -n "$REPORT_LOG_LINES" "$APP_LOG" 2>/dev/null || true
+    } >"$file"
+    report_anonymize "$file"
+}
+
+# Makes the report, then a one-time link to it; without the site of a
+# seedbox, saves it where the account that ran sudo can fetch it
+report_send() {
+    local tmp name owner home
+    name="seedtunnel-report-$(date +%Y%m%d-%H%M%S).txt"
+    tmp=$(mktemp)
+    printf '%s\n' "$(t 'Preparing the report (the diagnostics run once more)…')"
+    report_generate "$tmp"
+    if report_by_link; then
+        if ! (share_create "$tmp" "$name" "$(t 'seedtunnel report')" "$(text share_steps_report)" \
+            "$(t 'Domain, name of the server, public IP addresses, SFTP account, SSH keys and names of the VPN clients are replaced. No password, no key.')"); then
+            rm -f "$tmp"
+            return 1
+        fi
+        rm -f "$tmp"
+        return 0
+    fi
+    owner=${SUDO_USER:-root}
+    home=$(getent passwd "$owner" | cut -d: -f6 || true)
+    [[ -d $home ]] || {
+        owner=root
+        home=/root
+    }
+    install -m 600 -o "$owner" "$tmp" "$home/$name"
+    rm -f "$tmp"
+    ok 'Report saved: %s' "$home/$name"
+    say 'Without a seedbox there is no download link: fetch it with WinSCP, FileZilla or scp, logged in as %s.' "$owner"
 }
