@@ -435,22 +435,22 @@ ui_menu_show() {
 # (on its own line when there is no room). Prints all but the last line, which
 # is left in UI_PROMPT: it is the question.
 ui_footer() {
-    local keys="" prompt size
+    local shown="" prompt size
     while (($# >= 2)); do
         ui_key "$1"
-        keys+="${keys:+    }$UI_KEY $2"
+        shown+="${shown:+    }$UI_KEY $2"
         shift 2
     done
     prompt="$C_BRAND$(t 'Your choice') ›$C_RESET "
     ui_rule
-    ui_len "  $keys"
+    ui_len "  $shown"
     size=$UI_LEN
     ui_len "$prompt"
     if ((size + 2 + UI_LEN <= UI_WIDTH)); then
         ui_repeat ' ' $((UI_WIDTH - size - UI_LEN))
-        UI_PROMPT="  $keys$UI_REPEAT$prompt"
+        UI_PROMPT="  $shown$UI_REPEAT$prompt"
     else
-        ui_print "  $keys"
+        ui_print "  $shown"
         UI_PROMPT="  $prompt"
     fi
 }

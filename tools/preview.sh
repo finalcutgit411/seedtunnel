@@ -160,7 +160,7 @@ screen_danger() {
     echo
     ui_box bad "$(pv 'Revoke « laptop »' 'Révoquer « laptop »')" \
         "$(pv 'This device will no longer be able to connect to the VPN.' 'Cet appareil ne pourra plus se connecter au VPN.')" \
-        "$(pv 'Its file and its QR code stop working: this cannot be undone.' 'Son fichier et son QR code ne marcheront plus : c’est définitif.')"
+        "$(pv 'Its file and its QR code stop working: this cannot be undone.' "Son fichier et son QR code ne marcheront plus : c'est définitif.")"
     echo
     question="$C_RED$(pv 'Revoke « laptop » for good?' 'Révoquer définitivement « laptop » ?')$C_RESET $(t '[y/N]')"
     if ((ALL)); then
@@ -169,7 +169,7 @@ screen_danger() {
         return 0
     fi
     IFS= read -r -p "  $question " CHOICE || exit 130
-    printf '  %s\n' "$(pv '(preview: nothing was revoked)' '(aperçu : rien n’a été révoqué)')"
+    printf '  %s\n' "$(pv '(preview: nothing was revoked)' "(aperçu : rien n'a été révoqué)")"
     end_action
 }
 
@@ -183,7 +183,7 @@ screen_seedbox() {
     ui_field_add Services "transmission $C_GREEN●$C_RESET  nginx $C_GREEN●$C_RESET  fail2ban $C_GREEN●$C_RESET"
     ui_fields_show
     echo
-    ui_menu_add 1 "$(pv 'Change the user or the password' 'Changer l’utilisateur ou le mot de passe')"
+    ui_menu_add 1 "$(pv 'Change the user or the password' "Changer l'utilisateur ou le mot de passe")"
     ui_menu_add 2 "$(pv 'Domain name and HTTPS certificate' 'Nom de domaine et certificat HTTPS')"
     ui_menu_add 3 "$(pv 'SSH keys for SFTP' 'Clés SSH pour SFTP')"
     ui_menu_add 4 "$(pv 'SFTP connection: settings for WinSCP and FileZilla' 'Connexion SFTP : réglages pour WinSCP et FileZilla')"
@@ -217,7 +217,7 @@ screen_terminal() {
     key=$UI_KEY
     ui_print "  $C_BRAND● $(pv violet violet)$C_RESET   $C_GREEN● $(pv green vert)$C_RESET   $C_YELLOW● $(pv yellow jaune)$C_RESET   $C_RED● $(pv red rouge)$C_RESET   $C_GREY○ $(pv grey gris)$C_RESET   ${C_CYAN}cyan$C_RESET   $key $(pv key touche)"
     echo
-    ui_print "  $(pv 'Each of these characters must look right (no square, no « ? »):' 'Chacun de ces caractères doit s’afficher (ni carré, ni « ? ») :')"
+    ui_print "  $(pv 'Each of these characters must look right (no square, no « ? »):' "Chacun de ces caractères doit s'afficher (ni carré, ni « ? ») :")"
     ui_print "    ● ○ ✔ ✘ ! › · … ↵ ─ │ ┌ ┐ └ ┘ ├ ┤ ═ é è à ç « »"
     if ((UI_COLORS == 8)); then
         echo
@@ -277,8 +277,8 @@ fi
 [[ -t 0 ]] || die 'This action is interactive: run it from a terminal, or use --all.'
 INTERACTIVE=1
 ui_screen
-printf '\n  %s%s%s\n\n' "$C_BOLD" "$(pv "Preview of the interface of seedtunnel $APP_VERSION" "Aperçu de l’interface de seedtunnel $APP_VERSION")" "$C_RESET"
-ui_print "  $(pv 'Example screens, with example data: nothing is changed on this server.' 'Des écrans d’exemple, avec des données d’exemple : rien n’est modifié sur ce serveur.')"
+printf '\n  %s%s%s\n\n' "$C_BOLD" "$(pv "Preview of the interface of seedtunnel $APP_VERSION" "Aperçu de l'interface de seedtunnel $APP_VERSION")" "$C_RESET"
+ui_print "  $(pv 'Example screens, with example data: nothing is changed on this server.' "Des écrans d'exemple, avec des données d'exemple : rien n'est modifié sur ce serveur.")"
 ui_print "  $(pv 'Enter: next screen · Q: quit' 'Entrée : écran suivant · Q : quitter')"
 echo
 IFS= read -r -p "  $(pv 'Press Enter to start…' 'Appuyez sur Entrée pour commencer…') " CHOICE || exit 130

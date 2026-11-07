@@ -35,14 +35,14 @@ OPT_NEW_USER=""
 # Is the output a terminal? (a function, so that the tests can say yes)
 stdout_is_terminal() { [[ -t 1 ]]; }
 
-# colors_init [on|off] — without argument: on when the output is a terminal,
+# colors_init on|off|auto — auto (or empty): on when the output is a terminal,
 # unless NO_COLOR is set (https://no-color.org) or the terminal is « dumb ».
 # Violet is the color of seedtunnel: mauve (color 141) on the terminals with
 # 256 colors, plain magenta on the others (PuTTY says « xterm », 8 colors,
 # unless its « Terminal-type string » is xterm-256color).
 colors_init() {
-    local mode=${1-}
-    if [[ -z $mode ]]; then
+    local mode=${1:-auto}
+    if [[ $mode == auto ]]; then
         if stdout_is_terminal && [[ -z ${NO_COLOR-} && ${TERM-} != dumb ]]; then mode=on; else mode=off; fi
     fi
     C_RED="" C_GREEN="" C_YELLOW="" C_BLUE="" C_BOLD="" C_DIM="" C_RESET=""
@@ -69,7 +69,7 @@ colors_init() {
         C_GREY=$C_DIM
     fi
 }
-colors_init
+colors_init auto
 
 # --- Output -----------------------------------------------------------------------
 # Every message is a printf format written in English (see lib/i18n.sh):
