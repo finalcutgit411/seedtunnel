@@ -76,25 +76,37 @@ colors_init auto
 # Every message is a printf format written in English (see lib/i18n.sh):
 #   ok 'Client "%s" created.' "$name"
 
+# New screen of the menus: header of seedtunnel (lib/ui.sh). Nothing for the
+# commands.
 banner() {
     ((INTERACTIVE)) || return 0
-    clear 2>/dev/null || true
-    printf '%s' "$C_BLUE"
-    cat <<'EOF'
- ___  ___  ___  ___   _____  _   _  _  _  _  _  ___  _
-/ __|| __|| __||   \ |_   _|| | | || \| || \| || __|| |
-\__ \| _| | _| | |) |  | |  | |_| || .` || .` || _| | |__
-|___/|___||___||___/   |_|   \___/ |_|\_||_|\_||___||____|
-EOF
-    printf '%s%s  v%s · %s · %s%s\n\n' "$C_RESET" "$C_DIM" "$APP_VERSION" \
-        "$(t 'WireGuard VPN + seedbox')" "${APP_OS_DESCRIPTION:-Debian 12/13}" "$C_RESET"
+    ui_screen
+    ui_header
+    ui_rule
 }
 
 say() {
     t "$@"
     printf '\n'
 }
-section() { printf '%s%s%s\n\n' "$C_BOLD" "$(t "$@")" "$C_RESET"; }
+# section FORMAT [ARGUMENTS…] — title of a screen. In the menus, where we are:
+# « seedtunnel › VPN › Add a client » (UI_PLACE: the menus we are in). For
+# the commands, the title in capitals (not the values: names of clients…).
+section() {
+    local format
+    tr_format "$1"
+    shift
+    # shellcheck disable=SC2059 # the format comes from the code or from lang/
+    if ((INTERACTIVE)); then
+        ui_crumbs "${UI_PLACE[@]}" "$(printf -- "$TR_FORMAT" "$@")"
+        echo
+    else
+        format=${TR_FORMAT^^}
+        format=${format//%S/%s}
+        format=${format//%D/%d}
+        printf '%s%s%s\n\n' "$C_BOLD" "$(printf -- "$format" "$@")" "$C_RESET"
+    fi
+}
 ok() { printf '%s✔%s %s\n' "$C_GREEN" "$C_RESET" "$(t "$@")"; }
 warn() { printf '%s!%s %s\n' "$C_YELLOW" "$C_RESET" "$(t "$@")" >&2; }
 err() { printf '%s✘ %s%s\n' "$C_RED" "$(t "$@")" "$C_RESET" >&2; }
@@ -106,10 +118,17 @@ die() {
     exit 1
 }
 
+# End of an action in the menus: « Enter ↵ back · Q quit » (Q leaves
+# seedtunnel). pause_next: in the middle of a series of screens, « Enter ↵
+# continue ».
 pause() {
-    local _
     ((INTERACTIVE)) || return 0
-    IFS= read -r -p "$(t 'Press [Enter] to continue…') " _ || true
+    if ! ui_pause; then ui_quit; fi
+}
+
+pause_next() {
+    ((INTERACTIVE)) || return 0
+    if ! ui_pause next; then ui_quit; fi
 }
 
 # 0 → « today », 1 → « yesterday », N → « N days ago »
@@ -148,10 +167,15 @@ unit_ensure_on() {
 # --- Errors -----------------------------------------------------------------------
 # Any command that fails without being handled ends up here (set -e + trap
 # ERR): we show where, instead of carrying on in a half-done state.
+# The trap of the script (also set again in the actions of the menus)
+error_trap_on() { trap 'on_error $? $LINENO "$BASH_COMMAND" "${BASH_SOURCE[0]:-}"' ERR; }
+
+# Shown once: by the script itself, or by the action of a menu in which it
+# happened (see ui_action), not by the $(…) inside them.
 on_error() {
     local code=$1 line=$2 command=$3 file=${4##*/}
     trap - ERR
-    if ((BASH_SUBSHELL == 0)); then
+    if ((BASH_SUBSHELL == ${UI_ACTION_LEVEL:-0})); then
         printf '\n%s✘ %s%s\n    %s\n' "$C_RED" \
             "$(t 'Unexpected error (code %s) in %s, line %s:' "$code" "${file:-?}" "$line")" \
             "$C_RESET" "$command" >&2
@@ -648,6 +672,18 @@ net_hardening_cleanup() {
 
 # « 36GB free of 40GB » for the partition of a folder. The free space is green,
 # yellow under 10 % or 5 GB, red under 2 GB.
+# disk_level SIZE FREE (bytes) → DISK_LEVEL: bad under 2 GiB free, warn under
+# 5 GiB or 10 %, ok otherwise
+disk_level() {
+    if (($2 < 2 * 1024 ** 3)); then
+        DISK_LEVEL=bad
+    elif (($2 < 5 * 1024 ** 3 || $2 * 10 < $1)); then
+        DISK_LEVEL=warn
+    else
+        DISK_LEVEL=ok
+    fi
+}
+
 disk_free_text() {
     local size="" avail="" color
     read -r size avail < <(df -B1 --output=size,avail "$1" 2>/dev/null | tail -n 1) || true
@@ -655,13 +691,12 @@ disk_free_text() {
         printf '?'
         return 0
     fi
-    if ((avail < 2 * 1024 ** 3)); then
-        color=$C_RED
-    elif ((avail < 5 * 1024 ** 3 || avail * 10 < size)); then
-        color=$C_YELLOW
-    else
-        color=$C_GREEN
-    fi
+    disk_level "$size" "$avail"
+    case $DISK_LEVEL in
+        bad) color=$C_RED ;;
+        warn) color=$C_YELLOW ;;
+        *) color=$C_GREEN ;;
+    esac
     t '%s free%s of %s' "$color$(human_size "$avail")" "$C_RESET" "$(human_size "$size")"
 }
 
@@ -768,9 +803,9 @@ port_in_use() {
 }
 
 reboot_server() {
+    danger "$(t 'Restart the server')" "$(t 'The VPN and the seedbox stop for a minute or two; this connection is cut.')"
     if confirm 'Restart the server now?' n; then
-        say 'See you soon!'
         systemctl reboot
-        exit 0
+        ui_quit
     fi
 }

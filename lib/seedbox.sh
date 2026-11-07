@@ -262,7 +262,7 @@ seedbox_ask_user() {
 
 # Asks for the domain name and checks that it points to this server.
 # Sets SEEDBOX_DOMAIN, and SEEDBOX_LETSENCRYPT: auto if Let's Encrypt has a
-# chance, otherwise no. An empty answer or Q goes back, with status 1, and
+# chance, otherwise no. An empty answer or B goes back, with status 1, and
 # nothing is changed. « change »: the seedbox is already installed.
 seedbox_ask_domain() {
     local ip=$1 mode=${2-} ips choice answer default=$SEEDBOX_DOMAIN
@@ -303,7 +303,7 @@ seedbox_ask_domain() {
         say "  Let's Encrypt will not be able to issue a certificate for this name."
         say '  (after a DNS change, allow a few minutes to a few hours)'
         say '  R) Try again    C) Continue with a self-signed certificate'
-        say '  Q) Back, nothing is changed'
+        say '  B) Back, nothing is changed'
         ask choice 'Your choice' "R"
         case ${choice,,} in
             c)
@@ -311,7 +311,7 @@ seedbox_ask_domain() {
                 SEEDBOX_LETSENCRYPT=no
                 return 0
                 ;;
-            q) return 1 ;;
+            b | q) return 1 ;;
         esac
     done
 }
@@ -1065,7 +1065,7 @@ seedbox_sftp_config() {
     url=$(winscp_url "$port")
     if [[ $SEEDBOX_SFTP_PASSWORD == no ]]; then keys_only=" $(t '(SSH key only)')"; fi
     banner
-    section 'SFTP CONNECTION TO THE SEEDBOX'
+    section 'SFTP connection: settings for WinSCP and FileZilla'
     say '  Protocol    : SFTP'
     say '  Host        : %s' "$SEEDBOX_DOMAIN"
     say '  Port        : %s' "$port"
@@ -1269,52 +1269,63 @@ seedbox_set_sftp_password() {
     fi
 }
 
+sftp_keys_menu_add() {
+    local answer
+    if sftp_ask_public_key answer; then
+        sftp_keys_import - <<<"$answer"
+        seedbox_apply_sftp
+        pause
+    fi
+}
+
+sftp_keys_menu_remove() {
+    local answer
+    if sftp_ask_key_number answer; then
+        sftp_keys_remove "$answer"
+        pause
+    fi
+}
+
+sftp_keys_menu_password() {
+    if [[ $SEEDBOX_SFTP_PASSWORD == yes ]]; then seedbox_set_sftp_password off; else seedbox_set_sftp_password on; fi
+    pause
+}
+
+sftp_keys_menu_generate() {
+    sftp_key_generate
+    pause
+}
+
 sftp_keys_menu() {
-    local choice answer state
+    local choice state
     while true; do
         seedbox_load
-        banner
-        section 'SSH KEYS FOR SFTP'
-        say 'An SSH key is a good replacement for the password in SFTP.'
-        say 'Paste the PUBLIC key (.pub file, starts with ssh-ed25519 or ssh-rsa).'
-        say 'No key yet? Choice 2 creates one, ready for WinSCP and FileZilla.'
+        UI_PLACE=(Seedbox "$(t 'SSH keys for SFTP')")
+        ui_top "${UI_PLACE[@]}"
+        ui_print "  $(t 'An SSH key is a good replacement for the password in SFTP.')"
+        ui_print "  $(t 'Paste the PUBLIC key (.pub file, starts with ssh-ed25519 or ssh-rsa).')"
+        ui_print "  $(t 'No key yet? Choice 2 creates one, ready for WinSCP and FileZilla.')"
         echo
         sftp_keys_list
         echo
         if [[ $SEEDBOX_SFTP_PASSWORD == yes ]]; then state=$(t 'allowed'); else state=$(t 'refused (keys only)'); fi
-        say '  SFTP password: %s' "$state"
+        ui_field_add "$(t 'SFTP password')" "$state"
+        ui_fields_show
         echo
-        say '1) Add a key'
-        say '2) Create a key for WinSCP / FileZilla (one-time download link)'
-        say '3) Remove a key'
-        say '4) Allow / refuse the password in SFTP'
+        ui_menu_add 1 "$(t 'Add a key')"
+        ui_menu_add 2 "$(t 'Create a key for WinSCP / FileZilla (one-time download link)')"
+        ui_menu_add 3 "$(t 'Remove a key')"
+        ui_menu_add 4 "$(t 'Allow / refuse the password in SFTP')"
+        ui_menu_show
         echo
-        say 'Q) Back'
-        echo
-        ask choice 'Your choice' ""
+        ui_menu_ask choice back
         case ${choice,,} in
-            1)
-                if sftp_ask_public_key answer; then
-                    sftp_keys_import - <<<"$answer"
-                    seedbox_apply_sftp
-                    pause
-                fi
-                ;;
-            2)
-                sftp_key_generate
-                pause
-                ;;
-            3)
-                if sftp_ask_key_number answer; then
-                    sftp_keys_remove "$answer"
-                    pause
-                fi
-                ;;
-            4)
-                if [[ $SEEDBOX_SFTP_PASSWORD == yes ]]; then seedbox_set_sftp_password off; else seedbox_set_sftp_password on; fi
-                pause
-                ;;
-            q) return 0 ;;
+            1) ui_action sftp_keys_menu_add ;;
+            2) ui_action sftp_keys_menu_generate ;;
+            3) ui_action sftp_keys_menu_remove ;;
+            4) ui_action sftp_keys_menu_password ;;
+            "" | b) return 0 ;;
+            q) ui_quit ;;
         esac
     done
 }
@@ -1349,7 +1360,7 @@ seedbox_install_questions() {
 seedbox_install_interactive() {
     local ip
     banner
-    section 'SEEDBOX INSTALLATION'
+    section 'Seedbox installation'
     seedbox_check_web_ports
     base_setup
     apt_install bind9-dnsutils
@@ -1371,7 +1382,7 @@ seedbox_install_interactive() {
     echo
     seedbox_selftest
     banner
-    section 'SEEDBOX INSTALLED — no restart needed'
+    section 'Seedbox installed — no restart needed'
     seedbox_summary
     SEEDBOX_NEW_PASSWORD=""
     echo
@@ -1461,7 +1472,7 @@ seedbox_set_credentials() {
 # Status 1: the user went back, nothing changed
 seedbox_change_credentials() {
     banner
-    section 'USER AND PASSWORD'
+    section 'Change the user or the password'
     seedbox_ask_user "$SEEDBOX_USER" || return 1
     echo
     if ! confirm "$(t 'Save the user %s with this password?' "$OPT_NEW_USER")" y; then
@@ -1510,7 +1521,7 @@ seedbox_change_domain() {
     local ip server had_letsencrypt=0
     local old_domain=$SEEDBOX_DOMAIN old_letsencrypt=$SEEDBOX_LETSENCRYPT old_server=$SEEDBOX_LETSENCRYPT_SERVER
     banner
-    section 'DOMAIN NAME AND HTTPS CERTIFICATE'
+    section 'Domain name and HTTPS certificate'
     say 'Right now: %s (certificate %s)' "https://$SEEDBOX_DOMAIN/" "$(seedbox_certificate_label)"
     if [[ $SEEDBOX_CERTIFICATE != selfsigned ]] && letsencrypt_usable "$SEEDBOX_LETSENCRYPT_SERVER"; then
         had_letsencrypt=1
@@ -1574,7 +1585,7 @@ fail2ban_unban() {
 fail2ban_bans_menu() {
     local ip
     banner
-    section 'BANNED IP ADDRESSES (fail2ban)'
+    section 'Banned IP addresses (fail2ban)'
     fail2ban_bans_print
     echo
     while true; do
@@ -1619,9 +1630,13 @@ seedbox_delete_user() {
 seedbox_uninstall() {
     local delete_data=0
     banner
-    section 'REMOVING THE SEEDBOX'
-    text seedbox_uninstall_help
-    echo
+    section 'Remove the seedbox'
+    if ((INTERACTIVE)); then
+        danger "$(t 'Remove the seedbox')" "$(text seedbox_uninstall_help | tr '\n' ' ')"
+    else
+        text seedbox_uninstall_help
+        echo
+    fi
     if ! confirm 'Remove the seedbox?' n; then return 0; fi
     if ((INTERACTIVE)); then
         if confirm "$(t 'ALSO delete all the data in %s?' "$SEEDBOX_DATA_DIR")" n; then delete_data=1; fi
@@ -1669,6 +1684,24 @@ seedbox_uninstall() {
     pause
 }
 
+seedbox_menu_credentials() {
+    if seedbox_change_credentials; then pause; fi
+}
+
+seedbox_menu_domain() {
+    if seedbox_change_domain; then pause; fi
+}
+
+seedbox_menu_sftp() {
+    seedbox_sftp_config
+    pause
+}
+
+seedbox_menu_restart() {
+    seedbox_restart
+    pause
+}
+
 seedbox_menu() {
     local choice certificate transmission
     while true; do
@@ -1681,52 +1714,35 @@ seedbox_menu() {
         fi
         transmission=$(service_state transmission-daemon)
         if diskguard_stopped; then transmission="$C_RED$(t 'stopped: disk almost full')$C_RESET"; fi
-        banner
-        section 'SEEDBOX MANAGEMENT'
-        say '  Web interface : %s' "https://$SEEDBOX_DOMAIN/"
-        say '  Certificate   : %s' "$certificate"
-        say '  SFTP          : %s — %s' "$SEEDBOX_USER@$SEEDBOX_DOMAIN" "$(disk_free_text "$SEEDBOX_DATA_DIR")"
-        say '  Services      : transmission %s · nginx %s · fail2ban %s' \
-            "$transmission" "$(service_state nginx)" "$(service_state fail2ban)"
+        UI_PLACE=(Seedbox)
+        ui_top Seedbox
+        ui_field_add "$(t 'Web interface')" "${C_CYAN}https://$SEEDBOX_DOMAIN/$C_RESET"
+        ui_field_add "$(t 'Certificate')" "$certificate"
+        ui_field_add SFTP "$SEEDBOX_USER@$SEEDBOX_DOMAIN · $(disk_free_text "$SEEDBOX_DATA_DIR")"
+        ui_field_add Services "transmission $transmission · nginx $(service_state nginx) · fail2ban $(service_state fail2ban)"
+        ui_fields_show
         echo
-        say '1) Change the user or the password'
-        say '2) Domain name and HTTPS certificate'
-        say '3) SSH keys for SFTP'
-        say '4) SFTP connection: settings for WinSCP and FileZilla'
-        say '5) Banned IP addresses (fail2ban)'
+        ui_menu_add 1 "$(t 'Change the user or the password')"
+        ui_menu_add 2 "$(t 'Domain name and HTTPS certificate')"
+        ui_menu_add 3 "$(t 'SSH keys for SFTP')"
+        ui_menu_add 4 "$(t 'SFTP connection: settings for WinSCP and FileZilla')"
+        ui_menu_add 5 "$(t 'Banned IP addresses (fail2ban)')"
+        ui_menu_gap
+        ui_menu_add 6 "$(t 'Restart the services')"
+        ui_menu_add 7 "$(t 'Remove the seedbox')"
+        ui_menu_show
         echo
-        say '6) Restart the services'
-        say '7) Remove the seedbox'
-        echo
-        say 'Q) Back'
-        echo
-        ask choice 'Your choice' ""
+        ui_menu_ask choice back
         case ${choice,,} in
-            1)
-                if seedbox_change_credentials; then
-                    echo
-                    pause
-                fi
-                ;;
-            2)
-                if seedbox_change_domain; then
-                    echo
-                    pause
-                fi
-                ;;
-            3) sftp_keys_menu ;;
-            4)
-                seedbox_sftp_config
-                pause
-                ;;
-            5) fail2ban_bans_menu ;;
-            6)
-                seedbox_restart
-                echo
-                pause
-                ;;
-            7) seedbox_uninstall ;;
-            q) return 0 ;;
+            1) ui_action seedbox_menu_credentials ;;
+            2) ui_action seedbox_menu_domain ;;
+            3) ui_action sftp_keys_menu ;;
+            4) ui_action seedbox_menu_sftp ;;
+            5) ui_action fail2ban_bans_menu ;;
+            6) ui_action seedbox_menu_restart ;;
+            7) ui_action seedbox_uninstall ;;
+            "" | b) return 0 ;;
+            q) ui_quit ;;
         esac
     done
 }

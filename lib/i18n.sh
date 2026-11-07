@@ -67,15 +67,18 @@ i18n_load() {
 
 i18n_init() { i18n_load "$(i18n_detect)"; }
 
+# tr_format FORMAT → TR_FORMAT: the format in the current language, not filled
+tr_format() {
+    TR_FORMAT=$1
+    if [[ $APP_LANG != en && -n $1 && -n ${TRANSLATIONS[$1]-} ]]; then TR_FORMAT=${TRANSLATIONS[$1]}; fi
+}
+
 # t FORMAT [ARGUMENTS…] → the message in the current language
 t() {
-    local format=$1
+    tr_format "$1"
     shift
-    if [[ $APP_LANG != en && -n $format && -n ${TRANSLATIONS[$format]-} ]]; then
-        format=${TRANSLATIONS[$format]}
-    fi
     # shellcheck disable=SC2059 # the format comes from the code or from lang/
-    printf -- "$format" "$@"
+    printf -- "$TR_FORMAT" "$@"
 }
 
 # text NAME → a long text from lang/<language>.sh (English if missing)

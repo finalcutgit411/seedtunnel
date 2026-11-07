@@ -37,7 +37,7 @@ load() {
     APP_LANG_FILE="$WORK/state/language"
     mkdir -p "$APP_STATE_DIR"
     local library
-    for library in i18n ui vpn seedbox firewall share diskguard backup update doctor; do
+    for library in i18n ui vpn seedbox firewall share diskguard backup update doctor menu; do
         # shellcheck source=/dev/null
         . "$ROOT/lib/$library.sh"
     done

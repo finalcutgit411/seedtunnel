@@ -355,7 +355,7 @@ vpn_show_client() {
     . "$VPN_CLIENTS_DIR/$name.env"
     port=$((VPN_FORWARDED_PORT_BASE + CLIENT_NUMBER))
     banner
-    section 'VPN CLIENT "%s"' "$name"
+    section 'Client "%s"' "$name"
     qrencode -t ansiutf8 <"$VPN_CLIENTS_DIR/$name.conf"
     echo
     text vpn_client_help
@@ -433,9 +433,9 @@ vpn_status_table() {
             sent[$key]=$tx
         done < <(wg show "$VPN_INTERFACE" dump | tail -n +2)
     fi
+    local -a rows=()
     now=$(date +%s)
-    printf '%s%-16s %-12s %-7s %-20s %s%s\n' "$C_BOLD" "$(t 'CLIENT')" "IP" "PORT" \
-        "$(t 'RECEIVED / SENT')" "$(t 'LAST CONNECTION')" "$C_RESET"
+    rows+=("$(t 'CLIENT')"$'\t'IP$'\t'PORT$'\t'"$(t 'RECEIVED / SENT')"$'\t'"$(t 'LAST CONNECTION')")
     for file in "$VPN_CLIENTS_DIR"/*.env; do
         [[ -e $file ]] || continue
         name=${file##*/}
@@ -444,11 +444,11 @@ vpn_status_table() {
         . "$file"
         handshake=${handshakes[$CLIENT_PUBLIC_KEY]:-0}
         if ((handshake == 0)); then
-            ago="$C_DIM$(t 'never')$C_RESET"
+            ago="$C_GREY$(t 'never')$C_RESET"
         else
             ago=$((now - handshake))
             if ((ago < 180)); then
-                ago="$C_GREEN$(t 'connected')$C_RESET $(t '(%s s)' "$ago")"
+                ago="$C_GREEN● $(t 'connected')$C_RESET $(t '(%s s)' "$ago")"
             elif ((ago < 3600)); then
                 ago=$(t '%s min ago' "$((ago / 60))")
             elif ((ago < 86400)); then
@@ -457,10 +457,10 @@ vpn_status_table() {
                 ago=$(t '%s days ago' "$((ago / 86400))")
             fi
         fi
-        printf '%-16s %-12s %-7s %-20s %s\n' "$name" "$VPN_SUBNET.$((CLIENT_NUMBER + 1))" \
-            "$((VPN_FORWARDED_PORT_BASE + CLIENT_NUMBER))" \
-            "$(human_size "${received[$CLIENT_PUBLIC_KEY]:-0}") / $(human_size "${sent[$CLIENT_PUBLIC_KEY]:-0}")" "$ago"
+        rows+=("$name"$'\t'"$VPN_SUBNET.$((CLIENT_NUMBER + 1))"$'\t'"$((VPN_FORWARDED_PORT_BASE + CLIENT_NUMBER))"$'\t'"$(human_size "${received[$CLIENT_PUBLIC_KEY]:-0}") / $(human_size "${sent[$CLIENT_PUBLIC_KEY]:-0}")"$'\t'"$ago")
     done
+    ui_width
+    ui_table "${rows[@]}"
 }
 
 # --- Settings, installation, removal ---------------------------------------------
@@ -537,7 +537,7 @@ vpn_ask_settings() {
 vpn_install_interactive() {
     local first
     banner
-    section 'WIREGUARD VPN INSTALLATION'
+    section 'WireGuard VPN installation'
     vpn_check_kernel
     base_setup
     echo
@@ -559,7 +559,7 @@ vpn_install_interactive() {
     vpn_add_client "$first"
     echo
     ok 'VPN installed — no restart needed.'
-    pause
+    pause_next
     vpn_show_client "$first"
     pause
 }
@@ -595,7 +595,7 @@ vpn_install_from_config() {
 
 vpn_change_settings() {
     banner
-    section 'VPN SETTINGS'
+    section 'Change the settings (address, port, DNS)'
     warn 'After a change, every client will have to import its configuration again.'
     echo
     vpn_ask_settings "$VPN_PORT" || return 1
@@ -605,8 +605,9 @@ vpn_change_settings() {
 
 vpn_uninstall() {
     banner
-    section 'REMOVING THE VPN'
-    warn 'All the clients (%s) will be deleted for good.' "$(vpn_count_clients)"
+    section 'Remove the VPN'
+    danger "$(t 'Remove the VPN')" "$(t 'All the clients (%s) will be deleted for good.' "$(vpn_count_clients)")" \
+        "$(t 'Their files and QR codes will no longer work.')"
     if ! confirm 'Remove the VPN?' n; then return 0; fi
     echo
     systemctl disable --now "wg-quick@$VPN_INTERFACE" >>"$APP_LOG" 2>&1 || true
@@ -625,90 +626,114 @@ vpn_uninstall() {
     pause
 }
 
+# --- Menu --------------------------------------------------------------------------
+# Each action runs in a subshell (ui_action): an error comes back to the menu.
+
+vpn_menu_add() {
+    local name
+    banner
+    section 'Add a client'
+    if (($(vpn_count_clients) >= VPN_MAX_CLIENTS)); then
+        warn 'Maximum number of clients reached (%s).' "$VPN_MAX_CLIENTS"
+        pause
+    elif vpn_ask_client_name name ""; then
+        vpn_add_client "$name"
+        pause_next
+        vpn_show_client "$name"
+        pause
+    fi
+}
+
+vpn_menu_show() {
+    local name
+    banner
+    section 'Show a client (QR code, file)'
+    if vpn_pick_client name "$(t 'Client to show')"; then
+        vpn_show_client "$name"
+        pause
+    fi
+}
+
+vpn_menu_link() {
+    local name
+    banner
+    section 'Download link for a client (one time only)'
+    if ! seedbox_installed; then
+        warn 'Links go through the HTTPS site of the seedbox, which is not installed:'
+        warn 'use "Show a client" instead (QR code, or content to copy and paste).'
+        pause
+    elif vpn_pick_client name "$(t 'Client to send')"; then
+        vpn_share_client "$name"
+        pause
+    fi
+}
+
+vpn_menu_revoke() {
+    local name
+    banner
+    section 'Revoke a client'
+    vpn_pick_client name "$(t 'Client to revoke')" || return 0
+    echo
+    danger "$(t 'Revoke "%s"' "$name")" "$(t 'This device will no longer be able to connect to the VPN.')" \
+        "$(t 'Its file and its QR code stop working: this cannot be undone.')"
+    if confirm "$(t 'Revoke "%s" for good?' "$name")" n; then
+        vpn_remove_client "$name"
+        pause
+    fi
+}
+
+vpn_menu_clients() {
+    banner
+    section 'Clients and connections'
+    vpn_status_table
+    pause
+}
+
+vpn_menu_settings() {
+    if vpn_change_settings; then pause; fi
+}
+
+vpn_menu_restart() {
+    echo
+    run 'Restarting the VPN' systemctl restart "wg-quick@$VPN_INTERFACE"
+    pause
+}
+
 vpn_menu() {
-    local choice name
+    local choice
     while true; do
         vpn_load
         vpn_installed || return 0
-        banner
-        section 'VPN MANAGEMENT'
-        say '  State   : %s' "$(service_state "wg-quick@$VPN_INTERFACE")"
-        say '  Address : %s (UDP)' "$VPN_PUBLIC_ADDRESS:$VPN_PORT"
-        say '  Clients : %s (%s connected right now)' "$(vpn_count_clients)" "$(vpn_connected_count)"
+        UI_PLACE=(VPN)
+        ui_top VPN
+        ui_field_add "$(t 'State')" "$(service_state "wg-quick@$VPN_INTERFACE")"
+        ui_field_add "$(t 'Address')" "$C_CYAN$VPN_PUBLIC_ADDRESS:$VPN_PORT$C_RESET (UDP)"
+        ui_field_add Clients "$(t '%s (%s connected right now)' "$(vpn_count_clients)" "$(vpn_connected_count)")"
+        ui_fields_show
         echo
-        say '1) Add a client'
-        say '2) Show a client (QR code, file)'
-        say '3) Download link for a client (one time only)'
-        say '4) Revoke a client'
-        say '5) Clients and connections'
+        ui_menu_add 1 "$(t 'Add a client')"
+        ui_menu_add 2 "$(t 'Show a client (QR code, file)')"
+        ui_menu_add 3 "$(t 'Download link for a client (one time only)')"
+        ui_menu_add 4 "$(t 'Revoke a client')"
+        ui_menu_add 5 "$(t 'Clients and connections')"
+        ui_menu_gap
+        ui_menu_add 6 "$(t 'Change the settings (address, port, DNS)')"
+        ui_menu_add 7 "$(t 'Restart the VPN')"
+        ui_menu_add 8 "$(t 'Remove the VPN')"
+        ui_menu_show
         echo
-        say '6) Change the settings (address, port, DNS)'
-        say '7) Restart the VPN'
-        say '8) Remove the VPN'
-        echo
-        say 'Q) Back'
-        echo
-        ask choice 'Your choice' ""
+        ui_menu_ask choice back
         case ${choice,,} in
-            1)
-                banner
-                section 'ADD A CLIENT'
-                if (($(vpn_count_clients) >= VPN_MAX_CLIENTS)); then
-                    warn 'Maximum number of clients reached (%s).' "$VPN_MAX_CLIENTS"
-                    pause
-                elif vpn_ask_client_name name ""; then
-                    vpn_add_client "$name"
-                    pause
-                    vpn_show_client "$name"
-                    pause
-                fi
-                ;;
-            2)
-                banner
-                section 'SHOW A CLIENT'
-                if vpn_pick_client name "$(t 'Client to show')"; then
-                    vpn_show_client "$name"
-                    pause
-                fi
-                ;;
-            3)
-                banner
-                section 'DOWNLOAD LINK'
-                if ! seedbox_installed; then
-                    warn 'Links go through the HTTPS site of the seedbox, which is not installed:'
-                    warn 'use "Show a client" instead (QR code, or content to copy and paste).'
-                    pause
-                elif vpn_pick_client name "$(t 'Client to send')"; then
-                    vpn_share_client "$name"
-                    pause
-                fi
-                ;;
-            4)
-                banner
-                section 'REVOKE A CLIENT'
-                if vpn_pick_client name "$(t 'Client to revoke')" \
-                    && confirm "$(t 'Revoke "%s" for good?' "$name")" n; then
-                    vpn_remove_client "$name"
-                    pause
-                fi
-                ;;
-            5)
-                banner
-                section 'CLIENTS AND CONNECTIONS'
-                vpn_status_table
-                echo
-                pause
-                ;;
-            6)
-                if vpn_change_settings; then pause; fi
-                ;;
-            7)
-                echo
-                run 'Restarting the VPN' systemctl restart "wg-quick@$VPN_INTERFACE"
-                pause
-                ;;
-            8) vpn_uninstall ;;
-            q) return 0 ;;
+            1) ui_action vpn_menu_add ;;
+            2) ui_action vpn_menu_show ;;
+            3) ui_action vpn_menu_link ;;
+            4) ui_action vpn_menu_revoke ;;
+            5) ui_action vpn_menu_clients ;;
+            6) ui_action vpn_menu_settings ;;
+            7) ui_action vpn_menu_restart ;;
+            8) ui_action vpn_uninstall ;;
+            "" | b) return 0 ;;
+            q) ui_quit ;;
         esac
     done
 }

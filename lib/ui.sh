@@ -28,6 +28,10 @@ UI_MENU_KEYS=()
 UI_MENU_LABELS=()
 UI_FIELD_LABELS=()
 UI_FIELD_VALUES=()
+# The menus we are in, for the breadcrumb of the screens (section)
+UI_PLACE=()
+# Status of an action of a menu that asks to leave seedtunnel (ui_quit)
+UI_QUIT_STATUS=120
 
 # Does the locale count the characters of a text (UTF-8), or its bytes (C,
 # POSIX: LANG not set, cron…)? Decided once, and the locale is never changed
@@ -491,12 +495,14 @@ ui_menu_ask() {
     ui_ask_choice "$1" "${UI_KEYS[@]}"
 }
 
-# ui_pause — after an action: « Enter ↵ back · Q quit ». Status 1 for Q.
+# ui_pause [next] — after an action: « Enter ↵ back · Q quit » (next: « Enter
+# ↵ continue », more screens follow). Status 1 for Q.
 ui_pause() {
-    local answer
+    local answer text
     ((INTERACTIVE)) || return 0
+    if [[ ${1-} == next ]]; then text=$(t 'Enter ↵ continue · Q quit'); else text=$(t 'Enter ↵ back · Q quit'); fi
     echo
-    IFS= read -r -p "  $C_GREY$(t 'Enter ↵ back · Q quit')$C_RESET " answer || {
+    IFS= read -r -p "  $C_GREY$text$C_RESET " answer || {
         echo
         exit 130
     }
@@ -586,4 +592,72 @@ ui_box() {
     done
     ui_repeat ─ $((width - 2))
     printf '  %s└%s┘%s\n' "$UI_COLOR" "$UI_REPEAT" "$C_RESET"
+}
+
+# --- Navigation ------------------------------------------------------------------
+
+# ui_top PART… — top of a menu: header, line, where we are
+ui_top() {
+    ui_screen
+    ui_header
+    ui_rule
+    ui_crumbs "$@"
+    echo
+}
+
+# ui_quit [quiet] — leaves seedtunnel, from anywhere in the menus: an action
+# runs in a subshell, which only passes the request on (UI_QUIT_STATUS) to the
+# menu that started it. quiet: without « See you soon! ».
+ui_quit() {
+    if ((BASH_SUBSHELL > 0)); then exit "$UI_QUIT_STATUS"; fi
+    if [[ ${1-} != quiet ]]; then
+        echo
+        say 'See you soon!'
+        echo
+    fi
+    exit 0
+}
+
+# ui_action COMMAND [ARGUMENTS…] — an action of a menu, in a subshell. If it
+# fails (die, unexpected error), its message stays on the screen and Enter
+# goes back to the menu, instead of leaving seedtunnel.
+# Always call it on its own, never in an « if », « || » or « && »: bash would
+# then ignore « set -e » inside the action too, which would go on after an
+# error.
+ui_action() {
+    local status errexit=0 trap_err
+    if [[ $- == *e* ]]; then errexit=1; fi
+    trap_err=$(trap -p ERR)
+    trap - ERR
+    set +e
+    (
+        UI_ACTION_LEVEL=$BASH_SUBSHELL
+        set -e
+        error_trap_on
+        "$@"
+    )
+    status=$?
+    if ((errexit)); then set -e; fi
+    if [[ -n $trap_err ]]; then eval "$trap_err"; fi
+    case $status in
+        0) return 0 ;;
+        "$UI_QUIT_STATUS") ui_quit ;;
+        # end of the input (Ctrl+D)
+        130) exit 130 ;;
+    esac
+    # its message is on the screen
+    if ! ui_pause; then ui_quit; fi
+}
+
+# danger TITLE LINE… — before a question that cannot be undone: a red frame in
+# the menus, the lines as warnings for the commands (texts already translated)
+danger() {
+    local title=$1 line
+    shift
+    if ((INTERACTIVE)); then
+        ui_box bad "$title" "$@"
+        echo
+        return 0
+    fi
+    for line in "$@"; do printf '%s!%s %s\n' "$C_YELLOW" "$C_RESET" "$line" >&2; done
 }

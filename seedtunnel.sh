@@ -39,90 +39,10 @@ APP_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 . "$APP_DIR/lib/update.sh"
 # shellcheck source=lib/doctor.sh
 . "$APP_DIR/lib/doctor.sh"
+# shellcheck source=lib/menu.sh
+. "$APP_DIR/lib/menu.sh"
 
-trap 'on_error $? $LINENO "$BASH_COMMAND" "${BASH_SOURCE[0]:-}"' ERR
-
-# State of the server at the top of the main menu
-menu_status() {
-    local vpn_text seedbox_text disk_text firewall_text
-    if vpn_installed; then
-        vpn_text="$(service_state "wg-quick@$VPN_INTERFACE") · port $VPN_PORT/udp"
-        vpn_text+=" · $(t '%s connected of %s client(s)' "$(vpn_connected_count)" "$(vpn_count_clients)")"
-    else
-        vpn_text="$C_DIM$(t 'not installed')$C_RESET"
-    fi
-    if seedbox_installed; then
-        if diskguard_stopped; then
-            seedbox_text="$C_RED$(t 'stopped: disk almost full')$C_RESET · https://$SEEDBOX_DOMAIN/"
-        else
-            seedbox_text="$(service_state transmission-daemon) · https://$SEEDBOX_DOMAIN/"
-        fi
-        if ! systemctl is-active --quiet nginx; then seedbox_text+=" · $C_RED$(t 'nginx stopped')$C_RESET"; fi
-    else
-        seedbox_text="$C_DIM$(t 'not installed')$C_RESET"
-    fi
-    disk_text=$(disk_free_text /)
-    if seedbox_installed && [[ -d $SEEDBOX_DATA_DIR ]]; then
-        if [[ $(df --output=target "$SEEDBOX_DATA_DIR" 2>/dev/null | tail -n 1) == "$(df --output=target / 2>/dev/null | tail -n 1)" ]]; then
-            disk_text+=" $(t '(system and downloads)')"
-        else
-            # downloads on another disk: both are shown
-            disk_text="$(t 'system %s · downloads %s' "$disk_text" "$(disk_free_text "$SEEDBOX_DATA_DIR")")"
-        fi
-    fi
-    if firewall_enabled; then
-        firewall_text="$C_GREEN$(t 'on')$C_RESET"
-    else
-        firewall_text="$C_DIM$(t 'off')$C_RESET"
-    fi
-    printf '  %-10s: %s\n' "VPN" "$vpn_text"
-    printf '  %-10s: %s\n' "Seedbox" "$seedbox_text"
-    printf '  %-10s: %s\n' "$(t 'Disk')" "$disk_text"
-    printf '  %-10s: %s\n\n' "$(t 'Firewall')" "$firewall_text"
-    if restore_interrupted; then
-        warn 'A restore did not finish: the settings may be incomplete. See  seedtunnel doctor'
-        echo
-    fi
-}
-
-main_menu() {
-    local choice
-    while true; do
-        vpn_load
-        seedbox_load
-        banner
-        menu_status
-        if vpn_installed; then say '1) Manage the VPN'; else say '1) Install the VPN'; fi
-        if seedbox_installed; then say '2) Manage the seedbox'; else say '2) Install the seedbox'; fi
-        say '3) Firewall'
-        say '4) Diagnostics'
-        echo
-        say '5) Backup / restore'
-        say '6) Update seedtunnel'
-        say '7) Restart the server'
-        echo
-        printf '%s\n' 'L) Language / Langue'
-        say 'Q) Quit'
-        echo
-        ask choice 'Your choice' ""
-        case ${choice,,} in
-            1) vpn_main ;;
-            2) seedbox_main ;;
-            3) firewall_menu ;;
-            4) doctor_main ;;
-            5) backup_menu ;;
-            6) update_main ;;
-            7) reboot_server ;;
-            l) language_menu ;;
-            q)
-                echo
-                say 'See you soon!'
-                echo
-                exit 0
-                ;;
-        esac
-    done
-}
+error_trap_on
 
 # --- Options ---------------------------------------------------------------------------
 ARGUMENTS=()
