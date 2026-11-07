@@ -501,6 +501,7 @@ ui_menu_ask() {
 
 # ui_pause [next] — after an action: « Enter ↵ back · Q quit » (next: « Enter
 # ↵ continue », more screens follow). Status 1 for Q.
+# shellcheck disable=SC2120 # « next » comes from pause_next (lib/common.sh)
 ui_pause() {
     local answer text
     ((INTERACTIVE)) || return 0
@@ -609,16 +610,14 @@ ui_top() {
     echo
 }
 
-# ui_quit [quiet] — leaves seedtunnel, from anywhere in the menus: an action
-# runs in a subshell, which only passes the request on (UI_QUIT_STATUS) to the
-# menu that started it. quiet: without « See you soon! ».
+# ui_quit — leaves seedtunnel, from anywhere in the menus: an action runs in a
+# subshell, which only passes the request on (UI_QUIT_STATUS) to the menu that
+# started it
 ui_quit() {
     if ((BASH_SUBSHELL > 0)); then exit "$UI_QUIT_STATUS"; fi
-    if [[ ${1-} != quiet ]]; then
-        echo
-        say 'See you soon!'
-        echo
-    fi
+    echo
+    say 'See you soon!'
+    echo
     exit 0
 }
 
