@@ -66,9 +66,11 @@ If `/opt/seedtunnel` exists too, `seedtunnel update` refuses to go on as long as
 
 ### Menu
 
-`seedtunnel` without arguments gives access to everything: VPN, seedbox, firewall, diagnostics, backups, update. The state of the server is shown at the top: connected VPN clients, free disk space, stopped services.
+`seedtunnel` without arguments gives access to everything: VPN, seedbox, firewall, diagnostics, backups, update. The home screen shows the state of the server in five blocks — VPN (connected clients), seedbox, firewall, disk, backup — in green, yellow or red.
 
-Every question of the menu can be left with an empty answer: you go back, nothing is changed.
+The keys are the same in every menu: `B` (or an empty answer) goes back, `R` refreshes, `Q` leaves seedtunnel. Every question can be left with an empty answer: you go back, nothing is changed. If an action fails, its message stays on the screen and Enter goes back to the menu.
+
+The menus are pure bash: they work over SSH, in PuTTY as it is, with or without colors (`NO_COLOR` is honored), and fit the width of the window. To see them with example data, without installing anything: `bash tools/preview.sh` (`--fr` in French).
 
 ### Commands
 
@@ -229,9 +231,11 @@ Downloaded files are not in the backup: copy them with `rsync`.
 
 | File | Role |
 |---|---|
-| `seedtunnel.sh` | entry point: options, commands, main menu |
+| `seedtunnel.sh` | entry point: options, commands |
 | `lib/common.sh` | output, input, log, configuration file, apt |
 | `lib/i18n.sh` | translations |
+| `lib/ui.sh` | display of the menus: header, blocks, menus, tables, frames (widths in characters) |
+| `lib/menu.sh` | home screen and main menu |
 | `lib/vpn.sh` | WireGuard |
 | `lib/seedbox.sh` | Transmission, nginx, Let's Encrypt, SFTP, fail2ban |
 | `lib/firewall.sh` | nftables firewall |
@@ -242,6 +246,7 @@ Downloaded files are not in the backup: copy them with `rsync`.
 | `lib/doctor.sh` | diagnostics |
 | `lang/` | French messages (`fr.txt`) and long texts (`en.sh`, `fr.sh`) |
 | `tests/` | unit tests, translation check, Debian test image, integration tests |
+| `tools/preview.sh` | the screens of the menus with example data |
 
 Every module follows the same principle:
 1. read the wanted state in `/etc/seedtunnel`;

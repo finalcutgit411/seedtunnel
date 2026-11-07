@@ -66,9 +66,11 @@ Si `/opt/seedtunnel` existe aussi, `seedtunnel update` refuse de continuer tant 
 
 ### Menu
 
-`seedtunnel` sans argument donne accès à tout : VPN, seedbox, pare-feu, diagnostic, sauvegardes, mise à jour. L'état du serveur s'affiche en haut : clients VPN connectés, espace disque libre, services arrêtés.
+`seedtunnel` sans argument donne accès à tout : VPN, seedbox, pare-feu, diagnostic, sauvegardes, mise à jour. L'accueil montre l'état du serveur en cinq blocs — VPN (clients connectés), seedbox, pare-feu, disque, sauvegarde — en vert, jaune ou rouge.
 
-Chaque question du menu peut se quitter avec une réponse vide : on revient en arrière, rien n'est changé.
+Les touches sont les mêmes dans tous les menus : `B` (ou une réponse vide) revient en arrière, `R` actualise, `Q` quitte seedtunnel. Chaque question peut se quitter avec une réponse vide : on revient en arrière, rien n'est changé. Si une action échoue, son message reste affiché et Entrée ramène au menu.
+
+Les menus sont en bash pur : ils marchent en SSH, dans PuTTY tel quel, avec ou sans couleurs (`NO_COLOR` est respectée), et s'adaptent à la largeur de la fenêtre. Pour les voir avec des données d'exemple, sans rien installer : `bash tools/preview.sh --fr`.
 
 ### Commandes
 
@@ -229,9 +231,11 @@ Les fichiers téléchargés ne sont pas dans la sauvegarde : copiez-les avec `rs
 
 | Fichier | Rôle |
 |---|---|
-| `seedtunnel.sh` | point d'entrée : options, commandes, menu principal |
+| `seedtunnel.sh` | point d'entrée : options, commandes |
 | `lib/common.sh` | affichage, saisie, journal, fichier de configuration, apt |
 | `lib/i18n.sh` | traductions |
+| `lib/ui.sh` | affichage des menus : en-tête, blocs, menus, tableaux, cadres (largeurs en caractères) |
+| `lib/menu.sh` | accueil et menu principal |
 | `lib/vpn.sh` | WireGuard |
 | `lib/seedbox.sh` | Transmission, nginx, Let's Encrypt, SFTP, fail2ban |
 | `lib/firewall.sh` | pare-feu nftables |
@@ -242,6 +246,7 @@ Les fichiers téléchargés ne sont pas dans la sauvegarde : copiez-les avec `rs
 | `lib/doctor.sh` | diagnostic |
 | `lang/` | messages en français (`fr.txt`) et textes longs (`en.sh`, `fr.sh`) |
 | `tests/` | tests unitaires, vérification des traductions, image Debian de test, tests d'intégration |
+| `tools/preview.sh` | les écrans des menus avec des données d'exemple |
 
 Chaque module suit le même principe :
 1. lire l'état voulu dans `/etc/seedtunnel` ;

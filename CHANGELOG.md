@@ -3,6 +3,23 @@
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 
+## [2.0.0] - 2026-11-07
+
+A new look for the menus. The commands, the configuration file and what seedtunnel does on the server do not change.
+
+### Changed
+- **New interface of the menus**, in pure bash (nothing to install): a header with the name of the server and its version of Debian, a thin line, where you are (« seedtunnel › VPN › Clients »), aligned values, menu keys as `[1]`, pink as the color of seedtunnel. Readable without colors (`NO_COLOR` is honored), and fitted to the width of the window: nothing goes past the edge, accents and symbols no longer shift the columns.
+- **Home screen**: five blocks with the real state of the server — VPN (connected clients), seedbox, firewall, disk (used part, free space), backup (date of the last one) — in green, yellow or red. On a narrow window (under 80 columns), an aligned list instead. The menu goes on two columns when there is room.
+- **Same keys everywhere**: `B` (or an empty answer) goes back, `R` refreshes, `Q` leaves seedtunnel from any menu (in 1.2.x, `Q` went back). After an action: « Enter ↵ back · Q quit ».
+- **An error in a menu no longer leaves seedtunnel**: its message stays on the screen and Enter goes back to the menu.
+- **Actions that cannot be undone** (revoke a client, remove the VPN or the seedbox, restore a backup, turn the firewall off, restart the server) are shown in a red frame; the question still answers « no » by default.
+- `seedtunnel vpn list`: an aligned table. The titles of the commands (in capitals) follow the new names of the screens, and a few warnings are added before the actions above.
+- `tools/preview.sh`: the screens with example data, to check the look in your own terminal without installing anything.
+
+### Fixed
+- **Report to ask for help**: version numbers of packages (such as `4.23.9.0-2+b1`) were taken for IP addresses and replaced.
+- **Log**: removing the VPN, or turning the firewall off, wrote a harmless but alarming « Error: No such file or directory » (a table already gone was deleted a second time).
+
 ## [1.2.8] - 2026-11-07
 
 After a cross-module review: the restore on a server that already has seedtunnel, and two new tools.
