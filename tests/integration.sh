@@ -663,7 +663,7 @@ EOF
     chmod 600 "$W/ci.conf" "$W/password"
 
     step "General"
-    check "seedtunnel version" output_has "seedtunnel 1." app version
+    check "seedtunnel version" output_has "seedtunnel $(sed -n 's/^APP_VERSION="\(.*\)"$/\1/p' "${APP%/*}/lib/common.sh")" app version
     check "seedtunnel help" output_has "vpn add NAME" app help
     check "help: new commands" output_has "backup auto on|off|status" app help
     check "help in French" output_has "Utilisation : seedtunnel" env SEEDTUNNEL_LANG=fr "$APP" help
