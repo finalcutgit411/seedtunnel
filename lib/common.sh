@@ -37,16 +37,17 @@ stdout_is_terminal() { [[ -t 1 ]]; }
 
 # colors_init on|off|auto — auto (or empty): on when the output is a terminal,
 # unless NO_COLOR is set (https://no-color.org) or the terminal is « dumb ».
-# Violet is the color of seedtunnel: mauve (color 141) on the terminals with
-# 256 colors, plain magenta on the others (PuTTY says « xterm », 8 colors,
-# unless its « Terminal-type string » is xterm-256color).
+# Pink is the color of seedtunnel (bright magenta), on every terminal: the
+# same pink with 256 colors (color 207) as with 8 (PuTTY says « xterm », 8
+# colors, and shows bold magenta in bright pink). 256 colors only bring a
+# finer grey.
 colors_init() {
     local mode=${1:-auto}
     if [[ $mode == auto ]]; then
         if stdout_is_terminal && [[ -z ${NO_COLOR-} && ${TERM-} != dumb ]]; then mode=on; else mode=off; fi
     fi
     C_RED="" C_GREEN="" C_YELLOW="" C_BLUE="" C_BOLD="" C_DIM="" C_RESET=""
-    C_BRAND="" C_KEY="" C_CYAN="" C_GREY=""
+    C_BRAND="" C_BADGE="" C_CYAN="" C_GREY=""
     UI_COLORS=0
     [[ $mode == on ]] || return 0
     C_RED=$'\e[1;31m'
@@ -59,13 +60,13 @@ colors_init() {
     C_CYAN=$'\e[36m'
     if [[ ${TERM-} == *256color* || ${COLORTERM-} == truecolor || ${COLORTERM-} == 24bit ]]; then
         UI_COLORS=256
-        C_BRAND=$'\e[1;38;5;141m'
-        C_KEY=$'\e[1;97;48;5;98m'
+        C_BRAND=$'\e[1;38;5;207m'
+        C_BADGE=$'\e[1;97;48;5;127m'
         C_GREY=$'\e[38;5;245m'
     else
         UI_COLORS=8
         C_BRAND=$'\e[1;35m'
-        C_KEY=$'\e[1;37;45m'
+        C_BADGE=$'\e[1;37;45m'
         C_GREY=$C_DIM
     fi
 }

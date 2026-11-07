@@ -203,8 +203,7 @@ screen_terminal() {
     ui_crumbs "$(pv 'Terminal check' 'Vérification du terminal')"
     echo
     case $UI_COLORS in
-        256) colors=$(pv '256 (exact mauve)' '256 (mauve exact)') ;;
-        8) colors=$(pv '8 (violet shown as plain magenta)' '8 (violet affiché en magenta simple)') ;;
+        256 | 8) colors=$UI_COLORS ;;
         *) colors=$(pv 'none (NO_COLOR, or not a terminal)' 'aucune (NO_COLOR, ou pas un terminal)') ;;
     esac
     ui_field_add TERM "${TERM:-?}${COLORTERM:+ · COLORTERM=$COLORTERM}"
@@ -215,15 +214,10 @@ screen_terminal() {
     echo
     ui_key 1
     key=$UI_KEY
-    ui_print "  $C_BRAND● $(pv violet violet)$C_RESET   $C_GREEN● $(pv green vert)$C_RESET   $C_YELLOW● $(pv yellow jaune)$C_RESET   $C_RED● $(pv red rouge)$C_RESET   $C_GREY○ $(pv grey gris)$C_RESET   ${C_CYAN}cyan$C_RESET   $key $(pv key touche)"
+    ui_print "  $C_BRAND● $(pv pink rose)$C_RESET   $C_GREEN● $(pv green vert)$C_RESET   $C_YELLOW● $(pv yellow jaune)$C_RESET   $C_RED● $(pv red rouge)$C_RESET   $C_GREY○ $(pv grey gris)$C_RESET   ${C_CYAN}cyan$C_RESET   $key $(pv key touche)   ${C_BADGE} v$APP_VERSION $C_RESET"
     echo
     ui_print "  $(pv 'Each of these characters must look right (no square, no « ? »):' "Chacun de ces caractères doit s'afficher (ni carré, ni « ? ») :")"
     ui_print "    ● ○ ✔ ✘ ! › · … ↵ ─ │ ┌ ┐ └ ┘ ├ ┤ ═ é è à ç « »"
-    if ((UI_COLORS == 8)); then
-        echo
-        ui_box info "$(pv 'Tip for PuTTY' 'Astuce pour PuTTY')" \
-            "$(pv 'For the exact mauve: Connection → Data → Terminal-type string: xterm-256color, then Session → Save, and reconnect.' 'Pour le mauve exact : Connection → Data → « Terminal-type string » : xterm-256color, puis Session → Save, et reconnectez-vous.')"
-    fi
     end_action
 }
 

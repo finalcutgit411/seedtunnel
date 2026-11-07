@@ -227,7 +227,7 @@ ui_header() {
     local name badge subtitle
     ui_server_names
     name="${C_BOLD}Seed$C_RESET${C_BRAND}Tunnel$C_RESET"
-    if [[ -n $C_KEY ]]; then badge="$C_KEY v$APP_VERSION $C_RESET"; else badge="v$APP_VERSION"; fi
+    if [[ -n $C_BADGE ]]; then badge="$C_BADGE v$APP_VERSION $C_RESET"; else badge="v$APP_VERSION"; fi
     subtitle=$(t 'WireGuard VPN · private seedbox')
     ui_cut "$UI_SERVER" 24
     if ((UI_WIDTH >= 60)); then
@@ -258,7 +258,7 @@ ui_crumbs() {
 }
 
 # --- States -----------------------------------------------------------------------
-# ui_level LEVEL → UI_COLOR and UI_MARK: ok (green), info (violet), warn
+# ui_level LEVEL → UI_COLOR and UI_MARK: ok (green), info (pink), warn
 # (yellow), bad (red), off (grey, empty circle)
 ui_level() {
     UI_MARK="●"
@@ -370,10 +370,10 @@ ui_fields_show() {
 
 # --- Menus ------------------------------------------------------------------------
 
-# ui_key KEY → UI_KEY: the key as a violet keycap, or [K] without colors (3
-# characters either way)
+# ui_key KEY → UI_KEY: [K], the brackets in grey and the key in pink (no
+# background: choice of Neil, 7 Nov. 2026)
 ui_key() {
-    if [[ -n $C_KEY ]]; then UI_KEY="$C_KEY ${1^^} $C_RESET"; else UI_KEY="[${1^^}]"; fi
+    UI_KEY="$C_GREY[$C_RESET$C_BRAND${1^^}$C_RESET$C_GREY]$C_RESET"
 }
 
 # ui_menu_add KEY TEXT / ui_menu_gap / ui_menu_show — entries of a menu. Two
@@ -548,7 +548,7 @@ ui_table() {
 }
 
 # ui_box LEVEL TITLE [LINE…] — framed message: bad (red, « ! »), ok (green,
-# « ✔ »), warn (yellow), info (violet). Long lines are wrapped.
+# « ✔ »), warn (yellow), info (pink). Long lines are wrapped.
 ui_box() {
     local level=$1 title=$2 mark line part width inner
     shift 2

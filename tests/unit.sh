@@ -2928,7 +2928,7 @@ colors_follow_terminal_and_no_color() (
     TERM=xterm-256color
     unset NO_COLOR COLORTERM
     colors_init
-    [[ $C_BRAND == *"38;5;141"* && $UI_COLORS == 256 ]] || return 1
+    [[ $C_BRAND == *"38;5;207"* && $C_GREY == *"38;5;245"* && $UI_COLORS == 256 ]] || return 1
     TERM=xterm
     colors_init
     [[ $C_BRAND == $'\e[1;35m' && $UI_COLORS == 8 ]] || return 1
@@ -2938,7 +2938,7 @@ colors_follow_terminal_and_no_color() (
     # NO_COLOR (https://no-color.org): set and not empty → no color at all
     NO_COLOR=1
     colors_init
-    [[ -z $C_BRAND$C_GREEN$C_RESET$C_KEY && $UI_COLORS == 0 ]] || return 1
+    [[ -z $C_BRAND$C_GREEN$C_RESET$C_BADGE$C_GREY && $UI_COLORS == 0 ]] || return 1
     NO_COLOR=""
     colors_init
     [[ -n $C_BRAND ]] || return 1
@@ -2949,9 +2949,19 @@ colors_follow_terminal_and_no_color() (
     TERM=xterm-256color
     colors_init
     [[ -z $C_BRAND ]] || return 1
-    # keys: violet keycap, or [K] without colors (3 characters either way)
     ui_key q
-    [[ $UI_KEY == "[Q]" ]]
+    [[ $UI_KEY == "[Q]" ]] || return 1
+    # with colors: the same [Q], the key in pink, no background behind it
+    # (Neil, 7 Nov.: the pink background under the numbers was too much); the
+    # version keeps its pink background
+    colors_init on
+    ui_key q
+    [[ $UI_KEY == "$C_GREY[$C_RESET${C_BRAND}Q$C_RESET$C_GREY]$C_RESET" ]] || return 1
+    UI_COLUMNS=80
+    ui_width
+    local header
+    header=$(ui_header)
+    [[ $header == *"$C_BADGE v$APP_VERSION $C_RESET"* ]]
 )
 
 # No line wider than the screen, in English and in French, with and without
