@@ -285,7 +285,7 @@ file_age_days() {
 backup_main() {
     local out
     banner
-    section 'BACKUP'
+    section 'Create an encrypted backup now'
     backup_require_something
     out=${OPT_OUTPUT_FILE:-$(backup_file_name)}
     # an older backup is never replaced
@@ -324,7 +324,7 @@ backup_share() {
     size=$(human_size "$(stat -c %s "$file")")
     share_require "$(t 'Without a seedbox, copy it with WinSCP or scp: %s' "$file")"
     banner
-    section 'DOWNLOAD THE LATEST BACKUP'
+    section 'Download the latest backup (one-time link)'
     say 'Backup of %s.' "$(date -r "$file" '+%F %R')"
     share_create "$file" "${file##*/}" "$(t 'seedtunnel backup')" "$(text share_steps_backup)" \
         "$(t 'The backup is encrypted: it cannot be read without its passphrase.')" "$BACKUP_DOWNLOADED_MARK"
@@ -375,7 +375,7 @@ backup_auto_install_units() {
 
 backup_auto_enable() {
     banner
-    section 'WEEKLY BACKUP'
+    section 'Weekly backup'
     backup_require_something
     text backup_auto_help
     echo
@@ -475,41 +475,50 @@ backup_ask_file() {
     printf -v "$_file_var" '%s' "$_file"
 }
 
+backup_menu_share() {
+    backup_share
+    pause
+}
+
+backup_menu_weekly() {
+    if backup_auto_enabled; then
+        backup_auto_disable
+        pause
+    elif backup_auto_enable; then
+        pause
+    fi
+}
+
+backup_menu_restore() {
+    local file
+    banner
+    section 'Restore a backup'
+    backup_list
+    echo
+    if backup_ask_file file && restore_main "$file"; then pause; fi
+}
+
 backup_menu() {
-    local choice file
+    local choice
     while true; do
-        banner
-        section 'BACKUP / RESTORE'
+        UI_PLACE=("$(t 'Backup / restore')")
+        ui_top "${UI_PLACE[@]}"
         backup_auto_status
         echo
-        say '1) Create an encrypted backup now'
-        say '2) Download the latest backup (one-time link)'
-        say '3) Turn the weekly backup on / off'
-        say '4) Restore a backup'
+        ui_menu_add 1 "$(t 'Create an encrypted backup now')"
+        ui_menu_add 2 "$(t 'Download the latest backup (one-time link)')"
+        ui_menu_add 3 "$(t 'Turn the weekly backup on / off')"
+        ui_menu_add 4 "$(t 'Restore a backup')"
+        ui_menu_show
         echo
-        say 'Q) Back'
-        echo
-        ask choice 'Your choice' ""
+        ui_menu_ask choice back
         case ${choice,,} in
-            1) backup_main ;;
-            2)
-                backup_share
-                pause
-                ;;
-            3)
-                if backup_auto_enabled; then
-                    backup_auto_disable
-                    pause
-                elif backup_auto_enable; then
-                    pause
-                fi
-                ;;
-            4)
-                backup_list
-                echo
-                if backup_ask_file file && restore_main "$file"; then pause; fi
-                ;;
-            q) return 0 ;;
+            1) ui_action backup_main ;;
+            2) ui_action backup_menu_share ;;
+            3) ui_action backup_menu_weekly ;;
+            4) ui_action backup_menu_restore ;;
+            "" | b) return 0 ;;
+            q) ui_quit ;;
         esac
     done
 }
@@ -582,7 +591,7 @@ restore_main() {
     [[ -n $file ]] || die 'Usage: seedtunnel restore FILE'
     [[ -r $file ]] || die 'File not found: %s' "$file"
     banner
-    section 'RESTORE'
+    section 'Restore a backup'
     backup_read_passphrase 0 || return 1
     BACKUP_TMP_DIR=$(mktemp -d)
     # the decrypted archive holds secrets: deleted whatever happens (an error
@@ -639,6 +648,7 @@ restore_main() {
     if grep -q '/transmission-daemon/torrents' <<<"$list"; then say '  - the list of torrents'; fi
     if grep -qx 'etc/seedtunnel/firewall.conf' <<<"$list"; then say '  - the firewall'; fi
     echo
+    danger "$(t 'Restore a backup')" "$(t 'The current settings of seedtunnel are replaced by those of the backup (a copy of them is kept in /etc).')"
     if ! confirm 'Restore? The current settings of seedtunnel will be replaced' n; then
         backup_cleanup
         trap - EXIT INT TERM

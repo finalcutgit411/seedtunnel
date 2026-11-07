@@ -204,28 +204,36 @@ lock_message_names_the_holder() (
 
 # --- seedbox: changing the domain can always be cancelled ------------------------
 # A seedbox with a valid Let's Encrypt certificate for old.example.org; the
-# answers typed in the menu come from ANSWERS, « confirm » answers no.
+# answers typed in the menu come from « answers », « confirm » answers no.
 
-# The answers typed by the user, in order (ANSWERS). A question asked once more
-# than planned = a menu with no way out: the test fails. ask_back works as in
-# the script: an empty answer goes back (status 1).
+# The answers typed by the user, in order: answers "1" "" "b". A question asked
+# once more than planned = a menu with no way out: the test fails. ask_back
+# works as in the script: an empty answer goes back (status 1). The answers
+# are in a file: the actions of the menus run in subshells (ui_action), and
+# what they read must not be read again by the menu.
 answers_load() {
     INTERACTIVE=1
-    ANSWERS=()
+    : >"$WORK/answers"
     exec 3>&2
     ask() {
-        if ((${#ANSWERS[@]} == 0)); then
+        local _answer_line
+        if [[ ! -s $WORK/answers ]]; then
             echo "the menu asks again: no way out of it" >&3
             exit 99
         fi
-        printf -v "$1" '%s' "${ANSWERS[0]}"
-        ANSWERS=("${ANSWERS[@]:1}")
+        IFS= read -r _answer_line <"$WORK/answers"
+        sed -i 1d "$WORK/answers"
+        printf -v "$1" '%s' "$_answer_line"
     }
     ask_back() {
         ask "$1"
         [[ -n ${!1} ]]
     }
+    # the choice of a menu is an answer like the others
+    ui_ask_choice() { ask "$1"; }
 }
+
+answers() { printf '%s\n' "$@" >"$WORK/answers"; }
 
 domain_menu_load() {
     load
@@ -255,28 +263,32 @@ domain_untouched() {
 
 domain_change_empty_answer_goes_back() (
     domain_menu_load
-    ANSWERS=("")
+    answers ""
     if seedbox_change_domain >"$WORK/domain.out" 2>&1; then return 1; fi
     domain_untouched
 )
 
 domain_change_same_name_keeps_certificate() (
     domain_menu_load
-    ANSWERS=("old.example.org")
+    answers "old.example.org"
     seedbox_change_domain >"$WORK/domain.out" 2>&1
     domain_untouched && grep -q 'Nothing to change' "$WORK/domain.out"
 )
 
 domain_change_warns_before_replacing_certificate() (
     domain_menu_load
-    ANSWERS=("new.example.org")
+    answers "new.example.org"
     seedbox_change_domain >"$WORK/domain.out" 2>&1
     domain_untouched && grep -q 'will be deleted' "$WORK/domain.out"
 )
 
 domain_change_back_when_name_points_elsewhere() (
     domain_menu_load
-    ANSWERS=("elsewhere.test" "q")
+    answers "elsewhere.test" "b"
+    if seedbox_change_domain >"$WORK/domain.out" 2>&1; then return 1; fi
+    domain_untouched || return 1
+    # Q, the key of 1.2.x, still goes back
+    answers "elsewhere.test" "q"
     if seedbox_change_domain >"$WORK/domain.out" 2>&1; then return 1; fi
     domain_untouched
 )
@@ -284,7 +296,7 @@ domain_change_back_when_name_points_elsewhere() (
 domain_change_applied_once_confirmed() (
     domain_menu_load
     confirm() { return 0; }
-    ANSWERS=("new.example.org")
+    answers "new.example.org"
     seedbox_change_domain >"$WORK/domain.out" 2>&1
     [[ $APPLIED == 1 && $SEEDBOX_DOMAIN == new.example.org ]]
 )
@@ -1713,11 +1725,11 @@ vpn_add_client_can_go_back() (
     vpn_connected_count() { echo 0; }
     vpn_add_client() { echo "add $1" >>"$WORK/back-calls"; }
     # « Add a client », an empty name, then Q
-    ANSWERS=("1" "" "q")
+    answers "1" "" "b"
     vpn_menu >/dev/null 2>&1 || return 1
     back_nothing_done || return 1
     # a wrong name is asked again, then empty: back
-    ANSWERS=("not valid!" "")
+    answers "not valid!" ""
     vpn_ask_client_name name "" >/dev/null 2>&1
     (($? == 1))
 )
@@ -1736,7 +1748,7 @@ vpn_client_actions_can_go_back() (
     vpn_share_client() { echo "share $1" >>"$WORK/back-calls"; }
     vpn_remove_client() { echo "revoke $1" >>"$WORK/back-calls"; }
     # show, link, revoke: empty answer each time; revoke: « no » too
-    ANSWERS=("2" "" "3" "" "4" "" "4" "laptop" "q")
+    answers "2" "" "3" "" "4" "" "4" "laptop" "b"
     confirm() { return 1; }
     vpn_menu >/dev/null 2>&1 || return 1
     back_nothing_done
@@ -1747,9 +1759,9 @@ vpn_pick_client_asks_again() (
     touch "$VPN_CLIENTS_DIR/laptop.env"
     vpn_client_names() { echo laptop; }
     # a number that does not exist is asked again
-    ANSWERS=("9" "laptop")
+    answers "9" "laptop"
     vpn_pick_client name "Client" >/dev/null 2>&1 && [[ $name == laptop ]] || return 1
-    ANSWERS=("")
+    answers ""
     vpn_pick_client name "Client" >/dev/null 2>&1
     (($? == 1))
 )
@@ -1761,16 +1773,16 @@ vpn_settings_can_go_back() (
     VPN_PUBLIC_ADDRESS=203.0.113.10
     VPN_PORT=51820
     # empty address
-    ANSWERS=("")
+    answers ""
     vpn_change_settings >/dev/null 2>&1 && return 1
     # empty port, empty choice of DNS
-    ANSWERS=("203.0.113.10" "")
+    answers "203.0.113.10" ""
     vpn_change_settings >/dev/null 2>&1 && return 1
-    ANSWERS=("203.0.113.10" "51820" "")
+    answers "203.0.113.10" "51820" ""
     vpn_change_settings >/dev/null 2>&1 && return 1
     # « no » to « Is that right? »
     confirm() { return 1; }
-    ANSWERS=("203.0.113.10" "51820" "1")
+    answers "203.0.113.10" "51820" "1"
     vpn_change_settings >/dev/null 2>&1 && return 1
     back_nothing_done
 )
@@ -1785,10 +1797,10 @@ vpn_install_can_go_back() (
     vpn_port_is_free() { return 0; }
     vpn_apply() { echo "apply" >>"$WORK/back-calls"; }
     vpn_add_client() { echo "add $1" >>"$WORK/back-calls"; }
-    ANSWERS=("")
+    answers ""
     vpn_install_interactive >/dev/null 2>&1 || return 1
     # the name of the first client, empty
-    ANSWERS=("203.0.113.10" "51820" "1" "")
+    answers "203.0.113.10" "51820" "1" ""
     confirm() { return 0; }
     vpn_install_interactive >/dev/null 2>&1 || return 1
     back_nothing_done
@@ -1807,15 +1819,15 @@ seedbox_install_can_go_back() (
     seedbox_apply() { echo "apply" >>"$WORK/back-calls"; }
     id() { return 1; }
     # empty user, then empty domain, then empty data folder
-    ANSWERS=("")
+    answers ""
     seedbox_install_interactive >/dev/null 2>&1 || return 1
-    ANSWERS=("lancelot" "")
+    answers "lancelot" ""
     seedbox_install_interactive >/dev/null 2>&1 || return 1
-    ANSWERS=("lancelot" "203.0.113.10" "")
+    answers "lancelot" "203.0.113.10" ""
     seedbox_install_interactive >/dev/null 2>&1 || return 1
     # « no » to « Start the installation? »: nothing, and no password left
     confirm() { return 1; }
-    ANSWERS=("lancelot" "203.0.113.10" "$WORK/data")
+    answers "lancelot" "203.0.113.10" "$WORK/data"
     seedbox_install_interactive >/dev/null 2>&1 || return 1
     [[ -z ${SEEDBOX_NEW_PASSWORD-} ]] && back_nothing_done
 )
@@ -1825,11 +1837,11 @@ seedbox_credentials_can_go_back() (
     SEEDBOX_USER=lancelot
     ask_password() { printf -v "$1" '%s' 'a password of 20 chars'; }
     seedbox_set_credentials() { echo "set $1" >>"$WORK/back-calls"; }
-    ANSWERS=("")
+    answers ""
     seedbox_change_credentials >/dev/null 2>&1 && return 1
     # « no » to the last question
     confirm() { return 1; }
-    ANSWERS=("lancelot")
+    answers "lancelot"
     seedbox_change_credentials >/dev/null 2>&1 && return 1
     [[ -z ${SEEDBOX_NEW_PASSWORD-} ]] && back_nothing_done
 )
@@ -1845,7 +1857,7 @@ sftp_keys_menu_can_go_back() (
     sftp_keys_import() { echo "import" >>"$WORK/back-calls"; }
     sftp_keys_remove() { echo "remove $1" >>"$WORK/back-calls"; }
     # add: a wrong key asked again, then empty; remove: a wrong number, then empty
-    ANSWERS=("1" "not a key" "" "3" "5" "" "q")
+    answers "1" "not a key" "" "3" "5" "" "b"
     sftp_keys_menu >/dev/null 2>&1 || return 1
     back_nothing_done
 )
@@ -1855,7 +1867,7 @@ unban_can_go_back() (
     fail2ban_bans_print() { :; }
     fail2ban_unban() { echo "unban $1" >>"$WORK/back-calls"; }
     # a wrong address is asked again, then empty
-    ANSWERS=("x;y" "")
+    answers "x;y" ""
     fail2ban_bans_menu >/dev/null 2>&1 || return 1
     back_nothing_done
 )
@@ -1863,7 +1875,7 @@ unban_can_go_back() (
 seedbox_domain_install_can_go_back() (
     back_load
     SEEDBOX_DOMAIN=203.0.113.10
-    ANSWERS=("")
+    answers ""
     seedbox_ask_domain 203.0.113.10 >/dev/null 2>&1
     (($? == 1))
 )
@@ -1899,7 +1911,7 @@ backup_create_and_weekly_can_go_back() (
     backup_write() { echo "backup $1" >>"$WORK/back-calls"; }
     backup_auto_install_units() { echo "weekly on" >>"$WORK/back-calls"; }
     # « backup now », then « weekly backup on »: empty passphrase both times
-    ANSWERS=("1" "3" "q")
+    answers "1" "3" "b"
     backup_menu >/dev/null 2>&1 <<<$'\n\n' || return 1
     back_nothing_done && [[ ! -e $BACKUP_PASSPHRASE_FILE ]]
 )
@@ -1911,7 +1923,7 @@ backup_menu_can_go_back() (
     backup_latest() { echo "$WORK/none.enc"; }
     restore_main() { echo "restore $1" >>"$WORK/back-calls"; }
     # restore: a file that does not exist asked again, then empty
-    ANSWERS=("4" "$WORK/none.enc" "" "q")
+    answers "4" "$WORK/none.enc" "" "b"
     backup_menu >/dev/null 2>&1 || return 1
     back_nothing_done
 )
@@ -2226,6 +2238,7 @@ language_asked_again() (
     language_first_run <<<'1' >/dev/null 2>&1
     [[ $(<"$APP_LANG_FILE") == en ]] || return 1
     # from the menu: asked again too; an empty answer goes back
+    INTERACTIVE=1
     language_menu <<<$'9\n2' >/dev/null 2>&1
     [[ $(<"$APP_LANG_FILE") == fr ]] || return 1
     language_menu <<<'' >/dev/null 2>&1
@@ -2356,7 +2369,7 @@ vpn_port_change_through_vpn() (
     SSH_CONNECTION="10.8.0.2 50000 10.8.0.1 22"
     VPN_PORT=51820
     # same address, new port, Quad9
-    ANSWERS=("203.0.113.10" "51821" "1")
+    answers "203.0.113.10" "51821" "1"
     vpn_change_settings >"$WORK/port.out" 2>&1
     cat "$WORK/port.out" "$WORK/questions"
     # warned, asked (« no » by default), nothing applied
@@ -2365,7 +2378,7 @@ vpn_port_change_through_vpn() (
     # same port: not asked
     : >"$WORK/questions"
     VPN_PORT=51820
-    ANSWERS=("203.0.113.10" "51820" "1")
+    answers "203.0.113.10" "51820" "1"
     vpn_change_settings >"$WORK/port.out" 2>&1 || return 1
     ! grep -q "anyway" "$WORK/questions" && grep -q apply "$WORK/back-calls"
 )
@@ -3074,7 +3087,7 @@ check "lock: the message names the process holding it" lock_message_names_the_ho
 check "domain menu: an empty answer goes back, nothing changed" domain_change_empty_answer_goes_back
 check "domain menu: same name, certificate kept without a new request" domain_change_same_name_keeps_certificate
 check "domain menu: warning and confirmation before replacing the certificate" domain_change_warns_before_replacing_certificate
-check "domain menu: Q goes back when the name points elsewhere" domain_change_back_when_name_points_elsewhere
+check "domain menu: B (or Q) goes back when the name points elsewhere" domain_change_back_when_name_points_elsewhere
 check "domain menu: new name applied once confirmed" domain_change_applied_once_confirmed
 check "firewall: change refused → previous rules back, boot file untouched" firewall_change_refused_restores_previous_rules
 check "firewall: first activation refused → no rules left" firewall_first_trial_refused_leaves_nothing

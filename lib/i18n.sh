@@ -144,13 +144,18 @@ language_cli() {
     esac
 }
 
-# From the menu: asked again until 1 or 2; an empty answer goes back
+# From the menu (not in a subshell: the choice must stay): an empty answer or
+# B goes back
 language_menu() {
     local choice
-    printf '\n  1) English\n  2) Français\n\n'
     while true; do
-        IFS= read -r -p "Language / Langue [1-2] (empty = back / vide = retour) : " choice || return 0
-        case $choice in
+        ui_top 'Language / Langue'
+        ui_menu_add 1 English
+        ui_menu_add 2 Français
+        ui_menu_show
+        echo
+        ui_menu_ask choice back
+        case ${choice,,} in
             1)
                 language_save en
                 return 0
@@ -159,7 +164,8 @@ language_menu() {
                 language_save fr
                 return 0
                 ;;
-            "") return 0 ;;
+            "" | b) return 0 ;;
+            q) ui_quit ;;
         esac
     done
 }

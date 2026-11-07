@@ -10,23 +10,11 @@
 en: A restore did not finish: the settings may be incomplete. See  seedtunnel doctor
 fr: Une restauration ne s'est pas terminée : les réglages sont peut-être incomplets. Voir  seedtunnel doctor
 
-en: %s connected of %s client(s)
-fr: %s connecté(s) sur %s client(s)
-
-en: not installed
-fr: non installé
-
 en: stopped: disk almost full
 fr: arrêté : disque presque plein
 
 en: nginx stopped
 fr: nginx arrêté
-
-en: (system and downloads)
-fr: (système et téléchargements)
-
-en: system %s · downloads %s
-fr: système %s · téléchargements %s
 
 en: on
 fr: actif
@@ -39,36 +27,6 @@ fr: Disque
 
 en: Firewall
 fr: Pare-feu
-
-en: 1) Manage the VPN
-fr: 1) Gérer le VPN
-
-en: 1) Install the VPN
-fr: 1) Installer le VPN
-
-en: 2) Manage the seedbox
-fr: 2) Gérer la seedbox
-
-en: 2) Install the seedbox
-fr: 2) Installer la seedbox
-
-en: 3) Firewall
-fr: 3) Pare-feu
-
-en: 4) Diagnostics
-fr: 4) Diagnostic
-
-en: 5) Backup / restore
-fr: 5) Sauvegarder / restaurer
-
-en: 6) Update seedtunnel
-fr: 6) Mettre à jour seedtunnel
-
-en: 7) Restart the server
-fr: 7) Redémarrer le serveur
-
-en: Q) Quit
-fr: Q) Quitter
 
 en: Your choice
 fr: Votre choix
@@ -129,9 +87,6 @@ fr: Passphrase vide.
 en: Creating the encrypted archive
 fr: Création de l'archive chiffrée
 
-en: BACKUP
-fr: SAUVEGARDE
-
 en: Backup: %s
 fr: Sauvegarde : %s
 
@@ -143,9 +98,6 @@ fr: Aucune sauvegarde pour l'instant :  seedtunnel backup
 
 en: Without a seedbox, copy it with WinSCP or scp: %s
 fr: Sans seedbox, copiez-la avec WinSCP ou scp : %s
-
-en: DOWNLOAD THE LATEST BACKUP
-fr: TÉLÉCHARGER LA DERNIÈRE SAUVEGARDE
 
 en: Backup of %s.
 fr: Sauvegarde du %s.
@@ -161,9 +113,6 @@ fr: Rechargement de systemd
 
 en: Enabling the weekly backup
 fr: Activation de la sauvegarde hebdomadaire
-
-en: WEEKLY BACKUP
-fr: SAUVEGARDE HEBDOMADAIRE
 
 en: Weekly backup on: the last %s are kept in %s.
 fr: Sauvegarde hebdomadaire activée : les %s dernières sont gardées dans %s.
@@ -201,24 +150,6 @@ fr: Utilisation : seedtunnel backup auto on|off|status
 en: Usage: seedtunnel backup [list|share|auto on|off|status]
 fr: Utilisation : seedtunnel backup [list|share|auto on|off|status]
 
-en: BACKUP / RESTORE
-fr: SAUVEGARDER / RESTAURER
-
-en: 1) Create an encrypted backup now
-fr: 1) Créer une sauvegarde chiffrée maintenant
-
-en: 2) Download the latest backup (one-time link)
-fr: 2) Télécharger la dernière sauvegarde (lien à usage unique)
-
-en: 3) Turn the weekly backup on / off
-fr: 3) Activer / désactiver la sauvegarde hebdomadaire
-
-en: 4) Restore a backup
-fr: 4) Restaurer une sauvegarde
-
-en: Q) Back
-fr: Q) Retour
-
 en: Path of the backup file
 fr: Chemin du fichier de sauvegarde
 
@@ -233,9 +164,6 @@ fr: Utilisation : seedtunnel restore FICHIER
 
 en: File not found: %s
 fr: Fichier introuvable : %s
-
-en: RESTORE
-fr: RESTAURATION
 
 en: Cannot decrypt: wrong passphrase or damaged file.
 fr: Déchiffrement impossible : passphrase incorrecte ou fichier abîmé.
@@ -305,14 +233,8 @@ fr: hier
 en: %s belongs to another program: left alone (seedtunnel is still there: %s).
 fr: %s appartient à un autre programme : il n'a pas été touché (seedtunnel reste disponible : %s).
 
-en: WireGuard VPN + seedbox
-fr: VPN WireGuard + seedbox
-
-en: Press [Enter] to continue…
-fr: Appuyez sur [Entrée] pour continuer…
-
 en: running
-fr: actif
+fr: en marche
 
 en: stopped
 fr: arrêté
@@ -774,9 +696,6 @@ fr: Dernier téléchargement d'une sauvegarde commencé il y a %s jours   → se
 en: Download of a backup started %s (check its size on your computer)
 fr: Téléchargement d'une sauvegarde commencé %s (vérifiez sa taille sur votre ordinateur)
 
-en: DIAGNOSTICS
-fr: DIAGNOSTIC
-
 en: Looking for the public IP address…
 fr: Recherche de l'adresse IP publique…
 
@@ -860,14 +779,8 @@ fr: Tout le reste est accepté : ces règles ne refusent rien par défaut   → 
 en: Ports forwarded to the VPN clients (they can be reached from the Internet, the firewall does not filter them):
 fr: Ports redirigés vers les clients du VPN (joignables depuis Internet, le pare-feu ne les filtre pas) :
 
-en: FIREWALL RULES
-fr: RÈGLES DU PARE-FEU
-
 en: Show the raw rules (nftables)?
 fr: Afficher les règles brutes (nftables) ?
-
-en: 3) Show the rules
-fr: 3) Afficher les règles
 
 en: Raw rules:  nft list table inet %s ; nft list table ip seedtunnel
 fr: Règles brutes :  nft list table inet %s ; nft list table ip seedtunnel
@@ -883,9 +796,6 @@ fr: Application des règles
 
 en: Enabling at boot
 fr: Activation au démarrage
-
-en: FIREWALL
-fr: PARE-FEU
 
 en: Checking the rules
 fr: Vérification des règles
@@ -943,12 +853,6 @@ fr: Pare-feu activé mais règles absentes :  seedtunnel firewall enable --yes
 
 en: seedtunnel firewall off (everything is open, apart from the fail2ban rules).
 fr: Pare-feu seedtunnel désactivé (tout est ouvert, hors règles de fail2ban).
-
-en: 1) Enable / update the firewall
-fr: 1) Activer / mettre à jour le pare-feu
-
-en: 2) Turn the firewall off
-fr: 2) Désactiver le pare-feu
 
 en: Without a terminal:  seedtunnel firewall enable --yes
 fr: Sans terminal :  seedtunnel firewall enable --yes
@@ -1041,9 +945,6 @@ fr:   (après une modification DNS, comptez de quelques minutes à quelques heur
 en:   R) Try again    C) Continue with a self-signed certificate
 fr:   R) Recommencer    C) Continuer avec un certificat auto-signé
 
-en:   Q) Back, nothing is changed
-fr:   Q) Revenir, sans rien changer
-
 en: Creating the user %s
 fr: Création de l'utilisateur %s
 
@@ -1128,9 +1029,6 @@ fr: Le fichier ne contient pas de mot de passe.
 en: (SSH key only)
 fr: (clé SSH uniquement)
 
-en: SFTP CONNECTION TO THE SEEDBOX
-fr: CONNEXION SFTP À LA SEEDBOX
-
 en:   Protocol    : SFTP
 fr:   Protocole   : SFTP
 
@@ -1206,9 +1104,6 @@ fr: SFTP : mot de passe autorisé.
 en: SFTP: SSH keys only (the password still works for the web interface).
 fr: SFTP : clés SSH uniquement (le mot de passe reste valable pour l'interface web).
 
-en: SSH KEYS FOR SFTP
-fr: CLÉS SSH POUR LE SFTP
-
 en: An SSH key is a good replacement for the password in SFTP.
 fr: Une clé SSH remplace avantageusement le mot de passe pour le SFTP.
 
@@ -1224,29 +1119,11 @@ fr: autorisé
 en: refused (keys only)
 fr: refusé (clés uniquement)
 
-en:   SFTP password: %s
-fr:   Mot de passe SFTP : %s
-
-en: 1) Add a key
-fr: 1) Ajouter une clé
-
-en: 2) Create a key for WinSCP / FileZilla (one-time download link)
-fr: 2) Créer une clé pour WinSCP / FileZilla (lien de téléchargement unique)
-
-en: 3) Remove a key
-fr: 3) Supprimer une clé
-
-en: 4) Allow / refuse the password in SFTP
-fr: 4) Autoriser / refuser le mot de passe pour le SFTP
-
 en: Public key
 fr: Clé publique
 
 en: Number of the key to remove
 fr: Numéro de la clé à supprimer
-
-en: SEEDBOX INSTALLATION
-fr: INSTALLATION DE LA SEEDBOX
 
 en: Data folder
 fr: Dossier des données
@@ -1268,9 +1145,6 @@ fr:   Données     : %s
 
 en: Start the installation?
 fr: Lancer l'installation ?
-
-en: SEEDBOX INSTALLED — no restart needed
-fr: SEEDBOX INSTALLÉE — aucun redémarrage nécessaire
 
 en: Invalid SEEDBOX_USER: "%s"
 fr: SEEDBOX_USER invalide : « %s »
@@ -1320,9 +1194,6 @@ fr: Compte %s renommé en %s
 en: Cannot suspend %s before renaming it (details in %s): nothing was changed.
 fr: Impossible de suspendre %s avant de le renommer (détails dans %s) : rien n'a été changé.
 
-en: USER AND PASSWORD
-fr: UTILISATEUR ET MOT DE PASSE
-
 en: Password: at least 10 characters (read from standard input).
 fr: Mot de passe : 10 caractères minimum (lu sur l'entrée standard).
 
@@ -1334,9 +1205,6 @@ fr: Nom de domaine invalide : « %s »
 
 en: Seedbox available at %s (certificate %s)
 fr: Seedbox accessible sur %s (certificat %s)
-
-en: DOMAIN NAME AND HTTPS CERTIFICATE
-fr: NOM DE DOMAINE ET CERTIFICAT HTTPS
 
 en: Right now: %s (certificate %s)
 fr: Actuellement : %s (certificat %s)
@@ -1371,9 +1239,6 @@ fr: Adresse IP invalide : « %s »
 en: Unbanning %s
 fr: Débannissement de %s
 
-en: BANNED IP ADDRESSES (fail2ban)
-fr: ADRESSES IP BANNIES (fail2ban)
-
 en: IP to unban
 fr: IP à débannir
 
@@ -1382,9 +1247,6 @@ fr: Redémarrage de %s
 
 en: Transmission stays stopped: the disk is almost full (%s GB free). It restarts by itself above %s GB.
 fr: Transmission reste arrêté : le disque est presque plein (%s Go libres). Il redémarre tout seul au-dessus de %s Go.
-
-en: REMOVING THE SEEDBOX
-fr: DÉSINSTALLATION DE LA SEEDBOX
 
 en: Remove the seedbox?
 fr: Désinstaller la seedbox ?
@@ -1403,42 +1265,6 @@ fr: Seedbox désinstallée. Vos données restent dans %s.
 
 en: (option 2 to try Let's Encrypt again)
 fr: (option 2 pour retenter Let's Encrypt)
-
-en: SEEDBOX MANAGEMENT
-fr: GESTION DE LA SEEDBOX
-
-en:   Web interface : %s
-fr:   Interface web : %s
-
-en:   Certificate   : %s
-fr:   Certificat    : %s
-
-en:   SFTP          : %s — %s
-fr:   SFTP          : %s — %s
-
-en:   Services      : transmission %s · nginx %s · fail2ban %s
-fr:   Services      : transmission %s · nginx %s · fail2ban %s
-
-en: 1) Change the user or the password
-fr: 1) Changer l'utilisateur ou le mot de passe
-
-en: 2) Domain name and HTTPS certificate
-fr: 2) Nom de domaine et certificat HTTPS
-
-en: 3) SSH keys for SFTP
-fr: 3) Clés SSH pour le SFTP
-
-en: 4) SFTP connection: settings for WinSCP and FileZilla
-fr: 4) Connexion SFTP : réglages pour WinSCP et FileZilla
-
-en: 5) Banned IP addresses (fail2ban)
-fr: 5) Adresses IP bannies (fail2ban)
-
-en: 6) Restart the services
-fr: 6) Redémarrer les services
-
-en: 7) Remove the seedbox
-fr: 7) Désinstaller la seedbox
 
 en: The seedbox is already installed (seedtunnel seedbox to manage it).
 fr: La seedbox est déjà installée (seedtunnel seedbox pour la gérer).
@@ -1540,12 +1366,6 @@ fr: Aucune version publiée (étiquette vX.Y.Z) dans le dépôt.
 en: Switching to version %s
 fr: Passage à la version %s
 
-en: UPDATING SEEDTUNNEL
-fr: MISE À JOUR DE SEEDTUNNEL
-
-en: APPLYING THE CONFIGURATION
-fr: APPLICATION DE LA CONFIGURATION
-
 en: Configuration up to date (seedtunnel %s).
 fr: Configuration à jour (seedtunnel %s).
 
@@ -1619,9 +1439,6 @@ fr: Client « %s » créé : IP %s, port ouvert %s, fichier %s
 
 en: Client "%s" revoked: its key can no longer connect.
 fr: Client « %s » révoqué : sa clé ne peut plus se connecter.
-
-en: VPN CLIENT "%s"
-fr: CLIENT VPN « %s »
 
 en: Show the content of the file (to copy and paste)?
 fr: Afficher le contenu du fichier (pour un copier-coller) ?
@@ -1737,9 +1554,6 @@ fr: Cette session SSH passe par le VPN : elle sera coupée elle aussi. Reconnect
 en: Change the port anyway?
 fr: Changer le port quand même ?
 
-en: WIREGUARD VPN INSTALLATION
-fr: INSTALLATION DU VPN WIREGUARD
-
 en: VPN installed — no restart needed.
 fr: VPN installé — aucun redémarrage nécessaire.
 
@@ -1758,17 +1572,11 @@ fr: VPN_CLIENTS : nom invalide « %s »
 en: VPN ready: %s, %s client(s) in %s
 fr: VPN prêt : %s, %s client(s) dans %s
 
-en: VPN SETTINGS
-fr: RÉGLAGES DU VPN
-
 en: After a change, every client will have to import its configuration again.
 fr: Après modification, chaque client devra réimporter sa configuration.
 
 en: Settings saved. Show the clients again to get their new QR codes.
 fr: Réglages enregistrés. Réaffichez les clients pour récupérer leurs nouveaux QR codes.
-
-en: REMOVING THE VPN
-fr: DÉSINSTALLATION DU VPN
 
 en: All the clients (%s) will be deleted for good.
 fr: Tous les clients (%s) seront supprimés définitivement.
@@ -1779,53 +1587,8 @@ fr: Désinstaller le VPN ?
 en: VPN removed (IPv4 routing will be turned off at the next restart).
 fr: VPN désinstallé (le routage IPv4 sera désactivé au prochain redémarrage).
 
-en: VPN MANAGEMENT
-fr: GESTION DU VPN
-
-en:   State   : %s
-fr:   État    : %s
-
-en:   Address : %s (UDP)
-fr:   Adresse : %s (UDP)
-
-en:   Clients : %s (%s connected right now)
-fr:   Clients : %s (%s connecté(s) en ce moment)
-
-en: 1) Add a client
-fr: 1) Ajouter un client
-
-en: 2) Show a client (QR code, file)
-fr: 2) Afficher un client (QR code, fichier)
-
-en: 3) Download link for a client (one time only)
-fr: 3) Lien de téléchargement d'un client (usage unique)
-
-en: 4) Revoke a client
-fr: 4) Révoquer un client
-
-en: 5) Clients and connections
-fr: 5) Clients et connexions
-
-en: 6) Change the settings (address, port, DNS)
-fr: 6) Modifier les réglages (adresse, port, DNS)
-
-en: 7) Restart the VPN
-fr: 7) Redémarrer le VPN
-
-en: 8) Remove the VPN
-fr: 8) Désinstaller le VPN
-
-en: ADD A CLIENT
-fr: AJOUTER UN CLIENT
-
-en: SHOW A CLIENT
-fr: AFFICHER UN CLIENT
-
 en: Client to show
 fr: Client à afficher
-
-en: DOWNLOAD LINK
-fr: LIEN DE TÉLÉCHARGEMENT
 
 en: Links go through the HTTPS site of the seedbox, which is not installed:
 fr: Les liens passent par le site HTTPS de la seedbox, qui n'est pas installée :
@@ -1836,17 +1599,11 @@ fr: utilisez « Afficher un client » (QR code, ou contenu à copier-coller).
 en: Client to send
 fr: Client à envoyer
 
-en: REVOKE A CLIENT
-fr: RÉVOQUER UN CLIENT
-
 en: Client to revoke
 fr: Client à révoquer
 
 en: Revoke "%s" for good?
 fr: Révoquer définitivement « %s » ?
-
-en: CLIENTS AND CONNECTIONS
-fr: CLIENTS ET CONNEXIONS
 
 en: Restarting the VPN
 fr: Redémarrage du VPN
@@ -1960,3 +1717,215 @@ fr: Quitter
 
 en: Enter ↵ back · Q quit
 fr: Entrée ↵ revenir · Q quitter
+
+# --- Menus of 2.0.0 (lib/menu.sh, titles of the screens, states of the home screen) ---
+
+en: Create an encrypted backup now
+fr: Créer une sauvegarde chiffrée maintenant
+
+en: Download the latest backup (one-time link)
+fr: Télécharger la dernière sauvegarde (lien à usage unique)
+
+en: Weekly backup
+fr: Sauvegarde hebdomadaire
+
+en: Restore a backup
+fr: Restaurer une sauvegarde
+
+en: Backup / restore
+fr: Sauvegarde / restauration
+
+en: Turn the weekly backup on / off
+fr: Activer / désactiver la sauvegarde hebdomadaire
+
+en: The current settings of seedtunnel are replaced by those of the backup (a copy of them is kept in /etc).
+fr: Les réglages actuels de seedtunnel sont remplacés par ceux de la sauvegarde (une copie en est gardée dans /etc).
+
+en: Restart the server
+fr: Redémarrer le serveur
+
+en: The VPN and the seedbox stop for a minute or two; this connection is cut.
+fr: Le VPN et la seedbox s'arrêtent une à deux minutes ; cette connexion est coupée.
+
+en: Show the rules
+fr: Afficher les règles
+
+en: Enable / update the firewall
+fr: Activer / mettre à jour le pare-feu
+
+en: Turn the firewall off
+fr: Désactiver le pare-feu
+
+en: Every port of the server can then be reached from the Internet (fail2ban still bans the attacks it sees).
+fr: Tous les ports du serveur sont alors joignables depuis Internet (fail2ban bannit toujours les attaques qu'il voit).
+
+en: %s of %s clients connected
+fr: %s clients connectés sur %s
+
+en: absent
+fr: absente
+
+en: halted
+fr: arrêtée
+
+en: disk almost full
+fr: disque presque plein
+
+en: problem
+fr: problème
+
+en: firewall: see its rules
+fr: pare-feu : voir ses règles
+
+en: %s free
+fr: %s libres
+
+en: system: %s free
+fr: système : %s libres
+
+en: %s%%
+fr: %s %%
+
+en: Backup
+fr: Sauvegarde
+
+en: the weekly backup failed
+fr: la sauvegarde hebdomadaire a échoué
+
+en: weekly backup without its passphrase
+fr: sauvegarde hebdomadaire sans sa passphrase
+
+en: no backup yet
+fr: aucune sauvegarde
+
+en: recent
+fr: à jour
+
+en: last backup %s
+fr: dernière sauvegarde %s
+
+en: old
+fr: ancienne
+
+en: Manage the VPN
+fr: Gérer le VPN
+
+en: Install the VPN
+fr: Installer le VPN
+
+en: Manage the seedbox
+fr: Gérer la seedbox
+
+en: Install the seedbox
+fr: Installer la seedbox
+
+en: Update seedtunnel
+fr: Mettre à jour seedtunnel
+
+en:   B) Back, nothing is changed
+fr:   B) Revenir, sans rien changer
+
+en: SFTP connection: settings for WinSCP and FileZilla
+fr: Connexion SFTP : réglages pour WinSCP et FileZilla
+
+en: SSH keys for SFTP
+fr: Clés SSH pour le SFTP
+
+en: SFTP password
+fr: Mot de passe SFTP
+
+en: Add a key
+fr: Ajouter une clé
+
+en: Create a key for WinSCP / FileZilla (one-time download link)
+fr: Créer une clé pour WinSCP / FileZilla (lien de téléchargement unique)
+
+en: Remove a key
+fr: Supprimer une clé
+
+en: Allow / refuse the password in SFTP
+fr: Autoriser / refuser le mot de passe pour le SFTP
+
+en: Seedbox installation
+fr: Installation de la seedbox
+
+en: Seedbox installed — no restart needed
+fr: Seedbox installée — aucun redémarrage nécessaire
+
+en: Change the user or the password
+fr: Changer l'utilisateur ou le mot de passe
+
+en: Domain name and HTTPS certificate
+fr: Nom de domaine et certificat HTTPS
+
+en: Banned IP addresses (fail2ban)
+fr: Adresses IP bannies (fail2ban)
+
+en: Remove the seedbox
+fr: Désinstaller la seedbox
+
+en: Web interface
+fr: Interface web
+
+en: Certificate
+fr: Certificat
+
+en: Restart the services
+fr: Redémarrer les services
+
+en: Enter ↵ continue · Q quit
+fr: Entrée ↵ continuer · Q quitter
+
+en: Client "%s"
+fr: Client « %s »
+
+en: WireGuard VPN installation
+fr: Installation du VPN WireGuard
+
+en: Change the settings (address, port, DNS)
+fr: Modifier les réglages (adresse, port, DNS)
+
+en: Remove the VPN
+fr: Désinstaller le VPN
+
+en: Their files and QR codes will no longer work.
+fr: Leurs fichiers et leurs QR codes ne marcheront plus.
+
+en: Add a client
+fr: Ajouter un client
+
+en: Show a client (QR code, file)
+fr: Afficher un client (QR code, fichier)
+
+en: Download link for a client (one time only)
+fr: Lien de téléchargement d'un client (usage unique)
+
+en: Revoke a client
+fr: Révoquer un client
+
+en: Revoke "%s"
+fr: Révoquer « %s »
+
+en: This device will no longer be able to connect to the VPN.
+fr: Cet appareil ne pourra plus se connecter au VPN.
+
+en: Its file and its QR code stop working: this cannot be undone.
+fr: Son fichier et son QR code ne marcheront plus : c'est définitif.
+
+en: Clients and connections
+fr: Clients et connexions
+
+en: State
+fr: État
+
+en: Address
+fr: Adresse
+
+en: %s (%s connected right now)
+fr: %s (%s connecté(s) en ce moment)
+
+en: Restart the VPN
+fr: Redémarrer le VPN
+
+en: none yet
+fr: aucune

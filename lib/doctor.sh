@@ -344,7 +344,7 @@ doctor_main() {
     DOCTOR_ERRORS=0
     DOCTOR_WARNINGS=0
     banner
-    section 'DIAGNOSTICS'
+    section 'Diagnostics'
     printf '%s ' "$(t 'Looking for the public IP address…')"
     ip=$(public_ipv4)
     echo "${ip:-$(t 'not found')}"

@@ -146,7 +146,7 @@ update_from_git() {
 
 update_main() {
     banner
-    section 'UPDATING SEEDTUNNEL'
+    section 'Update seedtunnel'
     if [[ -d $APP_DIR/.git ]]; then update_from_git; else update_from_release; fi
     pause
 }
@@ -158,7 +158,7 @@ update_main() {
 apply_main() {
     local count=0
     banner
-    section 'APPLYING THE CONFIGURATION'
+    section 'Applying the configuration'
     if vpn_installed; then
         vpn_apply
         count=$((count + 1))

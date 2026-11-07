@@ -91,9 +91,9 @@ home_backup() {
         ui_status_add bad "$name" "$(t 'failed')" "$(t 'weekly backup without its passphrase')"
     elif [[ -z $age ]]; then
         if vpn_installed || seedbox_installed; then
-            ui_status_add warn "$name" "$(t 'none')" "$(t 'no backup yet')"
+            ui_status_add warn "$name" "$(t 'none yet')" "$(t 'no backup yet')"
         else
-            ui_status_add off "$name" "$(t 'none')"
+            ui_status_add off "$name" "$(t 'none yet')"
         fi
     elif ((age < 8)); then
         ui_status_add ok "$name" "$(t 'recent')" "$(t 'last backup %s' "$when")" "$when"

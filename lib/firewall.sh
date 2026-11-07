@@ -206,7 +206,7 @@ firewall_rules_show() {
 # From the menu: the list, then the raw rules on request
 firewall_rules_menu() {
     banner
-    section 'FIREWALL RULES'
+    section 'Show the rules'
     firewall_rules_show
     echo
     if confirm 'Show the raw rules (nftables)?' n; then
@@ -384,7 +384,7 @@ firewall_enable() {
     local was_on=0 start
     local -a undo
     banner
-    section 'FIREWALL'
+    section 'Enable / update the firewall'
     apt_install nftables
     if firewall_enabled && [[ -s $FIREWALL_RULES ]]; then was_on=1; fi
     # the new rules go to their own file: the rules in use, loaded at boot,
@@ -452,7 +452,8 @@ firewall_enable() {
 
 firewall_disable() {
     banner
-    section 'FIREWALL'
+    section 'Turn the firewall off'
+    danger "$(t 'Turn the firewall off')" "$(t 'Every port of the server can then be reached from the Internet (fail2ban still bans the attacks it sees).')"
     if ! confirm 'Turn the firewall off?' n; then return 0; fi
     nft_delete_table inet "$FIREWALL_TABLE"
     # the rules must really be gone before anything is deleted
@@ -510,22 +511,22 @@ firewall_status() {
 firewall_menu() {
     local choice
     while true; do
-        banner
-        section 'FIREWALL'
+        UI_PLACE=("$(t 'Firewall')")
+        ui_top "${UI_PLACE[@]}"
         firewall_status
         echo
-        say '1) Enable / update the firewall'
-        say '2) Turn the firewall off'
-        say '3) Show the rules'
+        ui_menu_add 1 "$(t 'Enable / update the firewall')"
+        ui_menu_add 2 "$(t 'Turn the firewall off')"
+        ui_menu_add 3 "$(t 'Show the rules')"
+        ui_menu_show
         echo
-        say 'Q) Back'
-        echo
-        ask choice 'Your choice' ""
+        ui_menu_ask choice back
         case ${choice,,} in
-            1) firewall_enable ;;
-            2) firewall_disable ;;
-            3) firewall_rules_menu ;;
-            q) return 0 ;;
+            1) ui_action firewall_enable ;;
+            2) ui_action firewall_disable ;;
+            3) ui_action firewall_rules_menu ;;
+            "" | b) return 0 ;;
+            q) ui_quit ;;
         esac
     done
 }
