@@ -373,7 +373,7 @@ ui_fields_show() {
 # ui_key KEY → UI_KEY: [K], the brackets in grey and the key in pink (no
 # background: choice of Neil, 7 Nov. 2026)
 ui_key() {
-    UI_KEY="$C_GREY[$C_RESET$C_BRAND${1^^}$C_RESET$C_GREY]$C_RESET"
+    UI_KEY="${C_GREY}[$C_RESET$C_BRAND${1^^}$C_RESET$C_GREY]$C_RESET"
 }
 
 # ui_menu_add KEY TEXT / ui_menu_gap / ui_menu_show — entries of a menu. Two

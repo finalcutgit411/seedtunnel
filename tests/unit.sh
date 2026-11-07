@@ -2956,7 +2956,7 @@ colors_follow_terminal_and_no_color() (
     # version keeps its pink background
     colors_init on
     ui_key q
-    [[ $UI_KEY == "$C_GREY[$C_RESET${C_BRAND}Q$C_RESET$C_GREY]$C_RESET" ]] || return 1
+    [[ $UI_KEY == "${C_GREY}[$C_RESET${C_BRAND}Q$C_RESET$C_GREY]$C_RESET" ]] || return 1
     UI_COLUMNS=80
     ui_width
     local header
