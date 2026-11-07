@@ -3,7 +3,7 @@
 
 Every English message written in the code (first argument of the functions
 that translate: t, say, section, ok, warn, err, die, run, unit_ensure_on,
-confirm, doctor_*; second argument of ask) must have its translation in
+log_run, confirm, doctor_*; second argument of ask) must have its translation in
 lang/fr.txt, not empty, with the same placeholders (%s, %d…) in the same
 order. A message or a translation may only hold %s, %d (with a width, like
 %-10s) or %%: any other « % » would be read by printf (« 100 % » too).
@@ -23,7 +23,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 CODE = [ROOT / "seedtunnel.sh", *sorted((ROOT / "lib").glob("*.sh"))]
 LANGUAGES = ["fr"]
 
-FUNCTIONS = r"(?:t|say|section|ok|warn|err|die|run|unit_ensure_on|confirm|doctor_ok|doctor_warn|doctor_error|doctor_title)"
+FUNCTIONS = r"(?:t|say|section|ok|warn|err|die|run|log_run|unit_ensure_on|confirm|doctor_ok|doctor_warn|doctor_error|doctor_title)"
 LITERAL = r"""('[^']*'|"(?:[^"\\]|\\.)*")"""
 # lookahead: calls inside other calls are found too
 CALL = re.compile(r"(?<![\w-])" + FUNCTIONS + r"\s+(?=" + LITERAL + ")")

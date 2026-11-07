@@ -111,14 +111,15 @@ esac
 # folder created, no lock taken). The commands of vpn, seedbox, firewall and
 # backup check their own arguments.
 case ${1-} in
-    apply | update | doctor | diskguard-check | diskguard-prestart) MAX_ARGUMENTS=1 ;;
-    restore | language) MAX_ARGUMENTS=2 ;;
+    apply | doctor | diskguard-check | diskguard-prestart) MAX_ARGUMENTS=1 ;;
+    restore | language | update) MAX_ARGUMENTS=2 ;;
     "" | vpn | seedbox | firewall | backup) MAX_ARGUMENTS=0 ;;
     *) die 'Unknown command: %s   (help: seedtunnel help)' "$1" ;;
 esac
 if ((MAX_ARGUMENTS && $# > MAX_ARGUMENTS)); then
     die 'Too many arguments for « seedtunnel %s »: %s   (help: seedtunnel help)' "$1" "${*:MAX_ARGUMENTS+1}"
 fi
+if [[ ${1-} == update && -n ${2-} && ${2-} != back ]]; then die 'Usage: seedtunnel update [back]'; fi
 
 check_system
 # Commands that change nothing (or only add a backup file) do not wait for the
@@ -158,7 +159,7 @@ case ${1-} in
     backup) backup_cli "${@:2}" ;;
     # status 1: empty passphrase or « no », back without doing anything
     restore) restore_main "${2-}" || true ;;
-    update) update_main ;;
+    update) update_cli "${2-}" ;;
     apply) apply_main ;;
     language) language_cli "${2-}" ;;
     diskguard-check) diskguard_check ;;

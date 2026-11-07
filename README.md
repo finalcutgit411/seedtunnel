@@ -54,6 +54,8 @@ The code is meant to be read: feel free to look through `seedtunnel.sh` and `lib
 
 After that, the `seedtunnel` command opens the menu again. `seedtunnel update` moves to the next version after checking its checksum, then applies the configuration again so that its fixes take effect. If that fails, the previous version comes back.
 
+The version replaced by an update is kept in `/opt/seedtunnel.old` (one only). `seedtunnel update back` puts it back, after a question answered « no » by default; it applies the settings again, and if that fails, the newer version comes back. `seedtunnel update` installs the newer version again later.
+
 If the server lost power during an update, the `seedtunnel` command may no longer exist: the installed version is then in `/opt/seedtunnel.previous`. To put it back:
 
 ```bash
@@ -183,9 +185,13 @@ In a terminal, every change is **tried first**: without a confirmation from a ne
 - the kernel network settings (IPv4, and IPv6 if the server has it);
 - the disk space, the full disk protection (including a Transmission that does not start again although there is room) and the clock;
 - an update or a restore that did not finish;
-- the backups (see below), including the timer and the passphrase of the weekly backup.
+- the backups (see below), including the timer and the passphrase of the weekly backup;
+- the BitTorrent port seen from the Internet, by the test service of Transmission (closed: check the firewall of your hosting provider, such as the « Edge Network Firewall » at OVH);
+- the SFTP password: a warning when it is still allowed although you have an SSH key.
 
 It exits with status 1 when it finds a problem, so it can run in a scheduled task.
+
+Everything seedtunnel runs is written to `/var/log/seedtunnel.log` (readable by root only, never a password). It is cut every month by logrotate; the last 6 months are kept, compressed.
 
 To ask for help, `seedtunnel doctor --link` (or the question at the end of the diagnostics, in the menu) makes a **report** — the diagnostics and the end of the log — and a one-time link to send it. What is private is replaced by a generic word: domain, name of the server, public IP addresses, SFTP account, SSH keys, names of the VPN clients (`<client-1>`…). The ports and the addresses inside the VPN (10.8.0.x, the same on every server) stay. It never holds a password, a passphrase or a key. Without a seedbox, the report is saved in your home folder.
 

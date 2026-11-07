@@ -54,6 +54,8 @@ Le code est fait pour être lu : n'hésitez pas à parcourir `seedtunnel.sh` et 
 
 Ensuite, la commande `seedtunnel` relance le menu. `seedtunnel update` passe à la version suivante en vérifiant son checksum, puis réapplique la configuration pour que ses corrections prennent effet. En cas d'échec, la version précédente revient.
 
+La version remplacée par une mise à jour est gardée dans `/opt/seedtunnel.old` (une seule). `seedtunnel update back` la remet en place, après une question qui répond « non » par défaut ; elle réapplique les réglages, et en cas d'échec la version plus récente revient. `seedtunnel update` réinstalle la version plus récente plus tard.
+
 Si le serveur a perdu le courant pendant une mise à jour, la commande `seedtunnel` peut ne plus exister : la version installée est alors dans `/opt/seedtunnel.previous`. Pour la remettre :
 
 ```bash
@@ -183,9 +185,13 @@ Dans un terminal, chaque changement est d'abord **à l'essai** : sans confirmati
 - les réglages réseau du noyau (IPv4, et IPv6 si le serveur l'a) ;
 - l'espace disque, la protection contre le disque plein (dont un Transmission qui ne redémarre pas alors qu'il y a de la place) et l'horloge ;
 - une mise à jour ou une restauration qui ne s'est pas terminée ;
-- les sauvegardes (voir plus bas), dont le minuteur et la passphrase de la sauvegarde hebdomadaire.
+- les sauvegardes (voir plus bas), dont le minuteur et la passphrase de la sauvegarde hebdomadaire ;
+- le port BitTorrent vu d'Internet, par le service de test de Transmission (fermé : vérifiez le pare-feu de votre hébergeur, comme l'« Edge Network Firewall » chez OVH) ;
+- le mot de passe SFTP : un avertissement quand il est encore autorisé alors que vous avez une clé SSH.
 
 Il renvoie le code 1 s'il trouve un problème : il peut tourner dans une tâche planifiée.
+
+Tout ce que seedtunnel lance est écrit dans `/var/log/seedtunnel.log` (lisible par root seulement, jamais de mot de passe). Il est découpé chaque mois par logrotate ; les 6 derniers mois sont gardés, compressés.
 
 Pour demander de l'aide, `seedtunnel doctor --link` (ou la question à la fin du diagnostic, dans le menu) prépare un **rapport** — le diagnostic et la fin du journal — et un lien à usage unique pour l'envoyer. Ce qui est privé est remplacé par un terme générique : domaine, nom du serveur, adresses IP publiques, compte SFTP, clés SSH, noms des clients VPN (`<client-1>`…). Les ports et les adresses internes du VPN (10.8.0.x, les mêmes sur tous les serveurs) restent. Il ne contient jamais de mot de passe, de passphrase ni de clé. Sans seedbox, le rapport est enregistré dans votre dossier personnel.
 

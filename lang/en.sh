@@ -43,6 +43,7 @@ Server
   backup auto on|off|status          weekly encrypted backup
   restore FILE [--passphrase-file FILE] [--yes]
   update                             go to the latest published version
+  update back [--yes]                back to the version before the last update
   apply                              apply the saved configuration again
   language en|fr                     language of the messages
   version | help

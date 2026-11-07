@@ -460,7 +460,7 @@ firewall_disable() {
     if nft list table inet "$FIREWALL_TABLE" &>/dev/null; then
         die 'The firewall rules could not be removed (details in %s): the firewall stays on, nothing was deleted.' "$APP_LOG"
     fi
-    systemctl disable --now seedtunnel-firewall.service >>"$APP_LOG" 2>&1 || true
+    log_run 'Stopping the firewall' systemctl disable --now seedtunnel-firewall.service
     rm -f "$FIREWALL_UNIT" "$FIREWALL_RULES" "$FIREWALL_CANDIDATE" "$FIREWALL_CONF_FILE"
     pending_clear firewall
     systemctl daemon-reload 2>/dev/null || true

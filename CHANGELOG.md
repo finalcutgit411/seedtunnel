@@ -3,6 +3,17 @@
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 
+## [2.1.0] - 2026-11-07
+
+### Added
+- **Back to the previous version**: an update now keeps the version it replaced (in `/opt/seedtunnel.old`, one only). `seedtunnel update back` puts it back, after a question answered « no » by default; it applies the settings again, and if that fails, the newer version comes back. In the menu, « Update seedtunnel » offers it when a version is kept. Already works for the update from 2.0.0 to 2.1.0.
+- **BitTorrent port seen from the Internet**: `seedtunnel doctor` asks the test service of Transmission whether the port of the seedbox can be reached. Closed, it points to the firewall of the hosting provider (at OVH: the « Edge Network Firewall » of the control panel). If the service does not answer, the port is said « not tested », without a warning.
+- **SFTP password**: shown in yellow in the menus while it is allowed (an SSH key is safer). `seedtunnel doctor` warns once there is an SSH key, the password being of no use then: `seedtunnel seedbox sftp-password off`.
+
+### Changed
+- **The log no longer grows without end**: `/var/log/seedtunnel.log` is cut every month by logrotate, the last 6 months kept, compressed. Set up by the installation and by `seedtunnel apply` (so by the update too).
+- **Clearer log**: stopping a service (firewall, VPN, Transmission, weekly backup, full disk protection) writes its own title; its « Removed … » line looked like part of the step before.
+
 ## [2.0.0] - 2026-11-07
 
 A new look for the menus. The commands, the configuration file and what seedtunnel does on the server do not change.

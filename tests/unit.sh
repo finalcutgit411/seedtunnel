@@ -2275,13 +2275,13 @@ shortcut_put_right() (
 # creates the folder of the settings
 commands_refused_first() (
     local arguments out
-    for arguments in "whatever" "apply now" "doctor x" "update x" "language fr en" "restore a.enc b.enc" "diskguard-check x"; do
+    for arguments in "whatever" "apply now" "doctor x" "update x" "update back x" "language fr en" "restore a.enc b.enc" "diskguard-check x"; do
         # shellcheck disable=SC2086 # one word per argument
         if out=$(SEEDTUNNEL_LANG=en bash "$ROOT/seedtunnel.sh" $arguments 2>&1); then
             echo "accepted: $arguments"
             return 1
         fi
-        if [[ $out != *"Unknown command"* && $out != *"Too many arguments"* ]]; then
+        if [[ $out != *"Unknown command"* && $out != *"Too many arguments"* && $out != *"Usage: seedtunnel update [back]"* ]]; then
             echo "$arguments → $out"
             return 1
         fi
@@ -3107,6 +3107,7 @@ fake_server() {
     SEEDBOX_CERTIFICATE=letsencrypt
     SEEDBOX_LETSENCRYPT_SERVER=production
     SEEDBOX_USER=neil
+    SEEDBOX_SFTP_PASSWORD=yes
     UI_SERVER=vps-test
     UI_SYSTEM="Debian 13"
 }
@@ -3290,6 +3291,224 @@ menus_fit_the_screen() (
     done
 )
 
+# --- 2.1.0 -------------------------------------------------------------------------
+
+# The log is cut every month (it used to grow without end), from the
+# installation and from « apply » (so after an update too)
+log_rotation_rule() (
+    load
+    LOGROTATE_FILE="$WORK/logrotate-seedtunnel"
+    apt_install() { echo "apt $*" >>"$WORK/logrotate-calls"; }
+    rm -f "$LOGROTATE_FILE" "$WORK/logrotate-calls"
+    log_rotation_apply
+    grep -qx "apt logrotate" "$WORK/logrotate-calls" || return 1
+    grep -q "^$APP_LOG {" "$LOGROTATE_FILE" || return 1
+    local word
+    for word in monthly 'rotate 6' compress 'create 0600 root root' missingok; do
+        grep -q "^    $word\$" "$LOGROTATE_FILE" || {
+            echo "missing: $word"
+            return 1
+        }
+    done
+    [[ $(stat -c %a "$LOGROTATE_FILE") == 644 ]] || return 1
+    declare -f base_setup | grep -q log_rotation_apply && declare -f apply_main | grep -q log_rotation_apply
+)
+
+# Stopping a service writes its own title in the log: its « Removed … » line no
+# longer looks like part of the step before
+log_titles_before_service_stops() (
+    load
+    local out
+    : >"$APP_LOG"
+    systemctl() { echo "Removed '/etc/systemd/system/x.wants/$3'."; }
+    log_run 'Stopping the firewall' systemctl disable --now seedtunnel-firewall.service
+    out=$(<"$APP_LOG")
+    [[ $out == *" · Stopping the firewall"$'\n''$ systemctl disable --now seedtunnel-firewall.service'$'\n'"Removed '"* ]] || {
+        echo "$out"
+        return 1
+    }
+    # never a failure
+    systemctl() { return 5; }
+    log_run 'Stopping the VPN' systemctl disable --now wg-quick@wg0 || return 1
+    # no service stopped into the log without a title any more
+    out=$(grep -n 'disable --now .*>>"$APP_LOG"' "$ROOT"/lib/*.sh || true)
+    [[ -z $out ]] || {
+        echo "$out"
+        return 1
+    }
+)
+
+# An installed version (records « NAME » when it applies, ends with STATUS)
+# in FOLDER, with the code of version VERSION
+fake_version_make() {
+    local folder=$1 version=$2 name=$3 status=${4:-0}
+    mkdir -p "$folder/lib" "$folder/lang"
+    printf '#!/bin/sh\necho %s >>"%s"\nexit %s\n' "$name" "$WORK/app/applied" "$status" >"$folder/seedtunnel.sh"
+    chmod +x "$folder/seedtunnel.sh"
+    printf 'APP_VERSION="%s"\n' "$version" >"$folder/lib/common.sh"
+    echo 'x=1' >"$folder/lang/en.sh"
+}
+
+# The version replaced by an update is kept (one only)
+update_keeps_previous_version() (
+    load
+    update_versions_make 0
+    mkdir -p "$APP_DIR.old"
+    echo older >"$APP_DIR.old/marker"
+    (update_switch "$WORK/app/new" 9.9.9) &>"$WORK/update.out" || {
+        cat "$WORK/update.out"
+        return 1
+    }
+    grep -q "echo new" "$APP_DIR/seedtunnel.sh" && grep -q "echo old" "$APP_DIR.old/seedtunnel.sh" \
+        && [[ ! -e $APP_DIR.old/marker && ! -e $APP_DIR.previous ]]
+)
+
+# « seedtunnel update back »: the version kept comes back and applies the
+# settings; the newer one goes (« seedtunnel update » downloads it again)
+update_back_puts_previous_back() (
+    load
+    APP_DIR="$WORK/app/seedtunnel"
+    rm -rf "$WORK/app"
+    APP_VERSION=2.1.0
+    fake_version_make "$APP_DIR" 2.1.0 new
+    fake_version_make "$APP_DIR.old" 2.0.0 old
+    OPT_YES=1
+    [[ $(update_old_version) == 2.0.0 ]] || return 1
+    (update_back) &>"$WORK/back.out" || {
+        cat "$WORK/back.out"
+        return 1
+    }
+    grep -q 'APP_VERSION="2.0.0"' "$APP_DIR/lib/common.sh" && [[ $(<"$WORK/app/applied") == old ]] \
+        && [[ ! -e $APP_DIR.old && ! -e $APP_DIR.previous ]]
+)
+
+# The older version cannot apply the settings: the newer one comes back,
+# applies them again, and the older one stays kept
+update_back_failure_puts_newer_back() (
+    load
+    APP_DIR="$WORK/app/seedtunnel"
+    rm -rf "$WORK/app"
+    APP_VERSION=2.1.0
+    fake_version_make "$APP_DIR" 2.1.0 new
+    fake_version_make "$APP_DIR.old" 2.0.0 old 7
+    OPT_YES=1
+    if (update_back) &>"$WORK/back.out"; then return 1; fi
+    grep -q "Going back cancelled" "$WORK/back.out" || {
+        cat "$WORK/back.out"
+        return 1
+    }
+    grep -q 'APP_VERSION="2.1.0"' "$APP_DIR/lib/common.sh" && grep -q 'APP_VERSION="2.0.0"' "$APP_DIR.old/lib/common.sh" \
+        && [[ $(tr '\n' ' ' <"$WORK/app/applied") == "old new " && ! -e $APP_DIR.previous ]]
+)
+
+# Nothing to go back to: no version kept, or not an older one, or a git
+# installation; « no » changes nothing
+update_back_refused_when_nothing_to_go_back_to() (
+    load
+    APP_DIR="$WORK/app/seedtunnel"
+    rm -rf "$WORK/app"
+    APP_VERSION=2.1.0
+    fake_version_make "$APP_DIR" 2.1.0 new
+    if (update_back) &>"$WORK/back.out"; then return 1; fi
+    grep -q "No previous version kept" "$WORK/back.out" || return 1
+    fake_version_make "$APP_DIR.old" 2.1.0 same
+    [[ -z $(update_old_version) ]] || return 1
+    if (update_back) &>"$WORK/back.out"; then return 1; fi
+    fake_version_make "$APP_DIR.old" 2.0.0 old
+    confirm() { return 1; }
+    (update_back) &>"$WORK/back.out" || return 1
+    [[ ! -e $WORK/app/applied ]] && grep -q 'APP_VERSION="2.1.0"' "$APP_DIR/lib/common.sh" || return 1
+    mkdir "$APP_DIR/.git"
+    if (update_back) &>"$WORK/back.out"; then return 1; fi
+    grep -q "git" "$WORK/back.out" || return 1
+    # the command: « update » or « update back », nothing else
+    if (update_cli wrong) &>"$WORK/back.out"; then return 1; fi
+    grep -q "Usage: seedtunnel update \[back\]" "$WORK/back.out"
+)
+
+# Update made by 2.0 (which deletes the version it replaced once « apply »
+# worked): the « apply » of the new version keeps a copy of the older one
+apply_saves_previous_for_back() (
+    load
+    APP_DIR="$WORK/app/seedtunnel"
+    rm -rf "$WORK/app"
+    APP_VERSION=2.1.0
+    fake_version_make "$APP_DIR" 2.1.0 new
+    fake_version_make "$APP_DIR.previous" 2.0.0 old
+    update_save_previous
+    [[ -e $APP_DIR.previous ]] && grep -q 'APP_VERSION="2.0.0"' "$APP_DIR.old/lib/common.sh" || return 1
+    # not a version newer or the same
+    rm -rf "$APP_DIR.old"
+    fake_version_make "$APP_DIR.previous" 2.1.0 same
+    update_save_previous
+    [[ ! -e $APP_DIR.old ]] && declare -f apply_main | grep -q update_save_previous
+)
+
+# The update screen of the menu: a choice when a version is kept; otherwise
+# the update straight away, as in 2.0
+update_menu_offers_way_back() (
+    back_load
+    APP_DIR="$WORK/app/seedtunnel"
+    rm -rf "$WORK/app"
+    APP_VERSION=2.1.0
+    fake_version_make "$APP_DIR" 2.1.0 new
+    update_main() { echo "update" >>"$WORK/menu-calls"; }
+    update_back() { echo "back" >>"$WORK/menu-calls"; }
+    : >"$WORK/menu-calls"
+    update_menu >/dev/null 2>&1 || return 1
+    [[ $(<"$WORK/menu-calls") == update ]] || return 1
+    fake_version_make "$APP_DIR.old" 2.0.0 old
+    : >"$WORK/menu-calls"
+    answers "2" "1" "b"
+    update_menu >/dev/null 2>&1 || return 1
+    [[ $(tr '\n' ' ' <"$WORK/menu-calls") == "back update " ]]
+)
+
+# BitTorrent port seen from the Internet: open, closed (warning, with the
+# firewall of the provider), not tested (no warning); not without Transmission
+doctor_tests_torrent_port() (
+    load
+    local out
+    DOCTOR_WARNINGS=0
+    systemctl() { return 0; }
+    curl() { [[ $* == *"-4"* && $* == *"portcheck.transmissionbt.com/$TORRENT_PORT"* ]] && echo 1; }
+    out=$(doctor_torrent_port)
+    [[ $out == *"BitTorrent port $TORRENT_PORT open from the Internet"* ]] || return 1
+    curl() { echo 0; }
+    doctor_torrent_port >"$WORK/port.out"
+    grep -q "closed from the Internet.*Edge Network Firewall" "$WORK/port.out" && ((DOCTOR_WARNINGS == 1)) || return 1
+    curl() { return 28; }
+    doctor_torrent_port >"$WORK/port.out"
+    grep -q "not tested" "$WORK/port.out" && ((DOCTOR_WARNINGS == 1)) || return 1
+    systemctl() { return 3; }
+    curl() { echo "curl called" >"$WORK/port.out"; }
+    : >"$WORK/port.out"
+    doctor_torrent_port
+    [[ ! -s $WORK/port.out ]] && declare -f doctor_seedbox | grep -q doctor_torrent_port
+)
+
+# SFTP password: a warning of the diagnostics only once there is an SSH key;
+# in yellow in the menus while it is allowed
+sftp_password_warning() (
+    load
+    local out
+    DOCTOR_WARNINGS=0
+    SEEDBOX_SFTP_PASSWORD=yes
+    sftp_keys_count() { echo 0; }
+    out=$(doctor_sftp_password)
+    [[ $out == *"password allowed"* ]] && ((DOCTOR_WARNINGS == 0)) || return 1
+    sftp_keys_count() { echo 1; }
+    doctor_sftp_password >"$WORK/sftp.out"
+    grep -q "sftp-password off" "$WORK/sftp.out" && ((DOCTOR_WARNINGS == 1)) || return 1
+    SEEDBOX_SFTP_PASSWORD=no
+    out=$(doctor_sftp_password)
+    [[ $out == *"keys only"* ]] && ((DOCTOR_WARNINGS == 1)) || return 1
+    colors_init on
+    [[ $(sftp_password_state) == "$C_GREEN"* ]] || return 1
+    SEEDBOX_SFTP_PASSWORD=yes
+    [[ $(sftp_password_state) == "$C_YELLOW"* ]] && declare -f doctor_seedbox | grep -q doctor_sftp_password
+)
+
 printf '\033[1m=== Unit tests\033[0m\n'
 check "vpn_sync: WireGuard refusing the configuration shows « failed »" vpn_sync_reports_wg_failure
 check "vpn_sync: a failure of « wg-quick strip » is seen" vpn_sync_reports_strip_failure
@@ -3451,6 +3670,16 @@ check "menus: Q after an action of a submenu leaves seedtunnel" quit_from_an_act
 check "home screen: each state of VPN, seedbox, firewall, disk and backup" home_states
 check "home screen: every state fits its block (9 characters, EN/FR)" home_state_words_fit_blocks
 check "menus: the real screens fit the screen (EN/FR, 40 and 80 columns)" menus_fit_the_screen
+check "log: cut every month (logrotate), from the installation and apply" log_rotation_rule
+check "log: a service stopped writes its own title (never a failure)" log_titles_before_service_stops
+check "update: the version replaced is kept (one only)" update_keeps_previous_version
+check "update back: the version kept comes back and applies the settings" update_back_puts_previous_back
+check "update back: older version failing → the newer one comes back" update_back_failure_puts_newer_back
+check "update back: nothing kept, not older, « no », git → nothing changed" update_back_refused_when_nothing_to_go_back_to
+check "update from 2.0: apply keeps a copy of the version replaced" apply_saves_previous_for_back
+check "menu: update screen offers the way back when a version is kept" update_menu_offers_way_back
+check "diagnostics: BitTorrent port open, closed (warning) or not tested" doctor_tests_torrent_port
+check "SFTP password: warning once there is a key, yellow in the menus" sftp_password_warning
 
 printf '\n\033[1m%s passed, %s failed\033[0m\n' "$PASS" "$FAIL"
 ((FAIL == 0))

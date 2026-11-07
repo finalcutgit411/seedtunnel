@@ -42,6 +42,7 @@ Serveur
   backup auto on|off|status          sauvegarde chiffrée chaque semaine
   restore FICHIER [--passphrase-file FICHIER] [--yes]
   update                             passer à la dernière version publiée
+  update back [--yes]                revenir à la version d'avant la dernière mise à jour
   apply                              réappliquer la configuration enregistrée
   language en|fr                     langue des messages
   version | help

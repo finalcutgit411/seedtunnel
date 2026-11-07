@@ -150,7 +150,7 @@ main_menu() {
             3) ui_action firewall_menu ;;
             4) ui_action doctor_main ;;
             5) ui_action backup_menu ;;
-            6) update_main ;;
+            6) update_menu ;;
             7) reboot_server ;;
             l) language_menu ;;
             q) ui_quit ;;

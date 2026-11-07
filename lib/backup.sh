@@ -399,7 +399,7 @@ backup_auto_enable() {
 }
 
 backup_auto_disable() {
-    systemctl disable --now seedtunnel-backup.timer >>"$APP_LOG" 2>&1 || true
+    log_run 'Turning the weekly backup off' systemctl disable --now seedtunnel-backup.timer
     rm -f "$BACKUP_SERVICE" "$BACKUP_TIMER" "$BACKUP_PASSPHRASE_FILE"
     systemctl daemon-reload 2>/dev/null || true
     ok 'Weekly backup off (the existing backups are kept in %s).' "$BACKUP_DIR"

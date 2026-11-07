@@ -243,6 +243,8 @@ doctor_seedbox() {
     else
         doctor_error 'SFTP rule inactive for %s   → seedtunnel apply' "$SEEDBOX_USER"
     fi
+    doctor_sftp_password
+    doctor_torrent_port
     if seedbox_check_data_dir "$SEEDBOX_DATA_DIR" 2>/dev/null; then
         doctor_ok 'Permissions of the data folder correct'
     else
@@ -262,6 +264,33 @@ doctor_seedbox() {
     else
         doctor_warn 'fail2ban rules incomplete   → seedtunnel seedbox restart'
     fi
+}
+
+# The password of SFTP, allowed by default (needed before the first SSH key):
+# a warning only once there is a key, the password then being of no use
+doctor_sftp_password() {
+    if [[ $SEEDBOX_SFTP_PASSWORD != yes ]]; then
+        doctor_ok 'SFTP: SSH keys only (password refused)'
+    elif (($(sftp_keys_count) > 0)); then
+        doctor_warn 'SFTP: the password is still allowed, though you have an SSH key: refuse it   → seedtunnel seedbox sftp-password off'
+    else
+        printf '  %s\n' "$(t '(SFTP: password allowed; an SSH key is safer: menu Seedbox › SSH keys for SFTP)')"
+    fi
+}
+
+# Is the BitTorrent port reachable from the Internet? Asked to the service of
+# Transmission for its own port test (IPv4 only): it connects back to the
+# server, and answers 1 (open) or 0 (closed). Without an answer: not tested,
+# no warning.
+doctor_torrent_port() {
+    local answer
+    systemctl is-active --quiet transmission-daemon 2>/dev/null || return 0
+    answer=$(curl -4 -fsS --max-time 20 "https://portcheck.transmissionbt.com/$TORRENT_PORT" 2>/dev/null || true)
+    case $answer in
+        1*) doctor_ok 'BitTorrent port %s open from the Internet' "$TORRENT_PORT" ;;
+        0*) doctor_warn 'BitTorrent port %s closed from the Internet: check the firewall of the hosting provider (at OVH: « Edge Network Firewall », in the control panel)' "$TORRENT_PORT" ;;
+        *) printf '  %s\n' "$(t '(BitTorrent port %s not tested: the test service of Transmission did not answer)' "$TORRENT_PORT")" ;;
+    esac
 }
 
 doctor_firewall() {

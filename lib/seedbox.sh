@@ -1296,8 +1296,18 @@ sftp_keys_menu_generate() {
     pause
 }
 
+# State of the SFTP password for the menus: allowed in yellow (an SSH key is
+# safer), refused in green
+sftp_password_state() {
+    if [[ $SEEDBOX_SFTP_PASSWORD == yes ]]; then
+        printf '%s! %s%s' "$C_YELLOW" "$(t 'allowed (an SSH key is safer)')" "$C_RESET"
+    else
+        printf '%s● %s%s' "$C_GREEN" "$(t 'refused (keys only)')" "$C_RESET"
+    fi
+}
+
 sftp_keys_menu() {
-    local choice state
+    local choice
     while true; do
         seedbox_load
         UI_PLACE=(Seedbox "$(t 'SSH keys for SFTP')")
@@ -1308,8 +1318,7 @@ sftp_keys_menu() {
         echo
         sftp_keys_list
         echo
-        if [[ $SEEDBOX_SFTP_PASSWORD == yes ]]; then state=$(t 'allowed'); else state=$(t 'refused (keys only)'); fi
-        ui_field_add "$(t 'SFTP password')" "$state"
+        ui_field_add "$(t 'SFTP password')" "$(sftp_password_state)"
         ui_fields_show
         echo
         ui_menu_add 1 "$(t 'Add a key')"
@@ -1649,7 +1658,7 @@ seedbox_uninstall() {
     # removed, so that running the removal again finishes the job.
     seedbox_delete_user
     diskguard_remove
-    systemctl disable --now transmission-daemon >>"$APP_LOG" 2>&1 || true
+    log_run 'Stopping Transmission' systemctl disable --now transmission-daemon
     if [[ -f $SSHD_SEEDBOX_CONF ]]; then
         rm -f "$SSHD_SEEDBOX_CONF"
         run 'Reloading SSH' systemctl try-reload-or-restart ssh.service
@@ -1719,6 +1728,7 @@ seedbox_menu() {
         ui_field_add "$(t 'Web interface')" "${C_CYAN}https://$SEEDBOX_DOMAIN/$C_RESET"
         ui_field_add "$(t 'Certificate')" "$certificate"
         ui_field_add SFTP "$SEEDBOX_USER@$SEEDBOX_DOMAIN · $(disk_free_text "$SEEDBOX_DATA_DIR")"
+        ui_field_add "$(t 'SFTP password')" "$(sftp_password_state)"
         ui_field_add Services "transmission $transmission · nginx $(service_state nginx) · fail2ban $(service_state fail2ban)"
         ui_fields_show
         echo

@@ -77,7 +77,7 @@ diskguard_install() {
 }
 
 diskguard_remove() {
-    systemctl disable --now seedtunnel-diskguard.timer >>"$APP_LOG" 2>&1 || true
+    log_run 'Turning the full disk protection off' systemctl disable --now seedtunnel-diskguard.timer
     rm -f "$DISKGUARD_SERVICE" "$DISKGUARD_TIMER" "$DISKGUARD_MARKER"
     systemctl daemon-reload 2>/dev/null || true
 }

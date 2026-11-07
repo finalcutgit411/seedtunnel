@@ -7,6 +7,9 @@
 #  checkout » of the latest tag if the script was installed with git). The
 #  new version then applies its own fixes (« seedtunnel apply »); if that
 #  fails, the previous version comes back.
+#
+#  The version replaced is kept in APP_DIR.old (one only):
+#  « seedtunnel update back » puts it back.
 # =============================================================================
 
 # version_greater A B → true if A is strictly newer than B
@@ -70,7 +73,7 @@ update_switch() {
         die 'The new version could not be put in place: version %s kept (details in %s).' "$APP_VERSION" "$APP_LOG"
     fi
     if update_apply_new; then
-        rm -rf "$previous"
+        update_keep_old "$previous"
         ok 'seedtunnel updated to version %s (see %s).' "$version" "$APP_DIR/CHANGELOG.md"
         exit 0
     fi
@@ -89,13 +92,134 @@ update_apply_new() {
     "$APP_DIR/seedtunnel.sh" apply
 }
 
-# After a failed update: the installed version applies its configuration again
+# After a failed update (or a failed way back: « back »): the installed
+# version applies its configuration again
 update_back_to_previous() {
     warn 'Version %s could not apply the configuration: back to version %s.' "$1" "$APP_VERSION"
     if ! "$APP_DIR/seedtunnel.sh" apply >>"$APP_LOG" 2>&1; then
         die 'Update cancelled: the files of version %s are back, but putting the configuration back into service failed too (details in %s). Run « seedtunnel doctor », then « seedtunnel apply ».' "$APP_VERSION" "$APP_LOG"
     fi
+    if [[ ${2-} == back ]]; then die 'Going back cancelled, version %s kept (details in %s).' "$APP_VERSION" "$APP_LOG"; fi
     die 'Update cancelled, version %s kept (details in %s).' "$APP_VERSION" "$APP_LOG"
+}
+
+# --- Back to the previous version (« seedtunnel update back ») --------------------
+
+# APP_VERSION written in the code of a folder of seedtunnel (empty if none)
+update_dir_version() {
+    { awk -F'"' '/^APP_VERSION="/ { print $2; exit }' "$1/lib/common.sh" 2>/dev/null || true; }
+}
+
+# The version just replaced goes to APP_DIR.old (the one there before goes)
+update_keep_old() {
+    rm -rf "$APP_DIR.old"
+    mv -T "$1" "$APP_DIR.old" 2>>"$APP_LOG" || rm -rf "$1"
+}
+
+# During an update made by a version older than 2.1.0, which deletes the
+# version it replaces once « apply » worked: a copy of it is kept, so that the
+# way back works from the first update on. Run by « apply ».
+update_save_previous() {
+    local version
+    [[ -f $APP_DIR.previous/seedtunnel.sh && ! -d $APP_DIR/.git ]] || return 0
+    version=$(update_dir_version "$APP_DIR.previous")
+    [[ -n $version ]] || return 0
+    version_greater "$APP_VERSION" "$version" || return 0
+    rm -rf "$APP_DIR.old.tmp"
+    if cp -a "$APP_DIR.previous" "$APP_DIR.old.tmp" 2>>"$APP_LOG"; then
+        rm -rf "$APP_DIR.old"
+        mv -T "$APP_DIR.old.tmp" "$APP_DIR.old" 2>>"$APP_LOG" || rm -rf "$APP_DIR.old.tmp"
+    else
+        rm -rf "$APP_DIR.old.tmp"
+    fi
+}
+
+# Version kept to go back to: empty if there is none, or if it is not older
+update_old_version() {
+    local version
+    [[ -f $APP_DIR.old/seedtunnel.sh ]] || return 0
+    version=$(update_dir_version "$APP_DIR.old")
+    if [[ -n $version ]] && version_greater "$APP_VERSION" "$version"; then printf '%s' "$version"; fi
+}
+
+# Puts the version kept back in place of the installed one, as an update does:
+# it applies the configuration again; if that fails, the installed version
+# comes back. The newer version is deleted (« seedtunnel update » downloads it
+# again).
+update_back() {
+    local version newer=$APP_VERSION previous="$APP_DIR.previous"
+    banner
+    section 'Back to the previous version'
+    [[ ! -d $APP_DIR/.git ]] || die 'Installed with git: go back with  git -C %s checkout vX.Y.Z  then  seedtunnel apply' "$APP_DIR"
+    version=$(update_old_version)
+    [[ -n $version ]] || die 'No previous version kept: it is kept from the next update on.'
+    danger "$(t 'Back to version %s' "$version")" \
+        "$(t 'Version %s replaces version %s and applies the same settings again; if that fails, version %s comes back.' "$version" "$newer" "$newer")"
+    if ! confirm "$(t 'Go back to version %s?' "$version")" n; then return 0; fi
+    echo
+    run 'Checking the syntax' update_check_syntax "$APP_DIR.old"
+    [[ ! -e $previous ]] \
+        || die '%s exists: an earlier update did not finish. If seedtunnel works, delete it (rm -rf %s), then update again.' "$previous" "$previous"
+    mv -T "$APP_DIR" "$previous" 2>>"$APP_LOG" \
+        || die 'Version %s could not be put in place: version %s kept (details in %s).' "$version" "$newer" "$APP_LOG"
+    if ! mv -T "$APP_DIR.old" "$APP_DIR" 2>>"$APP_LOG"; then
+        mv -T "$previous" "$APP_DIR" 2>>"$APP_LOG" \
+            || die 'Version %s could not be put in place, nor version %s put back (details in %s). By hand:  mv %s %s' "$version" "$newer" "$APP_LOG" "$previous" "$APP_DIR"
+        die 'Version %s could not be put in place: version %s kept (details in %s).' "$version" "$newer" "$APP_LOG"
+    fi
+    if update_apply_new; then
+        rm -rf "$previous"
+        ok 'Back to version %s (version %s comes back with  seedtunnel update).' "$version" "$newer"
+        exit 0
+    fi
+    # the older version failed: the newer one comes back, and stays kept
+    if ! { mv -T "$APP_DIR" "$APP_DIR.old" && mv -T "$previous" "$APP_DIR"; } 2>>"$APP_LOG"; then
+        die 'Version %s could not apply the configuration, and version %s could not be put back (details in %s). By hand:  mv %s %s.old ; mv %s %s ; seedtunnel apply' "$version" "$newer" "$APP_LOG" "$APP_DIR" "$APP_DIR" "$previous" "$APP_DIR"
+    fi
+    update_back_to_previous "$version" back
+}
+
+# seedtunnel update [back]
+update_cli() {
+    case ${1-} in
+        "") update_main ;;
+        back) update_back ;;
+        *) die 'Usage: seedtunnel update [back]' ;;
+    esac
+}
+
+# From the menu: with a version kept, a choice between the update and the way
+# back; otherwise the update straight away (as in 2.0). Not in a subshell: the
+# lock goes to the version put in place.
+update_menu() {
+    local choice old
+    while true; do
+        old=$(update_old_version)
+        if [[ -z $old || -d $APP_DIR/.git ]]; then
+            update_main
+            return 0
+        fi
+        UI_PLACE=("$(t 'Update seedtunnel')")
+        ui_top "${UI_PLACE[@]}"
+        ui_field_add "$(t 'Installed version')" "$APP_VERSION"
+        ui_field_add "$(t 'Previous version kept')" "$old"
+        ui_fields_show
+        echo
+        ui_menu_add 1 "$(t 'Look for an update and install it')"
+        ui_menu_add 2 "$(t 'Back to version %s' "$old")"
+        ui_menu_show
+        echo
+        ui_menu_ask choice back
+        case ${choice,,} in
+            1) update_main ;;
+            2)
+                update_back
+                pause
+                ;;
+            "" | b) return 0 ;;
+            q) ui_quit ;;
+        esac
+    done
 }
 
 # Version written in the code of a git tag (APP_VERSION of lib/common.sh);
@@ -159,6 +283,8 @@ apply_main() {
     local count=0
     banner
     section 'Applying the configuration'
+    update_save_previous
+    log_rotation_apply
     if vpn_installed; then
         vpn_apply
         count=$((count + 1))

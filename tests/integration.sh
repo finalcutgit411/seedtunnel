@@ -123,7 +123,7 @@ rename_test() {
 seedtunnel_function() {
     bash -c '
         APP_DIR=/opt/seedtunnel
-        for library in common i18n vpn seedbox firewall share diskguard backup update doctor; do
+        for library in common i18n ui vpn seedbox firewall share diskguard backup update doctor menu; do
             . "$APP_DIR/lib/$library.sh"
         done
         i18n_load en

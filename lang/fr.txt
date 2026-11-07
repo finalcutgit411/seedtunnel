@@ -1113,8 +1113,6 @@ fr: Collez la clé PUBLIQUE (fichier .pub, commence par ssh-ed25519 ou ssh-rsa).
 en: No key yet? Choice 2 creates one, ready for WinSCP and FileZilla.
 fr: Pas encore de clé ? Le choix 2 en crée une, prête pour WinSCP et FileZilla.
 
-en: allowed
-fr: autorisé
 
 en: refused (keys only)
 fr: refusé (clés uniquement)
@@ -1929,3 +1927,83 @@ fr: Redémarrer le VPN
 
 en: none yet
 fr: aucune
+
+# --- 2.1.0: log, way back, BitTorrent port, SFTP password ---
+
+en: Turning the weekly backup off
+fr: Arrêt de la sauvegarde hebdomadaire
+
+en: Turning the full disk protection off
+fr: Arrêt de la protection contre le disque plein
+
+en: Stopping the firewall
+fr: Arrêt du pare-feu
+
+en: Stopping the VPN
+fr: Arrêt du VPN
+
+en: SFTP: SSH keys only (password refused)
+fr: SFTP : clés SSH uniquement (mot de passe refusé)
+
+en: SFTP: the password is still allowed, though you have an SSH key: refuse it   → seedtunnel seedbox sftp-password off
+fr: SFTP : le mot de passe est encore autorisé alors que vous avez une clé SSH : refusez-le   → seedtunnel seedbox sftp-password off
+
+en: (SFTP: password allowed; an SSH key is safer: menu Seedbox › SSH keys for SFTP)
+fr: (SFTP : mot de passe autorisé ; une clé SSH est plus sûre : menu Seedbox › Clés SSH pour le SFTP)
+
+en: BitTorrent port %s open from the Internet
+fr: Port BitTorrent %s ouvert depuis Internet
+
+en: BitTorrent port %s closed from the Internet: check the firewall of the hosting provider (at OVH: « Edge Network Firewall », in the control panel)
+fr: Port BitTorrent %s fermé depuis Internet : vérifiez le pare-feu de l'hébergeur (chez OVH : « Edge Network Firewall », dans l'espace client)
+
+en: (BitTorrent port %s not tested: the test service of Transmission did not answer)
+fr: (port BitTorrent %s non testé : le service de test de Transmission n'a pas répondu)
+
+en: allowed (an SSH key is safer)
+fr: autorisé (une clé SSH est plus sûre)
+
+en: Going back cancelled, version %s kept (details in %s).
+fr: Retour annulé, version %s gardée (détails dans %s).
+
+en: Back to the previous version
+fr: Retour à la version précédente
+
+en: Installed with git: go back with  git -C %s checkout vX.Y.Z  then  seedtunnel apply
+fr: Installé avec git : revenez en arrière avec  git -C %s checkout vX.Y.Z  puis  seedtunnel apply
+
+en: No previous version kept: it is kept from the next update on.
+fr: Aucune version précédente gardée : elle le sera à partir de la prochaine mise à jour.
+
+en: Back to version %s
+fr: Revenir à la version %s
+
+en: Version %s replaces version %s and applies the same settings again; if that fails, version %s comes back.
+fr: La version %s remplace la version %s et réapplique les mêmes réglages ; en cas d'échec, la version %s revient.
+
+en: Go back to version %s?
+fr: Revenir à la version %s ?
+
+en: Version %s could not be put in place: version %s kept (details in %s).
+fr: La version %s n'a pas pu être mise en place : version %s gardée (détails dans %s).
+
+en: Version %s could not be put in place, nor version %s put back (details in %s). By hand:  mv %s %s
+fr: La version %s n'a pas pu être mise en place, ni la version %s remise (détails dans %s). À la main :  mv %s %s
+
+en: Back to version %s (version %s comes back with  seedtunnel update).
+fr: Retour à la version %s (la version %s revient avec  seedtunnel update).
+
+en: Version %s could not apply the configuration, and version %s could not be put back (details in %s). By hand:  mv %s %s.old ; mv %s %s ; seedtunnel apply
+fr: La version %s n'a pas pu appliquer la configuration, et la version %s n'a pas pu être remise (détails dans %s). À la main :  mv %s %s.old ; mv %s %s ; seedtunnel apply
+
+en: Usage: seedtunnel update [back]
+fr: Utilisation : seedtunnel update [back]
+
+en: Installed version
+fr: Version installée
+
+en: Previous version kept
+fr: Version précédente gardée
+
+en: Look for an update and install it
+fr: Rechercher une mise à jour et l'installer

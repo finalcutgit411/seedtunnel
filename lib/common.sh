@@ -6,7 +6,7 @@
 # =============================================================================
 
 APP_NAME="seedtunnel"
-APP_VERSION="2.0.0"
+APP_VERSION="2.1.0"
 # GitHub repository used by « seedtunnel update » (owner/project)
 APP_REPO="finalcutgit411/seedtunnel"
 # Server state and secrets (readable by root only)
@@ -182,6 +182,18 @@ on_error() {
         printf '  %s\n' "$(t 'Detailed log: %s' "$APP_LOG")" >&2
     fi
     exit "$code"
+}
+
+# log_run "Description" COMMAND [ARGUMENTS…] — like run, but silent and never
+# a failure: for what may fail without harm (stopping a service already
+# stopped). Its output goes to the log under its own title, not under the one
+# of the step before.
+log_run() {
+    local description
+    description=$(t "$1")
+    shift
+    printf '\n=== %(%F %T)T · %s\n$ %s\n' -1 "$description" "$*" >>"$APP_LOG"
+    "$@" >>"$APP_LOG" 2>&1 || true
 }
 
 # run "Description" COMMAND [ARGUMENTS…]
@@ -606,6 +618,32 @@ base_setup() {
             >/etc/apt/apt.conf.d/20auto-upgrades
         ok 'Automatic security updates enabled'
     fi
+    log_rotation_apply
+}
+
+# --- Rotation of the log ----------------------------------------------------------
+# The log is cut every month by logrotate (run every day by Debian): the last
+# 6 months are kept, compressed. It no longer grows without end.
+LOGROTATE_FILE="/etc/logrotate.d/seedtunnel"
+
+log_rotation_generate() {
+    cat <<EOF
+# Written by seedtunnel — its log, cut every month, the last 6 months kept
+$APP_LOG {
+    monthly
+    rotate 6
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0600 root root
+}
+EOF
+}
+
+log_rotation_apply() {
+    apt_install logrotate
+    write_if_changed "$LOGROTATE_FILE" 644 root:root log_rotation_generate || true
 }
 
 # --- Kernel network hardening -----------------------------------------------------
