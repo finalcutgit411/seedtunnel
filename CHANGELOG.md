@@ -3,6 +3,13 @@
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 
+## [2.1.1] - 2026-11-07
+
+### Fixed
+- **The clients connect, but have no Internet** — and `seedtunnel doctor` said everything was fine. Seen on a server with Docker: when it starts, Docker may refuse by default the traffic that crosses the server (« policy drop » on the forward hook), and nothing comes back to the clients. The diagnostics now look for such rules, whatever program set them: in red when nothing lets the VPN through, with the commands to type right now and, for Docker, the setting that holds after a restart (`"ip-forward-no-drop": true` in `/etc/docker/daemon.json`); in yellow when rules typed by hand let it through only until the next restart. See « Known limits » in the README.
+- The diagnostics also check that IPv4 routing is on for the interface of the VPN and for the way out to the Internet, not only for the whole server.
+- « seedtunnel is already running »: the message says `sudo kill …` when seedtunnel was started with sudo (a plain `kill` is refused, the process belongs to root).
+
 ## [2.1.0] - 2026-11-07
 
 ### Added

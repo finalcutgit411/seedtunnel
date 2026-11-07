@@ -3512,6 +3512,131 @@ sftp_password_warning() (
 )
 
 printf '\033[1m=== Unit tests\033[0m\n'
+
+# --- 2.1.1: the clients connect, but another program blocks their traffic --------
+
+# Rules as Docker leaves them (iptables-nft): forward hook refused by default,
+# nothing for the VPN in DOCKER-USER. Read on a real server, where the clients
+# connected but had no Internet: « doctor » said nothing.
+docker_ruleset() {
+    printf '%s\n' 'table inet seedtunnel_fw {' '	chain input {' '		type filter hook input priority filter; policy drop;' '		udp dport 51820 accept' '	}' '}' \
+        'table ip filter {' '	chain DOCKER-FORWARD {' '		iifname "docker0" counter packets 0 bytes 0 accept' '	}' \
+        '	chain FORWARD {' '		type filter hook forward priority filter; policy drop;' \
+        '		counter packets 462 bytes 50273 jump DOCKER-USER' '		counter packets 462 bytes 50273 jump DOCKER-FORWARD' '	}' \
+        '	chain DOCKER-USER {'
+    if [[ ${DOCKER_USER_RULES-} == yes ]]; then
+        printf '%s\n' '		iifname "ens3" oifname "wg0" xt match "conntrack" counter packets 0 bytes 0 accept' \
+            '		iifname "wg0" oifname "ens3" counter packets 0 bytes 0 accept'
+    fi
+    printf '%s\n' '	}' '}' 'table ip seedtunnel {' '	chain postrouting {' '		type nat hook postrouting priority srcnat; policy accept;' \
+        '		ip saddr 10.8.0.0/24 oifname "ens3" masquerade' '	}' '}'
+}
+
+doctor_sees_vpn_traffic_blocked() (
+    load
+    colors_init off
+    default_interface() { echo ens3; }
+    nft() { [[ $* == "list ruleset" ]] && docker_ruleset; }
+    DOCKER_DAEMON_CONFIG="$WORK/daemon.json"
+    rm -f "$DOCKER_DAEMON_CONFIG"
+    # blocked: red, with what to type right now and for good
+    DOCTOR_ERRORS=0 DOCTOR_WARNINGS=0
+    doctor_vpn_forward >"$WORK/fwd.out"
+    cat "$WORK/fwd.out"
+    ((DOCTOR_ERRORS == 1)) && grep -q "Docker blocks the traffic of the clients" "$WORK/fwd.out" \
+        && grep -qF 'iptables -I DOCKER-USER -i wg0 -o ens3 -j ACCEPT' "$WORK/fwd.out" \
+        && grep -qF 'iptables -I DOCKER-USER -i ens3 -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED,DNAT -j ACCEPT' "$WORK/fwd.out" \
+        && grep -qF '"ip-forward-no-drop": true  to '"$DOCKER_DAEMON_CONFIG" "$WORK/fwd.out" || return 1
+    # the setting of Docker is there, but counts only from its next start
+    echo '{ "ip-forward-no-drop": true }' >"$DOCKER_DAEMON_CONFIG"
+    DOCTOR_ERRORS=0
+    doctor_vpn_forward >"$WORK/fwd.out"
+    ((DOCTOR_ERRORS == 1)) && grep -q "Already in" "$WORK/fwd.out" || return 1
+    # let through by rules typed by hand: yellow while Docker is not set
+    DOCKER_USER_RULES=yes
+    rm -f "$DOCKER_DAEMON_CONFIG"
+    DOCTOR_ERRORS=0 DOCTOR_WARNINGS=0
+    doctor_vpn_forward >"$WORK/fwd.out"
+    ((DOCTOR_ERRORS == 0 && DOCTOR_WARNINGS == 1)) && grep -q "disappear at the next restart" "$WORK/fwd.out" || return 1
+    printf '{\n  "log-level": "warn",\n  "ip-forward-no-drop" : true\n}\n' >"$DOCKER_DAEMON_CONFIG"
+    DOCTOR_WARNINGS=0
+    [[ $(doctor_vpn_forward) == *"Traffic of the clients to the Internet: allowed"* ]] && ((DOCTOR_WARNINGS == 0)) || return 1
+    # another firewall that refuses by default
+    nft() { printf '%s\n' 'table inet other {' '	chain forward {' '		type filter hook forward priority 0; policy drop;' '	}' '}'; }
+    DOCTOR_ERRORS=0
+    doctor_vpn_forward >"$WORK/fwd.out"
+    ((DOCTOR_ERRORS == 1)) && grep -q "another program (table inet other)" "$WORK/fwd.out" || return 1
+    # … that lets the VPN out, and every established connection back
+    nft() { printf '%s\n' 'table inet other {' '	chain forward {' '		type filter hook forward priority 0; policy drop;' \
+        '		ct state established,related accept' '		iifname "wg0" accept' '	}' '}'; }
+    DOCTOR_ERRORS=0 DOCTOR_WARNINGS=0
+    doctor_vpn_forward >/dev/null
+    ((DOCTOR_ERRORS == 0 && DOCTOR_WARNINGS == 0)) || return 1
+    # out only, nothing comes back: still blocked
+    nft() { printf '%s\n' 'table inet other {' '	chain forward {' '		type filter hook forward priority 0; policy drop;' '		iifname "wg0" accept' '	}' '}'; }
+    DOCTOR_ERRORS=0
+    doctor_vpn_forward >/dev/null
+    ((DOCTOR_ERRORS == 1)) || return 1
+    # nothing refused by default (no Docker): fine; part of « doctor_vpn »
+    nft() { printf '%s\n' 'table ip seedtunnel {' '	chain postrouting {' '		type nat hook postrouting priority srcnat; policy accept;' '	}' '}'; }
+    DOCTOR_ERRORS=0 DOCTOR_WARNINGS=0
+    doctor_vpn_forward >/dev/null
+    ((DOCTOR_ERRORS == 0 && DOCTOR_WARNINGS == 0)) && declare -f doctor_vpn | grep -q doctor_vpn_forward
+)
+
+# Routing is checked for the interfaces the clients cross too, not only for
+# the whole server (eth0.100: « / » in the name of sysctl)
+doctor_sees_routing_off_for_an_interface() (
+    load
+    colors_init off
+    default_interface() { echo eth0.100; }
+    OFF=net.ipv4.conf.eth0/100.forwarding
+    sysctl() { if [[ $2 == "$OFF" ]]; then echo 0; else echo 1; fi; }
+    DOCTOR_ERRORS=0
+    doctor_vpn_routing >"$WORK/route.out"
+    cat "$WORK/route.out"
+    ((DOCTOR_ERRORS == 1)) && grep -qF "IPv4 routing off for eth0.100" "$WORK/route.out" \
+        && grep -qF "sysctl -w net.ipv4.conf.eth0/100.forwarding=1" "$WORK/route.out" || return 1
+    OFF=net.ipv4.conf.wg0.forwarding
+    DOCTOR_ERRORS=0
+    doctor_vpn_routing >"$WORK/route.out"
+    ((DOCTOR_ERRORS == 1)) && grep -qF "IPv4 routing off for wg0" "$WORK/route.out" || return 1
+    # on everywhere; an interface that is not there (VPN stopped) is skipped
+    OFF=none
+    sysctl() { if [[ $2 == *wg0* ]]; then return 255; else echo 1; fi; }
+    DOCTOR_ERRORS=0
+    [[ $(doctor_vpn_routing) == *"IPv4 routing on"* ]] && ((DOCTOR_ERRORS == 0)) || return 1
+    # off for the whole server: one line, as before
+    sysctl() { echo 0; }
+    DOCTOR_ERRORS=0
+    doctor_vpn_routing >"$WORK/route.out"
+    ((DOCTOR_ERRORS == 1)) && grep -q "IPv4 routing off: the clients" "$WORK/route.out" \
+        && declare -f doctor_vpn | grep -q doctor_vpn_routing
+)
+
+# The process holding the lock belongs to root: who came in by sudo needs
+# « sudo kill » (a plain « kill » is refused)
+lock_message_says_sudo_kill() (
+    load
+    APP_LOCK="$WORK/lock-sudo"
+    (
+        exec 9<>"$APP_LOCK"
+        flock 9
+        printf '%s %s %s\n' "$BASHPID" "$(date +%s)" pts/1 >"$APP_LOCK"
+        sleep 3
+    ) &
+    sleep 0.5
+    local out pid
+    pid=$(cut -d' ' -f1 "$APP_LOCK")
+    if out=$(SUDO_USER=debian take_lock 2>&1); then return 1; fi
+    echo "$out"
+    [[ $out == *"sudo kill $pid"* ]] || return 1
+    # logged in as root directly: no sudo
+    if out=$(unset SUDO_USER && take_lock 2>&1); then return 1; fi
+    wait
+    [[ $out == *"kill $pid"* && $out != *"sudo kill"* ]]
+)
+
 check "vpn_sync: WireGuard refusing the configuration shows « failed »" vpn_sync_reports_wg_failure
 check "vpn_sync: a failure of « wg-quick strip » is seen" vpn_sync_reports_strip_failure
 check "vpn_sync: « ok » when every step works" vpn_sync_ok_when_all_steps_work
@@ -3683,5 +3808,8 @@ check "menu: update screen offers the way back when a version is kept" update_me
 check "diagnostics: BitTorrent port open, closed (warning) or not tested" doctor_tests_torrent_port
 check "SFTP password: warning once there is a key, yellow in the menus" sftp_password_warning
 
+check "diagnostics: traffic of the VPN blocked by Docker or another firewall" doctor_sees_vpn_traffic_blocked
+check "diagnostics: IPv4 routing off for the VPN or the way out" doctor_sees_routing_off_for_an_interface
+check "lock: « sudo kill » for whoever came in by sudo" lock_message_says_sudo_kill
 printf '\n\033[1m%s passed, %s failed\033[0m\n' "$PASS" "$FAIL"
 ((FAIL == 0))

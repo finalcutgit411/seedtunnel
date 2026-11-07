@@ -182,6 +182,7 @@ In a terminal, every change is **tried first**: without a confirmation from a ne
 - the expiry of the certificate and its renewal;
 - the ports and the firewall, including the SSH port: a port changed without updating the firewall would lock you out; that the firewall really refuses what is not allowed;
 - the NAT of the VPN, made for the network interface the server uses now;
+- that the traffic of the VPN clients can cross the server: a firewall of another program (Docker most of all) that refuses it by default lets the clients connect without Internet (see « Known limits »);
 - the kernel network settings (IPv4, and IPv6 if the server has it);
 - the disk space, the full disk protection (including a Transmission that does not start again although there is room) and the clock;
 - an update or a restore that did not finish;
@@ -310,6 +311,11 @@ The repository used by `seedtunnel update` is set by `APP_REPO` in `lib/common.s
   - Android: Settings → VPN → WireGuard (gear) → « Always-on VPN » and « Block connections without VPN »;
   - qBittorrent (any system): Options → Advanced → Network interface → the WireGuard tunnel: no tunnel, no download.
 - **The seedbox has a single user.**
+- **Docker on the same server can cut the VPN off from the Internet.** When it starts, Docker may refuse by default the traffic that crosses the server: the clients connect, but nothing comes back. `seedtunnel doctor` sees it. For good, add `"ip-forward-no-drop": true` to `/etc/docker/daemon.json` (if the file does not exist: `{ "ip-forward-no-drop": true }`) and check it with `sudo dockerd --validate --config-file /etc/docker/daemon.json`; it counts from the next restart of the server. Until then (`ens3`: the network interface of your server, given by `ip route show default`):
+  ```
+  sudo iptables -I DOCKER-USER -i wg0 -o ens3 -j ACCEPT
+  sudo iptables -I DOCKER-USER -i ens3 -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED,DNAT -j ACCEPT
+  ```
 
 ## Uninstalling
 

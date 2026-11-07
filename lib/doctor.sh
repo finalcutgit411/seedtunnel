@@ -91,12 +91,9 @@ doctor_vpn() {
     else
         doctor_error 'WireGuard is not listening on port %s/udp   → seedtunnel vpn restart' "$VPN_PORT"
     fi
-    if [[ $(sysctl -n net.ipv4.ip_forward 2>/dev/null) == 1 ]]; then
-        doctor_ok 'IPv4 routing on'
-    else
-        doctor_error 'IPv4 routing off: the clients will have no Internet   → seedtunnel apply'
-    fi
+    doctor_vpn_routing
     doctor_vpn_nat
+    doctor_vpn_forward
     if is_ipv4 "$VPN_PUBLIC_ADDRESS"; then
         if [[ $VPN_PUBLIC_ADDRESS == "$ip" ]]; then
             doctor_ok 'Address of the clients (%s) = public IP of the server' "$VPN_PUBLIC_ADDRESS"
@@ -144,6 +141,79 @@ doctor_vpn_nat() {
     else
         doctor_ok 'NAT rules in place'
     fi
+}
+
+# Routing must be on for the server, and for the two interfaces the traffic of
+# the clients crosses: the VPN and the way out to the Internet. (In the names
+# of sysctl, the dot of an interface such as eth0.100 is written « / ».)
+doctor_vpn_routing() {
+    local dev key off=0
+    if [[ $(sysctl -n net.ipv4.ip_forward 2>/dev/null) != 1 ]]; then
+        doctor_error 'IPv4 routing off: the clients will have no Internet   → seedtunnel apply'
+        return 0
+    fi
+    for dev in "$VPN_INTERFACE" "$(default_interface)"; do
+        [[ -n $dev ]] || continue
+        key="net.ipv4.conf.${dev//./\/}.forwarding"
+        if [[ $(sysctl -n "$key" 2>/dev/null) == 0 ]]; then
+            doctor_error 'IPv4 routing off for %s: the clients will have no Internet   → sysctl -w %s=1' "$dev" "$key"
+            off=1
+        fi
+    done
+    if ((off == 0)); then doctor_ok 'IPv4 routing on'; fi
+}
+
+# Read by Docker when it starts. With « "ip-forward-no-drop": true », Docker
+# no longer refuses by default the traffic that crosses the server.
+DOCKER_DAEMON_CONFIG="/etc/docker/daemon.json"
+docker_forward_drop_off() { grep -Eqs '"ip-forward-no-drop"[[:space:]]*:[[:space:]]*true' "$DOCKER_DAEMON_CONFIG"; }
+
+# forward_drop_tables INTERFACE <RULESET — the tables whose forward hook
+# refuses by default (« policy drop »), one per line: « FAMILY NAME ALLOWED
+# DOCKER ». ALLOWED is 1 when rules of the table accept what comes in by
+# INTERFACE and what goes back to it (or any established connection); DOCKER
+# is 1 for the table of Docker (it has a chain DOCKER-USER).
+forward_drop_tables() {
+    awk -v dev="\"$1\"" '
+        /^table / { table = $2 " " $3; next }
+        /^[ \t]*chain / { if ($2 == "DOCKER-USER") docker[table] = 1; next }
+        /hook forward/ && /policy drop;/ { drop[table] = 1; next }
+        !/[ \t]accept([ \t]|$)/ { next }
+        index($0, "iifname " dev) { out[table] = 1 }
+        index($0, "oifname " dev) { back[table] = 1 }
+        /ct state [{ ]*(established, ?related|related, ?established)/ && !/(iif|oif)name/ { back[table] = 1 }
+        END { for (t in drop) print t, ((out[t] && back[t]) ? 1 : 0), (docker[t] ? 1 : 0) }'
+}
+
+# The traffic of the clients crosses the server (forward hook). Another
+# program, Docker most of all, may refuse it by default: the clients then
+# connect, but nothing comes back from the Internet. A rule that refuses
+# wins over any other table that accepts: it must be the program that set it
+# that lets the VPN through.
+doctor_vpn_forward() {
+    local ruleset family name allowed docker interface blocked=0
+    ruleset=$(nft list ruleset 2>/dev/null) || return 0
+    interface=$(default_interface)
+    while read -r family name allowed docker; do
+        if ((allowed)) && { ((docker == 0)) || docker_forward_drop_off; }; then continue; fi
+        blocked=1
+        if ((allowed)); then
+            doctor_warn 'Docker blocks the traffic that crosses the server; rules let the clients through for now, but those added by hand disappear at the next restart   → add  "ip-forward-no-drop": true  to %s' "$DOCKER_DAEMON_CONFIG"
+        elif ((docker)); then
+            doctor_error 'Docker blocks the traffic of the clients: they connect, but have no Internet'
+            say '  Right now (until the next restart):'
+            printf '    iptables -I DOCKER-USER -i %s -o %s -j ACCEPT\n' "$VPN_INTERFACE" "${interface:-?}"
+            printf '    iptables -I DOCKER-USER -i %s -o %s -m conntrack --ctstate RELATED,ESTABLISHED,DNAT -j ACCEPT\n' "${interface:-?}" "$VPN_INTERFACE"
+            if docker_forward_drop_off; then
+                say '  Already in %s: Docker no longer blocks after the next restart of the server.' "$DOCKER_DAEMON_CONFIG"
+            else
+                say '  For good: add  "ip-forward-no-drop": true  to %s (read when Docker starts)' "$DOCKER_DAEMON_CONFIG"
+            fi
+        else
+            doctor_error 'The firewall rules of another program (table %s) block the traffic of the clients: they connect, but have no Internet. They must accept what comes in by %s and what goes back to it.' "$family $name" "$VPN_INTERFACE"
+        fi
+    done < <(forward_drop_tables "$VPN_INTERFACE" <<<"$ruleset")
+    if ((blocked == 0)); then doctor_ok 'Traffic of the clients to the Internet: allowed'; fi
 }
 
 # Transmission, or why the full disk protection keeps it stopped

@@ -332,8 +332,8 @@ fr: Debian 12 (bookworm) ou 13 (trixie) requis — système détecté : %s.
 en: systemd is required.
 fr: systemd est requis.
 
-en: seedtunnel is already running (process %s, started %s min ago, terminal %s).\n  If that window is gone, stop it with:  kill %s
-fr: seedtunnel est déjà en cours d'exécution (processus %s, lancé il y a %s min, terminal %s).\n  Si cette fenêtre n'existe plus, arrêtez-le avec :  kill %s
+en: seedtunnel is already running (process %s, started %s min ago, terminal %s).\n  If that window is gone, stop it with:  %s
+fr: seedtunnel est déjà en cours d'exécution (processus %s, lancé il y a %s min, terminal %s).\n  Si cette fenêtre n'existe plus, arrêtez-le avec :  %s
 
 en: seedtunnel is already running in another terminal.
 fr: seedtunnel est déjà en cours d'exécution dans un autre terminal.
@@ -2007,3 +2007,29 @@ fr: Version précédente gardée
 
 en: Look for an update and install it
 fr: Rechercher une mise à jour et l'installer
+
+# --- 2.1.1: traffic of the VPN blocked by another program (Docker) ---
+
+en: IPv4 routing off for %s: the clients will have no Internet   → sysctl -w %s=1
+fr: Routage IPv4 désactivé pour %s : les clients n'auront pas Internet   → sysctl -w %s=1
+
+en: Docker blocks the traffic that crosses the server; rules let the clients through for now, but those added by hand disappear at the next restart   → add  "ip-forward-no-drop": true  to %s
+fr: Docker bloque le trafic qui traverse le serveur ; des règles laissent passer les clients pour l'instant, mais celles ajoutées à la main disparaissent au prochain redémarrage   → ajoutez  "ip-forward-no-drop": true  dans %s
+
+en: Docker blocks the traffic of the clients: they connect, but have no Internet
+fr: Docker bloque le trafic des clients : ils se connectent, mais n'ont pas Internet
+
+en:   Right now (until the next restart):
+fr:   Tout de suite (jusqu'au prochain redémarrage) :
+
+en:   Already in %s: Docker no longer blocks after the next restart of the server.
+fr:   Déjà dans %s : Docker ne bloquera plus après le prochain redémarrage du serveur.
+
+en:   For good: add  "ip-forward-no-drop": true  to %s (read when Docker starts)
+fr:   Pour de bon : ajoutez  "ip-forward-no-drop": true  dans %s (lu au démarrage de Docker)
+
+en: The firewall rules of another program (table %s) block the traffic of the clients: they connect, but have no Internet. They must accept what comes in by %s and what goes back to it.
+fr: Les règles de pare-feu d'un autre programme (table %s) bloquent le trafic des clients : ils se connectent, mais n'ont pas Internet. Elles doivent accepter ce qui entre par %s et ce qui y retourne.
+
+en: Traffic of the clients to the Internet: allowed
+fr: Trafic des clients vers Internet : autorisé

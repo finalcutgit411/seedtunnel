@@ -182,6 +182,7 @@ Dans un terminal, chaque changement est d'abord **à l'essai** : sans confirmati
 - l'expiration du certificat et son renouvellement ;
 - les ports et le pare-feu, dont le port SSH : un port changé sans mettre le pare-feu à jour vous enfermerait dehors ; que le pare-feu refuse bien ce qui n'est pas autorisé ;
 - le NAT du VPN, fait pour la carte réseau qu'utilise le serveur aujourd'hui ;
+- que le trafic des clients du VPN peut traverser le serveur : le pare-feu d'un autre programme (Docker surtout) qui le refuse par défaut laisse les clients se connecter sans Internet (voir « Limites connues ») ;
 - les réglages réseau du noyau (IPv4, et IPv6 si le serveur l'a) ;
 - l'espace disque, la protection contre le disque plein (dont un Transmission qui ne redémarre pas alors qu'il y a de la place) et l'horloge ;
 - une mise à jour ou une restauration qui ne s'est pas terminée ;
@@ -310,6 +311,11 @@ Le dépôt interrogé par `seedtunnel update` est défini par `APP_REPO` dans `l
   - Android : Paramètres → VPN → WireGuard (roue dentée) → « VPN permanent » et « Bloquer les connexions sans VPN » ;
   - qBittorrent (tout système) : Options → Avancé → Interface réseau → le tunnel WireGuard : pas de tunnel, pas de téléchargement.
 - **La seedbox est mono-utilisateur.**
+- **Docker sur le même serveur peut couper le VPN d'Internet.** À son démarrage, Docker peut refuser par défaut le trafic qui traverse le serveur : les clients se connectent, mais rien ne revient. `seedtunnel doctor` le voit. Pour de bon, ajoutez `"ip-forward-no-drop": true` dans `/etc/docker/daemon.json` (si le fichier n'existe pas : `{ "ip-forward-no-drop": true }`) et vérifiez-le avec `sudo dockerd --validate --config-file /etc/docker/daemon.json` ; il compte à partir du prochain redémarrage du serveur. D'ici là (`ens3` : la carte réseau de votre serveur, donnée par `ip route show default`) :
+  ```
+  sudo iptables -I DOCKER-USER -i wg0 -o ens3 -j ACCEPT
+  sudo iptables -I DOCKER-USER -i ens3 -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED,DNAT -j ACCEPT
+  ```
 
 ## Désinstallation
 

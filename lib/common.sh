@@ -6,7 +6,7 @@
 # =============================================================================
 
 APP_NAME="seedtunnel"
-APP_VERSION="2.1.0"
+APP_VERSION="2.1.1"
 # GitHub repository used by « seedtunnel update » (owner/project)
 APP_REPO="finalcutgit411/seedtunnel"
 # Server state and secrets (readable by root only)
@@ -484,13 +484,17 @@ install_shortcut() {
 # Only one copy at a time may change the server. The lock file says who holds
 # the lock, so the message can tell which process to stop if it was forgotten.
 take_lock() {
-    local pid="" since="" tty=""
+    local pid="" since="" tty="" stop
     exec 9<>"$APP_LOCK"
     if ! flock -n 9; then
         read -r pid since tty <"$APP_LOCK" || true
         if [[ $pid =~ ^[0-9]+$ && $since =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
-            die 'seedtunnel is already running (process %s, started %s min ago, terminal %s).\n  If that window is gone, stop it with:  kill %s' \
-                "$pid" "$((($(date +%s) - since) / 60))" "${tty:--}" "$pid"
+            # the process belongs to root: someone who came in by sudo needs
+            # sudo to stop it too
+            stop="kill $pid"
+            if [[ -n ${SUDO_USER-} ]]; then stop="sudo $stop"; fi
+            die 'seedtunnel is already running (process %s, started %s min ago, terminal %s).\n  If that window is gone, stop it with:  %s' \
+                "$pid" "$((($(date +%s) - since) / 60))" "${tty:--}" "$stop"
         fi
         die 'seedtunnel is already running in another terminal.'
     fi
