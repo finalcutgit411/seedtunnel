@@ -6,7 +6,7 @@
 # =============================================================================
 
 APP_NAME="seedtunnel"
-APP_VERSION="1.2.8"
+APP_VERSION="2.0.0"
 # GitHub repository used by « seedtunnel update » (owner/project)
 APP_REPO="finalcutgit411/seedtunnel"
 # Server state and secrets (readable by root only)
@@ -31,8 +31,24 @@ OPT_QR=0
 OPT_LINK=0
 OPT_NEW_USER=""
 
-# --- Colors (off when the output is not a terminal) ---------------------------
-if [[ -t 1 ]]; then
+# --- Colors -------------------------------------------------------------------------
+# Is the output a terminal? (a function, so that the tests can say yes)
+stdout_is_terminal() { [[ -t 1 ]]; }
+
+# colors_init [on|off] — without argument: on when the output is a terminal,
+# unless NO_COLOR is set (https://no-color.org) or the terminal is « dumb ».
+# Violet is the color of seedtunnel: mauve (color 141) on the terminals with
+# 256 colors, plain magenta on the others (PuTTY says « xterm », 8 colors,
+# unless its « Terminal-type string » is xterm-256color).
+colors_init() {
+    local mode=${1-}
+    if [[ -z $mode ]]; then
+        if stdout_is_terminal && [[ -z ${NO_COLOR-} && ${TERM-} != dumb ]]; then mode=on; else mode=off; fi
+    fi
+    C_RED="" C_GREEN="" C_YELLOW="" C_BLUE="" C_BOLD="" C_DIM="" C_RESET=""
+    C_BRAND="" C_KEY="" C_CYAN="" C_GREY=""
+    UI_COLORS=0
+    [[ $mode == on ]] || return 0
     C_RED=$'\e[1;31m'
     C_GREEN=$'\e[1;32m'
     C_YELLOW=$'\e[1;33m'
@@ -40,15 +56,20 @@ if [[ -t 1 ]]; then
     C_BOLD=$'\e[1m'
     C_DIM=$'\e[2m'
     C_RESET=$'\e[0m'
-else
-    C_RED=""
-    C_GREEN=""
-    C_YELLOW=""
-    C_BLUE=""
-    C_BOLD=""
-    C_DIM=""
-    C_RESET=""
-fi
+    C_CYAN=$'\e[36m'
+    if [[ ${TERM-} == *256color* || ${COLORTERM-} == truecolor || ${COLORTERM-} == 24bit ]]; then
+        UI_COLORS=256
+        C_BRAND=$'\e[1;38;5;141m'
+        C_KEY=$'\e[1;97;48;5;98m'
+        C_GREY=$'\e[38;5;245m'
+    else
+        UI_COLORS=8
+        C_BRAND=$'\e[1;35m'
+        C_KEY=$'\e[1;37;45m'
+        C_GREY=$C_DIM
+    fi
+}
+colors_init
 
 # --- Output -----------------------------------------------------------------------
 # Every message is a printf format written in English (see lib/i18n.sh):
@@ -724,6 +745,14 @@ ssh_session_source() {
     source=${source%% *}
     if [[ -z $source ]]; then source=$(who -m 2>/dev/null | sed -n 's/.*(\([^)]*\)).*/\1/p' || true); fi
     printf '%s' "$source"
+}
+
+# nft_delete_table FAMILY NAME — removes a table of nftables if it is still
+# there (stopping WireGuard or the firewall may have removed it already: no
+# « Error: No such file or directory » in the log, that would look like a
+# real problem to someone reading it)
+nft_delete_table() {
+    if nft list table "$1" "$2" &>/dev/null; then nft delete table "$1" "$2" >>"$APP_LOG" 2>&1 || true; fi
 }
 
 # Is a port already in use?  port_in_use tcp|udp PORT

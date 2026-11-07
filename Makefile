@@ -6,7 +6,7 @@
 #   make unit        unit tests (no root, no server needed)
 #   make check       all of the above, plus « bash -n »
 
-SCRIPTS := seedtunnel.sh $(wildcard lib/*.sh) $(wildcard lang/*.sh) $(wildcard tests/*.sh)
+SCRIPTS := seedtunnel.sh $(wildcard lib/*.sh) $(wildcard lang/*.sh) $(wildcard tests/*.sh) $(wildcard tools/*.sh)
 # 4 spaces, indented « case », operators (| && ||) at the start of lines
 SHFMT := shfmt -i 4 -ci -bn
 

@@ -610,7 +610,7 @@ vpn_uninstall() {
     if ! confirm 'Remove the VPN?' n; then return 0; fi
     echo
     systemctl disable --now "wg-quick@$VPN_INTERFACE" >>"$APP_LOG" 2>&1 || true
-    nft delete table ip seedtunnel >>"$APP_LOG" 2>&1 || true
+    nft_delete_table ip seedtunnel
     # A running interface keeps the clients it knows, files or not: the keys are
     # only deleted once the VPN is really stopped
     if ip link show "$VPN_INTERFACE" &>/dev/null || nft list table ip seedtunnel &>/dev/null; then

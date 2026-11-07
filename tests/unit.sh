@@ -37,7 +37,7 @@ load() {
     APP_LANG_FILE="$WORK/state/language"
     mkdir -p "$APP_STATE_DIR"
     local library
-    for library in i18n vpn seedbox firewall share diskguard backup update doctor; do
+    for library in i18n ui vpn seedbox firewall share diskguard backup update doctor; do
         # shellcheck source=/dev/null
         . "$ROOT/lib/$library.sh"
     done
@@ -2837,6 +2837,209 @@ restore_failure_says_marker() (
     grep -qF "mv $WORK/failure-before $APP_STATE_DIR && rm -f $RESTORE_MARKER && seedtunnel apply" "$WORK/failure.out"
 )
 
+# --- 2.0.0 ---------------------------------------------------------------------
+
+# Seen in a real report: « inotify-tools 4.23.9.0-2+b1 » became « <ip>-2+b1 »
+report_keeps_version_numbers() (
+    report_load
+    cat >"$WORK/report.txt" <<'EOF'
+Unpacking libinotifytools0:amd64 (4.23.9.0-2+b1) ...
+amd64 libinotifytools0 amd64 4.23.9.0-2+b1 [23.1 kB] and version 1.2.3.4.5
+banned 198.51.100.7. Then 198.51.100.7, (198.51.100.7) and 198.51.100.7:51820
+EOF
+    report_anonymize "$WORK/report.txt"
+    cat "$WORK/report.txt"
+    (($(grep -c '4\.23\.9\.0-2+b1' "$WORK/report.txt") == 2)) && grep -q '1\.2\.3\.4\.5' "$WORK/report.txt" \
+        && ! grep -q '198\.51\.100\.7' "$WORK/report.txt" && (($(grep -o '<ip>' "$WORK/report.txt" | wc -l) == 4))
+)
+
+# Seen in a real log: « Error: No such file or directory … delete table » after
+# a VPN was removed (stopping WireGuard had removed the table already)
+nft_tables_deleted_only_when_there() (
+    load
+    : >"$WORK/nft-calls"
+    NFT_TABLE_THERE=0
+    nft() {
+        echo "nft $*" >>"$WORK/nft-calls"
+        if [[ $1 == list ]]; then ((NFT_TABLE_THERE)); fi
+    }
+    nft_delete_table ip seedtunnel
+    ! grep -q "nft delete" "$WORK/nft-calls" || return 1
+    NFT_TABLE_THERE=1
+    nft_delete_table ip seedtunnel
+    grep -qx "nft delete table ip seedtunnel" "$WORK/nft-calls" || return 1
+    # used where a table may be gone already
+    declare -f vpn_uninstall | grep -q 'nft_delete_table ip seedtunnel' \
+        && declare -f firewall_disable | grep -q 'nft_delete_table inet "$FIREWALL_TABLE"'
+)
+
+# --- 2.0.0: interface (lib/ui.sh, tools/preview.sh) ----------------------------
+
+# Lengths in characters, whatever the locale: printf '%-10s' counts bytes, and
+# « é », « ● » or « ─ » shifted the columns
+ui_counts_characters() (
+    local locale out
+    cat >"$WORK/lengths.sh" <<'EOF'
+APP_DIR=$1
+. "$APP_DIR/lib/common.sh"
+. "$APP_DIR/lib/i18n.sh"
+. "$APP_DIR/lib/ui.sh"
+ui_len "été ● ─"
+printf '%s|' "$UI_LEN"
+ui_len $'\e[0mx\e[1;38;5;141mé\e[0m'
+printf '%s|' "$UI_LEN"
+ui_cut "Sauvegardé" 5
+printf '%s|' "$UI_CUT"
+ui_cut "à jour" 6
+printf '%s|' "$UI_CUT"
+ui_pad "été" 5
+printf '%s|' "$UI_PAD"
+ui_take "éèà" 2
+printf '%s/%s' "$UI_TAKE" "$UI_REST"
+EOF
+    for locale in C C.UTF-8; do
+        out=$(LC_ALL=$locale bash "$WORK/lengths.sh" "$ROOT" 2>&1)
+        [[ $out == "7|2|Sauv…|à jour|été  |éè/à" ]] || {
+            echo "LC_ALL=$locale: $out"
+            return 1
+        }
+    done
+)
+
+# A long word (a path) is split, never shortened; the text stays whole
+ui_wraps_without_losing_text() (
+    load
+    local path=/etc/seedtunnel/vpn/clients/phone2.conf joined="" line
+    ui_wrap "File: $path, to keep" 12
+    for line in "${UI_LINES[@]}"; do
+        ui_len "$line"
+        ((UI_LEN <= 12)) || return 1
+        joined+=$line
+    done
+    [[ ${joined// /} == "File:$path,tokeep" ]] || {
+        printf '%s\n' "${UI_LINES[@]}"
+        return 1
+    }
+)
+
+colors_follow_terminal_and_no_color() (
+    load
+    stdout_is_terminal() { return 0; }
+    TERM=xterm-256color
+    unset NO_COLOR COLORTERM
+    colors_init
+    [[ $C_BRAND == *"38;5;141"* && $UI_COLORS == 256 ]] || return 1
+    TERM=xterm
+    colors_init
+    [[ $C_BRAND == $'\e[1;35m' && $UI_COLORS == 8 ]] || return 1
+    COLORTERM=truecolor
+    colors_init
+    [[ $UI_COLORS == 256 ]] || return 1
+    # NO_COLOR (https://no-color.org): set and not empty → no color at all
+    NO_COLOR=1
+    colors_init
+    [[ -z $C_BRAND$C_GREEN$C_RESET$C_KEY && $UI_COLORS == 0 ]] || return 1
+    NO_COLOR=""
+    colors_init
+    [[ -n $C_BRAND ]] || return 1
+    TERM=dumb
+    colors_init
+    [[ -z $C_BRAND ]] || return 1
+    stdout_is_terminal() { return 1; }
+    TERM=xterm-256color
+    colors_init
+    [[ -z $C_BRAND ]] || return 1
+    # keys: violet keycap, or [K] without colors (3 characters either way)
+    ui_key q
+    [[ $UI_KEY == "[Q]" ]]
+)
+
+# No line wider than the screen, in English and in French, with and without
+# colors, from 20 columns (a phone) to 200
+preview_fits_every_width() (
+    load
+    local columns language colors width line out
+    for columns in 20 30 40 60 70 71 79 80 81 120 200; do
+        width=$((columns - 1))
+        if ((width > 79)); then width=79; fi
+        if ((width < 20)); then width=20; fi
+        for language in en fr; do
+            for colors in --color --no-color; do
+                out=$(TERM=xterm-256color "$ROOT/tools/preview.sh" --all "--$language" "$colors" --columns "$columns" 2>&1) || {
+                    printf '%s\n' "$out" | tail -n 5
+                    return 1
+                }
+                if [[ $colors == --no-color && $out == *$'\e'* ]]; then
+                    echo "color code with --no-color ($language, $columns columns)"
+                    return 1
+                fi
+                while IFS= read -r line; do
+                    ui_len "$line"
+                    if ((UI_LEN > width)); then
+                        echo "$columns columns, $language $colors: $UI_LEN > $width: $UI_STRIP"
+                        return 1
+                    fi
+                done <<<"$out"
+            done
+        done
+    done
+)
+
+# Same screens whether the locale counts characters or bytes (LANG not set)
+preview_same_in_every_locale() (
+    local utf8 bytes
+    utf8=$(LC_ALL=C.UTF-8 "$ROOT/tools/preview.sh" --all --fr --color --columns 80 2>&1) || return 1
+    bytes=$(LC_ALL=C "$ROOT/tools/preview.sh" --all --fr --color --columns 80 2>&1) || return 1
+    [[ $utf8 == "$bytes" ]] || {
+        diff <(printf '%s\n' "$utf8") <(printf '%s\n' "$bytes")
+        return 1
+    }
+)
+
+# Blocks from 80 columns (PuTTY), list below; two columns of menu from 71
+preview_layout_follows_width() (
+    local out
+    out=$("$ROOT/tools/preview.sh" --all --fr --no-color --columns 80) || return 1
+    out=${out%%=== vpn*}
+    grep -q '┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐' <<<"$out" || return 1
+    grep -q '\[1\] .*\[5\] ' <<<"$out" || return 1
+    out=$("$ROOT/tools/preview.sh" --all --fr --no-color --columns 79) || return 1
+    out=${out%%=== vpn*}
+    ! grep -q '┌─────────────┐' <<<"$out" || return 1
+    grep -q '^  Sauvegarde  ● à jour  *il y a 3 jours$' <<<"$out" || return 1
+    grep -q '\[1\] .*\[5\] ' <<<"$out" || return 1
+    out=$("$ROOT/tools/preview.sh" --all --fr --no-color --columns 70) || return 1
+    out=${out%%=== vpn*}
+    ! grep -q '\[1\] .*\[5\] ' <<<"$out" || return 1
+    grep -q '^  \[5\] Sauvegarde / restauration$' <<<"$out"
+)
+
+# Columns of a table stay aligned with accents and colors
+ui_table_aligned_with_accents() (
+    load
+    local out
+    out=$(ui_table $'NOM\tÉTAT\tFIN' $'été\t'"$C_GREEN"$'● en marche'"$C_RESET"$'\tx' $'a\tarrêté\ty')
+    [[ $out == "  NOM  ÉTAT         FIN"$'\n'"  ─────────────────────"$'\n'"  été  ● en marche  x"$'\n'"  a    arrêté       y" ]] || {
+        printf '%s\n' "$out"
+        return 1
+    }
+)
+
+# The answer of a menu without its spaces; Q after an action; no question
+# outside the menus
+ui_choice_and_pause_answers() (
+    load
+    local choice
+    INTERACTIVE=1
+    ui_menu_ask choice back <<<"  2 " >/dev/null 2>&1
+    [[ $choice == 2 ]] || return 1
+    ui_pause <<<"" >/dev/null 2>&1 || return 1
+    ! ui_pause <<<" Q" >/dev/null 2>&1 || return 1
+    INTERACTIVE=0
+    ! (ui_menu_ask choice <<<"1") >/dev/null 2>&1 || return 1
+    ui_pause </dev/null
+)
+
 printf '\033[1m=== Unit tests\033[0m\n'
 check "vpn_sync: WireGuard refusing the configuration shows « failed »" vpn_sync_reports_wg_failure
 check "vpn_sync: a failure of « wg-quick strip » is seen" vpn_sync_reports_strip_failure
@@ -2982,6 +3185,16 @@ check "report: private values replaced, the useful ones kept" report_replaces_pr
 check "report: without a seedbox, saved for the account of sudo (600)" report_saved_without_seedbox
 check "report: longest names first, common words and VPN addresses kept" report_longest_first_common_words_kept
 check "restore that fails: the way back also removes its marker" restore_failure_says_marker
+check "report: version numbers of packages are not taken for addresses" report_keeps_version_numbers
+check "nftables: a table is only deleted while it is there (no error in the log)" nft_tables_deleted_only_when_there
+check "interface: lengths in characters, in any locale (accents, ●, ─, colors)" ui_counts_characters
+check "interface: long text wrapped, a path split but never shortened" ui_wraps_without_losing_text
+check "interface: colors with a terminal, none with NO_COLOR or « dumb »; 256 or 8" colors_follow_terminal_and_no_color
+check "interface: no line wider than the screen (20 to 200 columns, EN/FR, colors)" preview_fits_every_width
+check "interface: same screens whether the locale counts characters or bytes" preview_same_in_every_locale
+check "interface: blocks from 80 columns, list below; menu in two columns from 71" preview_layout_follows_width
+check "interface: table columns aligned with accents and colors" ui_table_aligned_with_accents
+check "interface: answer without spaces, Q after an action, no question outside menus" ui_choice_and_pause_answers
 
 printf '\n\033[1m%s passed, %s failed\033[0m\n' "$PASS" "$FAIL"
 ((FAIL == 0))

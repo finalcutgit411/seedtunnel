@@ -402,11 +402,16 @@ report_by_link() { seedbox_installed && systemctl is-active --quiet nginx; }
 
 # Adds to the sed script: the whole VALUE (not inside a longer word) →
 # REPLACEMENT. Twice: two values next to each other share the character
-# between them.
+# between them. An IPv4 address is not part of a version number either:
+# « 4.23.9.0-2+b1 » (package) or « 1.2.3.4.5 » stay as they are.
 report_replace() {
-    local value=$1 replacement=$2 pattern
+    local value=$1 replacement=$2 pattern before="(^|[^[:alnum:]_])" after="([^[:alnum:]_]|\$)"
     [[ -n $value ]] || return 0
-    pattern="(^|[^[:alnum:]_])$(sed 's/[][\.*^$/+?(){}|]/\\&/g' <<<"$value")([^[:alnum:]_]|\$)"
+    if is_ipv4 "$value"; then
+        before="(^|[^[:alnum:]_.])"
+        after="([^[:alnum:]_.~+-]|\\.([^0-9]|\$)|\$)"
+    fi
+    pattern="$before$(sed 's/[][\.*^$/+?(){}|]/\\&/g' <<<"$value")$after"
     REPORT_SCRIPT+="s/$pattern/\\1$replacement\\2/g;s/$pattern/\\1$replacement\\2/g;"
 }
 

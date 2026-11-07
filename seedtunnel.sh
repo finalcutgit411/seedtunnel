@@ -21,6 +21,8 @@ APP_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 . "$APP_DIR/lib/common.sh"
 # shellcheck source=lib/i18n.sh
 . "$APP_DIR/lib/i18n.sh"
+# shellcheck source=lib/ui.sh
+. "$APP_DIR/lib/ui.sh"
 # shellcheck source=lib/vpn.sh
 . "$APP_DIR/lib/vpn.sh"
 # shellcheck source=lib/seedbox.sh

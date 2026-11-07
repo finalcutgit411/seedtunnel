@@ -454,7 +454,7 @@ firewall_disable() {
     banner
     section 'FIREWALL'
     if ! confirm 'Turn the firewall off?' n; then return 0; fi
-    nft delete table inet "$FIREWALL_TABLE" >>"$APP_LOG" 2>&1 || true
+    nft_delete_table inet "$FIREWALL_TABLE"
     # the rules must really be gone before anything is deleted
     if nft list table inet "$FIREWALL_TABLE" &>/dev/null; then
         die 'The firewall rules could not be removed (details in %s): the firewall stays on, nothing was deleted.' "$APP_LOG"

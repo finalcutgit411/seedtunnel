@@ -1943,3 +1943,20 @@ fr: Enregistrer l'utilisateur %s avec ce mot de passe ?
 
 en: The VPN could not be stopped (details in %s): nothing was deleted. Try again, or:  systemctl stop wg-quick@%s
 fr: Le VPN n'a pas pu être arrêté (détails dans %s) : rien n'a été supprimé. Réessayez, ou :  systemctl stop wg-quick@%s
+
+# --- Interface (lib/ui.sh) ---------------------------------------------------------
+
+en: WireGuard VPN · private seedbox
+fr: VPN WireGuard · seedbox privée
+
+en: Back
+fr: Retour
+
+en: Refresh
+fr: Actualiser
+
+en: Quit
+fr: Quitter
+
+en: Enter ↵ back · Q quit
+fr: Entrée ↵ revenir · Q quitter
