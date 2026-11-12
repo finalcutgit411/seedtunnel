@@ -1121,6 +1121,9 @@ restore_cli() {
     local file=${1-}
     if [[ -z $file ]]; then
         stdin_is_terminal || die 'Usage: seedtunnel restore FILE'
+        # the list asks which backup, as in the menu (seen on a real server:
+        # « Question asked outside interactive mode » without it)
+        INTERACTIVE=1
         banner
         section 'Restore a backup'
         # ufw on: said before the choice of the file, not after it

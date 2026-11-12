@@ -5819,7 +5819,7 @@ doctor_reports_restore_leftovers() (
 )
 
 # « seedtunnel restore » without a file: the list of the backups, as in the
-# menu, in a terminal only
+# menu, in a terminal only, where its question is asked
 restore_command_without_file() (
     load
     local out
@@ -5832,8 +5832,23 @@ restore_command_without_file() (
     if out=$( (restore_cli "") 2>&1); then return 1; fi
     echo "$out"
     [[ $out == *"Usage: seedtunnel restore FILE"* && ! -e $WORK/cli-restore-calls ]] || return 1
-    # in a terminal: the list; going back from it restores nothing
+    # in a terminal: the real list, and its question asked (seen on a real
+    # server: refused as « outside interactive mode »)
     stdin_is_terminal() { return 0; }
+    BACKUP_DIR="$WORK/cli-pick"
+    BACKUP_COPIED=()
+    rm -rf "$BACKUP_DIR"
+    mkdir -p "$BACKUP_DIR"
+    touch "$BACKUP_DIR/seedtunnel-server-20261112-171024.tar.gz.enc"
+    INTERACTIVE=0
+    restore_cli "" <<<"1" >"$WORK/cli-pick.out" 2>&1 || {
+        cat "$WORK/cli-pick.out"
+        return 1
+    }
+    ! grep -q "outside interactive mode" "$WORK/cli-pick.out" || return 1
+    [[ $(<"$WORK/cli-restore-calls") == "restore $BACKUP_DIR/seedtunnel-server-20261112-171024.tar.gz.enc" ]] || return 1
+    rm -f "$WORK/cli-restore-calls"
+    # going back from the list restores nothing
     backup_pick_file() { return 1; }
     restore_cli "" >/dev/null 2>&1 || return 1
     [[ ! -e $WORK/cli-restore-calls ]] || return 1
