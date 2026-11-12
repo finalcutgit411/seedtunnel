@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # =============================================================================
 #  Unit tests of seedtunnel: no root and no server needed (run by
 #  « make check », and on GitHub before the real installations of

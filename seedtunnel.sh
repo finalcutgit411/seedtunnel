@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # =============================================================================
 #  seedtunnel — WireGuard VPN + secure seedbox, for Debian 12 / 13 and Ubuntu 24.04 / 26.04
 #
@@ -8,6 +9,11 @@
 #
 #  Without arguments: interactive menu. With a command: usable from scripts
 #  (see « seedtunnel help »). Messages in English or in French.
+#
+#  Copyright (C) 2016-2026 FinalCut
+#  Free software under the GNU General Public License, version 3 or any later
+#  version (see LICENSE): you may use, study, change and share it; what you
+#  share stays under the same license, with its source code.
 # =============================================================================
 set -Eeuo pipefail
 

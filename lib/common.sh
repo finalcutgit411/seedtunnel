@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # =============================================================================
 #  seedtunnel — shared library
 #  Output, input, log, configuration file, system checks, apt, network.

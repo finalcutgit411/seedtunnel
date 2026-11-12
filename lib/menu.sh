@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # =============================================================================
 #  seedtunnel — home screen of the menus: state of the server and main menu
 #  Loaded by seedtunnel.sh: this file does nothing on its own.

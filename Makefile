@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Development tools (not needed to use seedtunnel)
 #   make lint        code analysis with shellcheck
 #   make fmt         formats the code with shfmt

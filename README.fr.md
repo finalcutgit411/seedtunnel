@@ -8,7 +8,7 @@
 <p align="center">
   <a href="https://github.com/finalcutgit411/seedtunnel/actions/workflows/ci.yml"><img src="https://github.com/finalcutgit411/seedtunnel/actions/workflows/ci.yml/badge.svg" alt="Tests"></a>
   <a href="https://github.com/finalcutgit411/seedtunnel/releases/latest"><img src="https://img.shields.io/github/v/release/finalcutgit411/seedtunnel?label=version" alt="Dernière version"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/finalcutgit411/seedtunnel?label=licence" alt="Licence MIT"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/finalcutgit411/seedtunnel?label=licence" alt="Licence GPL-3.0"></a>
 </p>
 
 <p align="center">Par FinalCut · <a href="README.md">English</a></p>
@@ -133,4 +133,6 @@ Ouvrez une [issue sur GitHub](https://github.com/finalcutgit411/seedtunnel/issue
 
 ## Licence
 
-[MIT](LICENSE).
+[GPL-3.0-or-later](LICENSE) : vous pouvez utiliser, étudier, modifier et partager SeedTunnel librement. Une version que vous partagez, modifiée ou non, reste sous la même licence, avec son code source.
+
+Copyright © 2016-2026 FinalCut.

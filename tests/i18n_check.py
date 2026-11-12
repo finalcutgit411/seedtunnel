@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Checks the translations of seedtunnel.
 
 Every English message written in the code (first argument of the functions

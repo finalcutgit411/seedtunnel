@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # =============================================================================
 #  seedtunnel — display of the menus (« Premium Signature » interface)
 #  Header, breadcrumb, state of the server, menu entries, footer, tables and

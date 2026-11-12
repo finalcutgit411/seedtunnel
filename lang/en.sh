@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # =============================================================================
 #  seedtunnel — long texts in English
 #  Each text is a function text_en_<name>, shown with « text <name> ».

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Test image: a freshly installed system with systemd, like a real server.
 # Built and started by .github/workflows/ci.yml, once for each system of its
 # list (IMAGE: debian:bookworm, debian:trixie…).
