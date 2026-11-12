@@ -52,7 +52,7 @@ Les touches sont les mêmes dans tous les menus : `B` (ou une réponse vide) rev
 
 Les menus sont en bash pur : ils marchent en SSH, dans PuTTY tel quel, avec ou sans couleurs (`NO_COLOR` est respectée), et s'adaptent à la largeur de la fenêtre. Pour les voir avec des données d'exemple, sans rien installer : `bash tools/preview.sh --fr`.
 
-<p align="center"><img src="seedtunnel-vpn.png" alt="Le menu du VPN" width="640"></p>
+<p align="center"><img src="screens/fr-vpn.png" alt="Le menu du VPN" width="640"></p>
 
 ### Commandes
 
@@ -115,7 +115,7 @@ Le fichier n'est jamais exécuté : il est seulement lu ligne par ligne, et les 
 | DNS des clients | Quad9 par défaut ; Cloudflare, DNS4EU (Union européenne), AdGuard (bloque aussi les publicités) ou vos propres adresses. Pour le changer : menu VPN → « Changer le DNS des clients », ou `seedtunnel vpn dns adguard`. Chaque client garde l'ancien jusqu'à ce qu'il réimporte sa configuration |
 | Connexions | « Clients et connexions » : connecté (vert), il y a moins d'une heure (jaune), plus ancien, ou pas depuis le démarrage du VPN (WireGuard les oublie quand il redémarre) |
 
-<p align="center"><img src="seedtunnel-clients.png" alt="Les clients du VPN et leurs connexions" width="640"></p>
+<p align="center"><img src="screens/fr-clients.png" alt="Les clients du VPN et leurs connexions" width="640"></p>
 
 ### Seedbox
 
@@ -128,9 +128,9 @@ Le fichier n'est jamais exécuté : il est seulement lu ligne par ligne, et les 
 | Protection | fail2ban sur SSH/SFTP, le mot de passe web et les récidivistes. Les adresses bannies en ce moment, avec la fin de leur bannissement : menu Seedbox → « Adresses IP bannies », ou `seedtunnel seedbox bans` |
 | Disque plein | contrôlé toutes les 5 minutes : sous 3 Go libres, Transmission est arrêté proprement ; il redémarre tout seul au-dessus de 5 Go |
 
-<p align="center"><img src="seedtunnel-seedbox.png" alt="Le menu de la seedbox : interface web, certificat, SFTP et état de ses services" width="640"></p>
+<p align="center"><img src="screens/fr-seedbox.png" alt="Le menu de la seedbox : interface web, certificat, SFTP et état de ses services" width="640"></p>
 
-<p align="center"><img src="seedtunnel-web.png" alt="L'interface web de Transmission aux couleurs de seedtunnel (Debian 13)" width="100%"></p>
+<p align="center"><img src="screens/web.png" alt="L'interface web de Transmission aux couleurs de seedtunnel (Debian 13)" width="100%"></p>
 
 Pas de nom de domaine ? La plupart des hébergeurs en fournissent un (par exemple `vps-1234abcd.vps.ovh.net`). Le script le propose s'il pointe bien sur le serveur.
 
@@ -172,7 +172,7 @@ Avec la seedbox, fail2ban bannit une adresse après 5 connexions ratées en 10 m
 
 Votre adresse n'est pas dans la liste ? Cherchez une adresse IPv6 : beaucoup de connexions à la maison joignent le serveur en IPv6.
 
-<p align="center"><img src="seedtunnel-bans.png" alt="Les adresses bannies, avec leur jail et la fin de leur bannissement" width="640"></p>
+<p align="center"><img src="screens/fr-bans.png" alt="Les adresses bannies, avec leur jail et la fin de leur bannissement" width="640"></p>
 
 ### Diagnostic
 
@@ -193,7 +193,7 @@ Votre adresse n'est pas dans la liste ? Cherchez une adresse IPv6 : beaucoup de 
 
 Il renvoie le code 1 s'il trouve un problème : il peut tourner dans une tâche planifiée.
 
-<p align="center"><img src="seedtunnel-diagnostic.png" alt="Un diagnostic complet, tout est en ordre" width="560"></p>
+<p align="center"><img src="screens/fr-diagnostic.png" alt="Un diagnostic complet, tout est en ordre" width="560"></p>
 
 Tout ce que seedtunnel lance est écrit dans `/var/log/seedtunnel.log` (lisible par root seulement, jamais de mot de passe). Il est découpé chaque mois par logrotate ; les 6 derniers mois sont gardés, compressés. Avec moins de 100 Mo libres sur le disque système, seedtunnel ne change rien et le dit d'abord.
 

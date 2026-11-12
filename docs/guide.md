@@ -2,8 +2,6 @@
 
 *[Version française](guide.fr.md)* · [← Back to the README](../README.md)
 
-*The screens shown here are in French: every menu and message also exists in English (`seedtunnel language en`).*
-
 ## Requirements
 
 - Debian **12 (bookworm)** or **13 (trixie)**, Ubuntu Server **24.04** or **26.04** (LTS): all four tested automatically at every change. Debian 11 is no longer supported (no security updates since 31 August 2026): upgrade to Debian 12, then 13;
@@ -54,7 +52,7 @@ The keys are the same in every menu: `B` (or an empty answer) goes back, `R` ref
 
 The menus are pure bash: they work over SSH, in PuTTY as it is, with or without colors (`NO_COLOR` is honored), and fit the width of the window. To see them with example data, without installing anything: `bash tools/preview.sh` (`--fr` in French).
 
-<p align="center"><img src="seedtunnel-vpn.png" alt="The VPN menu" width="640"></p>
+<p align="center"><img src="screens/en-vpn.png" alt="The VPN menu" width="640"></p>
 
 ### Commands
 
@@ -117,7 +115,7 @@ The first time the menu opens, it asks for the language: English or French. To c
 | DNS of the clients | Quad9 by default; Cloudflare, DNS4EU (European Union), AdGuard (blocks ads too) or your own addresses. To change it: menu VPN → « Change the DNS of the clients », or `seedtunnel vpn dns adguard`. Each client keeps the previous one until it imports its configuration again |
 | Connections | « Clients and connections »: connected (green), less than an hour ago (yellow), older, or not since the VPN started (WireGuard forgets them when it restarts) |
 
-<p align="center"><img src="seedtunnel-clients.png" alt="The VPN clients and their connections" width="640"></p>
+<p align="center"><img src="screens/en-clients.png" alt="The VPN clients and their connections" width="640"></p>
 
 ### Seedbox
 
@@ -130,9 +128,9 @@ The first time the menu opens, it asks for the language: English or French. To c
 | Protection | fail2ban on SSH/SFTP, the web password and repeat offenders. The addresses banned right now, with the end of their ban: menu Seedbox → « Banned IP addresses », or `seedtunnel seedbox bans` |
 | Full disk | checked every 5 minutes: under 3 GB free, Transmission is stopped cleanly; it starts again by itself above 5 GB |
 
-<p align="center"><img src="seedtunnel-seedbox.png" alt="The seedbox menu: web interface, certificate, SFTP and the state of its services" width="640"></p>
+<p align="center"><img src="screens/en-seedbox.png" alt="The seedbox menu: web interface, certificate, SFTP and the state of its services" width="640"></p>
 
-<p align="center"><img src="seedtunnel-web.png" alt="The web interface of Transmission in the colors of seedtunnel (Debian 13)" width="100%"></p>
+<p align="center"><img src="screens/web.png" alt="The web interface of Transmission in the colors of seedtunnel (Debian 13)" width="100%"></p>
 
 No domain name? Most providers give one (for example `vps-1234abcd.vps.ovh.net`). The script suggests it if it points to the server.
 
@@ -174,7 +172,7 @@ With the seedbox, fail2ban bans an address after 5 failed logins in 10 minutes: 
 
 Your address is not in the list? Look for an IPv6 address: many home connections reach the server in IPv6.
 
-<p align="center"><img src="seedtunnel-bans.png" alt="The banned addresses, with their jail and the end of their ban" width="640"></p>
+<p align="center"><img src="screens/en-bans.png" alt="The banned addresses, with their jail and the end of their ban" width="640"></p>
 
 ### Diagnostics
 
@@ -195,7 +193,7 @@ Your address is not in the list? Look for an IPv6 address: many home connections
 
 It exits with status 1 when it finds a problem, so it can run in a scheduled task.
 
-<p align="center"><img src="seedtunnel-diagnostic.png" alt="A full diagnostic, everything in order" width="560"></p>
+<p align="center"><img src="screens/en-diagnostic.png" alt="A full diagnostic, everything in order" width="560"></p>
 
 Everything seedtunnel runs is written to `/var/log/seedtunnel.log` (readable by root only, never a password). It is cut every month by logrotate; the last 6 months are kept, compressed. With less than 100 MB free on the system disk, seedtunnel changes nothing and says so first.
 

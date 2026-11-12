@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="226" viewBox="0 0 760 226" role="img" aria-label="SeedTunnel. Votre propre VPN et votre seedbox, sur votre serveur. Une commande. Sans Docker. Rien de caché.">
+  <title>SeedTunnel. Votre propre VPN et votre seedbox, sur votre serveur. Une commande. Sans Docker. Rien de caché.</title>
+  <g fill="none" stroke-linecap="round">
+    <line x1="232" y1="44" x2="318" y2="44" stroke="#5c566b" stroke-width="3"/>
+    <line x1="442" y1="44" x2="528" y2="44" stroke="#5c566b" stroke-width="3"/>
+    <rect x="320" y="14" width="120" height="60" rx="10" stroke="#ff5fff" stroke-width="3.5"/>
+    <line x1="352" y1="40" x2="408" y2="40" stroke="#ff5fff" stroke-width="2.5"/>
+    <line x1="352" y1="48" x2="408" y2="48" stroke="#ff5fff" stroke-width="2.5"/>
+  </g>
+  <circle cx="348" cy="44" r="8" fill="#ff5fff"/>
+  <circle cx="412" cy="44" r="8" fill="#ff5fff"/>
+  <text x="380" y="140" text-anchor="middle" font-family="'Segoe UI', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="58" font-weight="700" letter-spacing="-0.5"><tspan fill="#f4f2f8">Seed</tspan><tspan fill="#ff5fff">Tunnel</tspan></text>
+  <text x="380" y="184" text-anchor="middle" font-family="'Segoe UI', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="21" fill="#a9a3b8">Votre propre VPN et votre seedbox, sur votre serveur.</text>
+  <text x="380" y="214" text-anchor="middle" font-family="'Segoe UI', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif" font-size="21" font-weight="600" fill="#e6e3ee">Une commande. Sans Docker. Rien de caché.</text>
+</svg>
