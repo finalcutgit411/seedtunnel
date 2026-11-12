@@ -300,6 +300,34 @@ ui_group() {
     UI_FIELD_VALUES=()
 }
 
+# ui_print_wrapped START INDENT TEXT [END] — START then TEXT, going on under
+# INDENT between words (colors kept, ui_wrap_words) when too long for the
+# window. A word wider than the room left is cut (a name, in a field).
+ui_print_wrapped() {
+    local start=$1 indent=$2 text=$3 end=${4-} room part first=1
+    ui_len "$start"
+    room=$((UI_WIDTH - UI_LEN))
+    if ((room < 8)); then
+        ui_print "$start$text$end"
+        return 0
+    fi
+    ui_wrap_words "$text" "$room"
+    for part in "${UI_LINES[@]}"; do
+        part=${part//$'\x01'/ }
+        ui_len "$part"
+        if ((UI_LEN > room)); then
+            ui_cut "$part" "$room"
+            part=$UI_CUT
+        fi
+        if ((first)); then
+            printf '%s%s%s\n' "$start" "$part" "$end"
+            first=0
+        else
+            printf '%s%s%s\n' "$indent" "$part" "$end"
+        fi
+    done
+}
+
 # ui_glue TEXT → UI_GLUED: the spaces before « : », « ? », « ! », « ; » and
 # « » », and after « « », replaced by \x01 for the time of a ui_wrap (put back
 # as spaces when printed)
@@ -504,28 +532,44 @@ ui_field_add() {
 # ui_print_joined START INDENT TEXT [END] — START then TEXT, END at the end of
 # each line. Too long for the window, TEXT goes on to the next line (INDENT,
 # then « · ») at a « · »: never cut, a cut line could hide the state of a
-# service or a date.
+# service or a date. Without « · », TEXT goes on under itself, between words.
 ui_print_joined() {
-    local line=$1 indent=$2 value=$3 end=${4-} part
-    ui_len "$line$value"
-    if ((UI_LEN <= UI_WIDTH)) || [[ $value != *" · "* ]]; then
-        ui_print "$line$value$end"
+    local start=$1 indent=$2 value=$3 end=${4-} line="" part prefix next
+    local -a parts=()
+    ui_len "$start$value"
+    if ((UI_LEN <= UI_WIDTH)); then
+        ui_print "$start$value$end"
         return 0
     fi
-    line+=${value%%" · "*}
-    value=${value#*" · "}
     while [[ -n $value ]]; do
-        part=${value%%" · "*}
+        parts+=("${value%%" · "*}")
         if [[ $value == *" · "* ]]; then value=${value#*" · "}; else value=""; fi
-        ui_len "$line · $part"
-        if ((UI_LEN <= UI_WIDTH)); then
-            line+=" · $part"
-        else
-            ui_print "$line$end"
-            line="$indent· $part"
-        fi
     done
-    ui_print "$line$end"
+    # the next lines of a part: under it (after « · » for the next parts)
+    prefix=$start
+    next=$indent
+    for part in "${parts[@]}"; do
+        # on the line being filled
+        if [[ -n $line ]]; then
+            ui_len "$line · $part"
+            if ((UI_LEN <= UI_WIDTH)); then
+                line+=" · $part"
+                continue
+            fi
+            printf '%s%s\n' "$line" "$end"
+            line=""
+        fi
+        # at the start of a line: whole, or wrapped between words
+        ui_len "$prefix$part"
+        if ((UI_LEN <= UI_WIDTH)); then
+            line="$prefix$part"
+        else
+            ui_print_wrapped "$prefix" "$next" "$part" "$end"
+        fi
+        prefix="$indent· "
+        next="$indent  "
+    done
+    if [[ -n $line ]]; then printf '%s%s\n' "$line" "$end"; fi
 }
 
 ui_fields_show() {
