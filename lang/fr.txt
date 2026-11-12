@@ -147,8 +147,11 @@ fr: Aucune sauvegarde téléchargée pour l'instant   (seedtunnel backup share)
 en: Usage: seedtunnel backup auto on|off|status
 fr: Utilisation : seedtunnel backup auto on|off|status
 
-en: Usage: seedtunnel backup [list|share|auto on|off|status]
-fr: Utilisation : seedtunnel backup [list|share|auto on|off|status]
+en: Usage: seedtunnel backup [list|share [NUMBER]|delete NUMBER|auto on|off|status]
+fr: Utilisation : seedtunnel backup [list|share [NUMÉRO]|delete NUMÉRO|auto on|off|status]
+
+en: Usage: seedtunnel backup delete NUMBER (the numbers: seedtunnel backup list)
+fr: Utilisation : seedtunnel backup delete NUMÉRO (les numéros : seedtunnel backup list)
 
 en: Backup to restore (number, or path of a file)
 fr: Sauvegarde à restaurer (numéro, ou chemin d'un fichier)
@@ -2580,3 +2583,53 @@ fr: joignables depuis Internet : le pare-feu ne les filtre pas
 
 en: IPv6 address from the provider (DHCPv6)
 fr: adresse IPv6 de l'hébergeur (DHCPv6)
+
+# --- My backups: list, download, delete ---------------------------------------
+
+en: My backups (list, download, delete)
+fr: Mes sauvegardes (liste, télécharger, supprimer)
+
+en: My backups
+fr: Mes sauvegardes
+
+en: Space used
+fr: Place utilisée
+
+en: in %s
+fr: dans %s
+
+en: Download a backup (one-time link)
+fr: Télécharger une sauvegarde (lien à usage unique)
+
+en: Delete a backup
+fr: Supprimer une sauvegarde
+
+en: Backup to download (number)
+fr: Sauvegarde à télécharger (numéro)
+
+en: Backup to delete (number)
+fr: Sauvegarde à supprimer (numéro)
+
+en: The backup of %s (%s, %s) is deleted for good.
+fr: La sauvegarde du %s (%s, %s) est supprimée pour de bon.
+
+en: It is the only backup on the server: keep a copy of it on your computer first.
+fr: C'est la seule sauvegarde du serveur : gardez-en d'abord une copie sur votre ordinateur.
+
+en: Delete this backup?
+fr: Supprimer cette sauvegarde ?
+
+en: Deleting %s
+fr: Suppression de %s
+
+en: Backup deleted: %s
+fr: Sauvegarde supprimée : %s
+
+en: seedtunnel only deletes its own backups, those of %s: delete %s yourself (WinSCP).
+fr: seedtunnel ne supprime que ses propres sauvegardes, celles de %s : supprimez %s vous-même (WinSCP).
+
+en: This backup was copied into %s: seedtunnel leaves it there, delete it yourself (WinSCP).
+fr: Cette sauvegarde a été copiée dans %s : seedtunnel la laisse, supprimez-la vous-même (WinSCP).
+
+en: No backup number %s (seedtunnel backup list).
+fr: Pas de sauvegarde numéro %s (seedtunnel backup list).

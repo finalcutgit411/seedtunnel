@@ -462,28 +462,120 @@ backup_line() {
     printf '%s  %s  %s' "$(date -r "$1" '+%F %R')" "$(human_size "$(stat -c %s "$1")")" "$1"
 }
 
+# The backups, numbered as in the menu: « seedtunnel backup share|delete
+# NUMBER » take these numbers
 backup_list() {
-    local file found=0
+    local file index=0
     while IFS= read -r file; do
-        printf '  %s\n' "$(backup_line "$file")"
-        found=1
+        index=$((index + 1))
+        printf '  %s  %s\n' "$index" "$(backup_line "$file")"
     done < <(backup_candidates)
-    if ((!found)); then say 'No backup found in %s, nor in /root and /home.' "$BACKUP_DIR"; fi
+    if ((!index)); then say 'No backup found in %s, nor in /root and /home.' "$BACKUP_DIR"; fi
 }
 
-# One-time link to the latest backup; the download is recorded for the
-# reminder of « seedtunnel doctor »
+# backup_kind FILE — made by hand or weekly by this server, or copied into
+# /root or a home folder (WinSCP, scp)
+backup_kind() {
+    if [[ $1 != "$BACKUP_DIR"/* ]]; then
+        t 'copied'
+    elif [[ $1 == *-auto.tar.gz.enc ]]; then
+        t 'weekly'
+    else
+        t 'by hand'
+    fi
+}
+
+# backup_table FILE… — the backups in a table, numbered from 1
+backup_table() {
+    local file folder index=0
+    local -a rows=("#"$'\t'"$(t 'DATE')"$'\t'"$(t 'SIZE')"$'\t'"$(t 'KIND')"$'\t'"$(t 'FOLDER')")
+    for file in "$@"; do
+        index=$((index + 1))
+        # no character that the terminal would take for a command
+        folder=${file%/*}
+        folder=${folder//[$'\001'-$'\037'$'\177']/?}
+        rows+=("$index"$'\t'"$(date -r "$file" '+%F %R')"$'\t'"$(human_size "$(stat -c %s "$file")")"$'\t'"$(backup_kind "$file")"$'\t'"$folder")
+    done
+    ui_width
+    ui_table "${rows[@]}"
+}
+
+# backup_by_number VARIABLE NUMBER — the backup of that number in the list
+backup_by_number() {
+    local -a files
+    mapfile -t files < <(backup_candidates)
+    if [[ ! $2 =~ ^[0-9]{1,9}$ ]] || ((10#$2 < 1 || 10#$2 > ${#files[@]})); then
+        die 'No backup number %s (seedtunnel backup list).' "$2"
+    fi
+    printf -v "$1" '%s' "${files[10#$2 - 1]}"
+}
+
+# backup_ask_number VARIABLE QUESTION FILE… — one of the backups listed, by
+# its number, asked again while it is not in the list. Status 1: back.
+backup_ask_number() {
+    local _bn_var=$1 _bn_question=$2 _bn_answer
+    shift 2
+    while true; do
+        ask_back _bn_answer "$_bn_question" || return 1
+        if [[ $_bn_answer =~ ^[0-9]{1,9}$ ]] && ((10#$_bn_answer >= 1 && 10#$_bn_answer <= $#)); then
+            _bn_answer=$((10#$_bn_answer))
+            printf -v "$_bn_var" '%s' "${!_bn_answer}"
+            return 0
+        fi
+        warn 'No backup number %s.' "$_bn_answer"
+    done
+}
+
+# backup_share [NUMBER] — one-time link to the latest backup, or to the one of
+# that number; the download is recorded for the reminder of « seedtunnel doctor »
 backup_share() {
-    local file size
-    file=$(backup_latest) || die 'No backup yet:  seedtunnel backup'
+    local file
+    if [[ -n ${1-} ]]; then
+        backup_by_number file "$1"
+        backup_share_file "$file" 'Download a backup (one-time link)'
+    else
+        file=$(backup_latest) || die 'No backup yet:  seedtunnel backup'
+        backup_share_file "$file" 'Download the latest backup (one-time link)'
+    fi
+}
+
+# backup_share_file FILE TITLE
+backup_share_file() {
+    local file=$1 size
     # shown on the download page, to check that the file arrived whole
     size=$(human_size "$(stat -c %s "$file")")
     share_require "$(t 'Without a seedbox, copy it with WinSCP or scp: %s' "$file")"
     banner
-    section 'Download the latest backup (one-time link)'
+    section "$2"
     say 'Backup of %s.' "$(date -r "$file" '+%F %R')"
     share_create "$file" "${file##*/}" "$(t 'seedtunnel backup')" "$(text share_steps_backup)" \
         "$(t 'The backup is encrypted: it cannot be read without its passphrase.')" "$BACKUP_DOWNLOADED_MARK"
+}
+
+# backup_delete FILE — one backup of this server deleted for good, after a
+# question in red (« no » by default; said if it is the last one). Only those
+# of $BACKUP_DIR: a backup copied into /root or a home folder belongs to
+# whoever put it there. A link made before keeps its own copy.
+backup_delete() {
+    local file=$1 other others=0
+    local -a lines
+    WENT_BACK=0
+    if [[ $file != "$BACKUP_DIR"/*.tar.gz.enc || ${file#"$BACKUP_DIR"/} == */* || ! -f $file || -L $file ]]; then
+        die 'seedtunnel only deletes its own backups, those of %s: delete %s yourself (WinSCP).' "$BACKUP_DIR" "$file"
+    fi
+    for other in "$BACKUP_DIR"/*.tar.gz.enc; do
+        if [[ -f $other && $other != "$file" ]]; then others=$((others + 1)); fi
+    done
+    lines=("$(t 'The backup of %s (%s, %s) is deleted for good.' "$(date -r "$file" '+%F %R')" \
+        "$(human_size "$(stat -c %s "$file")")" "$(backup_kind "$file")")")
+    if ((!others)); then lines+=("$(t 'It is the only backup on the server: keep a copy of it on your computer first.')"); fi
+    danger "$(t 'Delete a backup')" "${lines[@]}"
+    if ! confirm 'Delete this backup?' n; then
+        WENT_BACK=1
+        return 0
+    fi
+    run "$(t 'Deleting %s' "${file##*/}")" rm -f -- "$file"
+    ok 'Backup deleted: %s' "${file##*/}"
 }
 
 # --- Weekly backup ---------------------------------------------------------------------
@@ -671,10 +763,16 @@ backup_status_fields() {
 
 # seedtunnel backup …
 backup_cli() {
+    local file
     case ${1-} in
         "") backup_main ;;
         list) backup_list ;;
-        share) backup_share ;;
+        share) backup_share "${2-}" ;;
+        delete)
+            [[ -n ${2-} ]] || die 'Usage: seedtunnel backup delete NUMBER (the numbers: seedtunnel backup list)'
+            backup_by_number file "$2"
+            backup_delete "$file"
+            ;;
         auto)
             case ${2-} in
                 # empty passphrase or « no »: back without doing anything
@@ -685,7 +783,7 @@ backup_cli() {
                 *) die 'Usage: seedtunnel backup auto on|off|status' ;;
             esac
             ;;
-        *) die 'Usage: seedtunnel backup [list|share|auto on|off|status]' ;;
+        *) die 'Usage: seedtunnel backup [list|share [NUMBER]|delete NUMBER|auto on|off|status]' ;;
     esac
 }
 
@@ -693,28 +791,11 @@ backup_cli() {
 # one is chosen by its number (Enter: the newest), or any file by its path.
 # Asked again while the file cannot be read. Status 1: back.
 backup_pick_file() {
-    local _bp_var=$1 _bp_answer _bp_file _bp_index=0 _bp_default="" _bp_kind _bp_folder
-    local -a _bp_files _bp_rows=()
+    local _bp_var=$1 _bp_answer _bp_index _bp_default=""
+    local -a _bp_files
     mapfile -t _bp_files < <(backup_candidates)
-    _bp_rows+=("#"$'\t'"$(t 'DATE')"$'\t'"$(t 'SIZE')"$'\t'"$(t 'KIND')"$'\t'"$(t 'FOLDER')")
-    for _bp_file in "${_bp_files[@]}"; do
-        _bp_index=$((_bp_index + 1))
-        if [[ $_bp_file != "$BACKUP_DIR"/* ]]; then
-            _bp_kind=$(t 'copied')
-        elif [[ $_bp_file == *-auto.tar.gz.enc ]]; then
-            _bp_kind=$(t 'weekly')
-        else
-            _bp_kind=$(t 'by hand')
-        fi
-        # no character that the terminal would take for a command
-        _bp_folder=${_bp_file%/*}
-        _bp_folder=${_bp_folder//[$'\001'-$'\037'$'\177']/?}
-        _bp_rows+=("$_bp_index"$'\t'"$(date -r "$_bp_file" '+%F %R')"$'\t'"$(human_size "$(stat -c %s "$_bp_file")")"$'\t'"$_bp_kind"$'\t'"$_bp_folder")
-    done
-    if ((_bp_index)); then
-        ui_width
-        ui_table "${_bp_rows[@]}"
-    fi
+    _bp_index=${#_bp_files[@]}
+    if ((_bp_index)); then backup_table "${_bp_files[@]}"; fi
     # Enter takes the newest one only if it was made by this server
     if [[ ${_bp_files[0]-} == "$BACKUP_DIR"/* ]]; then _bp_default=1; fi
     if ((_bp_index == 0)); then say 'No backup found in %s, nor in /root and /home.' "$BACKUP_DIR"; fi
@@ -750,6 +831,68 @@ backup_menu_share() {
     pause
 }
 
+# The screen of the backups: the table (those of the server and those copied
+# into /root or a home folder), the room they take, then download or delete
+backup_menu_mine() {
+    local choice file total=0
+    local -a files
+    while true; do
+        mapfile -t files < <(backup_candidates)
+        UI_PLACE=("$(t 'Backup / restore')" "$(t 'My backups')")
+        ui_top "${UI_PLACE[@]}"
+        if ((${#files[@]})); then
+            backup_table "${files[@]}"
+        else
+            say 'No backup found in %s, nor in /root and /home.' "$BACKUP_DIR"
+        fi
+        echo
+        total=0
+        for file in "$BACKUP_DIR"/*.tar.gz.enc; do
+            if [[ -f $file && ! -L $file ]]; then total=$((total + $(stat -c %s "$file"))); fi
+        done
+        ui_field_add "$(t 'Space used')" "$(human_size_spaced "$total") $C_GREY$(t 'in %s' "$BACKUP_DIR")$C_RESET"
+        ui_field_add "$(t 'Disk')" "$(disk_free_text "$BACKUP_DIR")"
+        ui_fields_show
+        echo
+        ui_menu_add 1 "$(t 'Download a backup (one-time link)')"
+        ui_menu_add 2 "$(t 'Delete a backup')"
+        ui_menu_show
+        echo
+        ui_menu_ask choice back
+        case ${choice,,} in
+            1) ui_action backup_menu_mine_share ;;
+            2) ui_action backup_menu_mine_delete ;;
+            "" | b) return 0 ;;
+            q) ui_quit ;;
+        esac
+    done
+}
+
+backup_menu_mine_share() {
+    local file
+    local -a files
+    mapfile -t files < <(backup_candidates)
+    ((${#files[@]})) || return 0
+    backup_ask_number file 'Backup to download (number)' "${files[@]}" || return 0
+    backup_share_file "$file" 'Download a backup (one-time link)'
+    pause
+}
+
+backup_menu_mine_delete() {
+    local file
+    local -a files
+    mapfile -t files < <(backup_candidates)
+    ((${#files[@]})) || return 0
+    backup_ask_number file 'Backup to delete (number)' "${files[@]}" || return 0
+    if [[ $file != "$BACKUP_DIR"/* ]]; then
+        warn 'This backup was copied into %s: seedtunnel leaves it there, delete it yourself (WinSCP).' "${file%/*}"
+        pause
+        return 0
+    fi
+    backup_delete "$file"
+    if ((!WENT_BACK)); then pause; fi
+}
+
 backup_menu_weekly() {
     if backup_auto_enabled; then
         backup_auto_disable_asked
@@ -781,6 +924,7 @@ backup_menu() {
         ui_menu_add 2 "$(t 'Download the latest backup (one-time link)')"
         ui_menu_add 3 "$(t 'Turn the weekly backup on / off')"
         ui_menu_add 4 "$(t 'Restore a backup')"
+        ui_menu_add 5 "$(t 'My backups (list, download, delete)')"
         ui_menu_show
         echo
         ui_menu_ask choice back
@@ -793,6 +937,7 @@ backup_menu() {
                 # the menus go on in the language of the backup restored
                 language_reload
                 ;;
+            5) backup_menu_mine ;;
             "" | b) return 0 ;;
             q) ui_quit ;;
         esac

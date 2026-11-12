@@ -67,7 +67,7 @@ seedtunnel vpn dns adguard                  seedtunnel seedbox sftp-password off
                                             seedtunnel seedbox bans | unban IP
 seedtunnel firewall enable|disable|status   seedtunnel doctor [--link]
 seedtunnel firewall rules
-seedtunnel backup [--passphrase-file F]     seedtunnel backup list | share
+seedtunnel backup [--passphrase-file F]     seedtunnel backup list | share [N] | delete N
 seedtunnel backup auto on|off|status        seedtunnel restore [FICHIER] [--passphrase-file F]
 seedtunnel update                           seedtunnel apply
 seedtunnel language en|fr
@@ -213,6 +213,8 @@ Si un réglage change pendant l'écriture de l'archive (renouvellement d'un cert
 `seedtunnel backup auto on` fait une sauvegarde chiffrée **chaque semaine** et garde les 4 dernières. Sa passphrase est enregistrée sur le serveur (lisible par root uniquement) pour qu'elle tourne seule : notez-la aussi ailleurs. La désactiver (`seedtunnel backup auto off`, ou le menu) demande d'abord confirmation : la passphrase enregistrée est effacée.
 
 Une sauvegarde restée sur le serveur disparaît avec lui : `seedtunnel backup share` donne un lien à usage unique pour télécharger la dernière sur votre ordinateur. `seedtunnel doctor` vous le rappelle quand la sauvegarde hebdomadaire est désactivée ou échoue, et quand aucune sauvegarde n'a été téléchargée depuis un mois.
+
+Dans le menu, Sauvegarde / restauration → « Mes sauvegardes » les liste toutes, numérotées (celles du serveur et celles copiées dans `/root` ou un dossier personnel), avec la place qu'elles prennent et la place libre du disque. De là, n'importe laquelle se télécharge par un lien à usage unique, et celles du serveur se suppriment : la date, la taille et le type s'affichent d'abord en rouge, et la question attend « non » par défaut (c'est dit aussi quand c'est la dernière sauvegarde du serveur). Les sauvegardes que vous avez copiées vous-même ne sont pas touchées. En commande : `seedtunnel backup list` (numérotées), `seedtunnel backup share NUMÉRO`, `seedtunnel backup delete NUMÉRO` (`--yes` sans terminal).
 
 Dans le menu (Sauvegarde / restauration → « Restaurer une sauvegarde »), les sauvegardes du serveur et celles copiées dans `/root` ou un dossier personnel (WinSCP, scp) sont listées, la plus récente d'abord : tapez un numéro, ou le chemin d'un autre fichier. `seedtunnel restore` sans fichier affiche la même liste.
 

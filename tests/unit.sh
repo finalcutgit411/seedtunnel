@@ -4867,6 +4867,69 @@ restore_picks_a_backup_by_number() (
     (($? == 1)) && grep -q "No backup found in $WORK/pick/none, nor in /root and /home." "$WORK/pick.out"
 )
 
+# My backups: the list numbered (by command too), one downloaded by its
+# number, those of the server deleted after a question in red (the last one
+# said), those copied into a home folder left alone
+backup_list_download_delete() (
+    back_load
+    local file auto="" hand="" copied=""
+    rm -rf "$WORK/mine"
+    BACKUP_DIR="$WORK/mine/backups"
+    BACKUP_COPIED=("$WORK/mine/home/*/*.tar.gz.enc")
+    mkdir -p "$BACKUP_DIR" "$WORK/mine/home/ubuntu"
+    hand="$BACKUP_DIR/seedtunnel-server-20261109-182200.tar.gz.enc"
+    copied="$WORK/mine/home/ubuntu/seedtunnel-copied.tar.gz.enc"
+    auto="$BACKUP_DIR/seedtunnel-server-20261112-173000-auto.tar.gz.enc"
+    touch -d '3 days ago' "$hand"
+    touch -d '1 day ago' "$copied"
+    touch "$auto"
+    # by command: numbered, the newest first
+    backup_list >"$WORK/mine.out"
+    cat "$WORK/mine.out"
+    grep -q "^  1  .*$auto$" "$WORK/mine.out" && grep -q "^  2  .*$copied$" "$WORK/mine.out" \
+        && grep -q "^  3  .*$hand$" "$WORK/mine.out" || return 1
+    backup_by_number file 2
+    [[ $file == "$copied" ]] || return 1
+    if (backup_by_number file 4) >"$WORK/mine.out" 2>&1; then return 1; fi
+    grep -q "No backup number 4" "$WORK/mine.out" || return 1
+    # downloaded by its number
+    banner() { :; }
+    share_require() { :; }
+    share_create() { echo "share $1" >>"$WORK/mine-calls"; }
+    rm -f "$WORK/mine-calls"
+    backup_share 3 >/dev/null 2>&1 || return 1
+    [[ $(<"$WORK/mine-calls") == "share $hand" ]] || return 1
+    # a backup copied into a home folder: never deleted
+    if (backup_delete "$copied") >"$WORK/mine.out" 2>&1; then return 1; fi
+    grep -q "only deletes its own backups" "$WORK/mine.out" && [[ -f $copied ]] || return 1
+    # « no »: kept, nothing more said
+    confirm() { return 1; }
+    backup_delete "$hand" >"$WORK/mine.out" 2>&1 || return 1
+    cat "$WORK/mine.out"
+    [[ -f $hand ]] && ((WENT_BACK == 1)) && grep -q "is deleted for good" "$WORK/mine.out" \
+        && ! grep -q "only backup on the server" "$WORK/mine.out" || return 1
+    # « yes »: deleted
+    confirm() { return 0; }
+    backup_delete "$hand" >"$WORK/mine.out" 2>&1 || return 1
+    [[ ! -e $hand ]] && grep -q "Backup deleted: ${hand##*/}" "$WORK/mine.out" || return 1
+    # the last backup of the server: said in the red frame
+    confirm() { return 1; }
+    backup_delete "$auto" >"$WORK/mine.out" 2>&1 || return 1
+    grep -q "It is the only backup on the server" "$WORK/mine.out" && [[ -f $auto ]] || return 1
+    # the menu: a number not in the list asked again; a copied backup left alone
+    answers "9" "2"
+    backup_menu_mine_delete >"$WORK/mine.out" 2>&1 || return 1
+    cat "$WORK/mine.out"
+    grep -q "No backup number 9" "$WORK/mine.out" && grep -q "was copied into $WORK/mine/home/ubuntu" "$WORK/mine.out" \
+        && [[ -f $copied ]] || return 1
+    # the screen: the table, the room taken, the two actions; empty: back
+    answers ""
+    backup_menu_mine >"$WORK/mine.out" 2>&1 || return 1
+    grep -q "My backups" "$WORK/mine.out" && grep -q "Space used" "$WORK/mine.out" \
+        && grep -q "Download a backup (one-time link)" "$WORK/mine.out" && grep -q "Delete a backup" "$WORK/mine.out" \
+        && grep -q "^ *1 .* weekly .*$BACKUP_DIR" "$WORK/mine.out"
+)
+
 # The last connection of a client: connected (green), less than an hour ago
 # (yellow), older (grey), « not since the VPN started » instead of « never »
 vpn_last_connection_states() (
@@ -6880,6 +6943,7 @@ check "preview: the labels of the real menus" preview_labels_are_those_of_the_me
 check "release: the archive comes with its attestation" release_attested
 check "answers: the spaces around them are not part of them (restore « File not found »)" answers_without_spaces_around
 check "restore: the backups found, numbered (/var/backups, /root, /home), a number or a path" restore_picks_a_backup_by_number
+check "my backups: numbered, one downloaded by its number, deleted after a question (the last said), copied ones left alone" backup_list_download_delete
 check "VPN clients: connected, less than an hour ago, older, not since the VPN started" vpn_last_connection_states
 check "VPN clients: since when the VPN runs, or that it is stopped" vpn_table_says_since_when
 check "DNS: going back changes nothing, the same DNS applies nothing" vpn_dns_can_go_back

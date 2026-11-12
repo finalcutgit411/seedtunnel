@@ -43,7 +43,9 @@ Server
   doctor                             full diagnostics (status 1 if a problem)
   doctor --link                      report without private details, one-time link
   backup [--output FILE] [--passphrase-file FILE]
-  backup list | share                list the backups / one-time download link
+  backup list                        the backups, numbered
+  backup share [NUMBER]              one-time download link (the latest, or NUMBER)
+  backup delete NUMBER [--yes]       delete a backup of the server
   backup auto on|off|status          weekly encrypted backup (off: --yes without a terminal)
   restore [FILE] [--passphrase-file FILE] [--yes]
                                      without FILE: the list of the backups found

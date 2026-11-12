@@ -42,7 +42,9 @@ Serveur
   doctor                             diagnostic complet (code 1 si problème)
   doctor --link                      rapport sans données privées, lien unique
   backup [--output FICHIER] [--passphrase-file FICHIER]
-  backup list | share                liste des sauvegardes / lien de téléchargement
+  backup list                        les sauvegardes, numérotées
+  backup share [NUMÉRO]              lien de téléchargement (la dernière, ou NUMÉRO)
+  backup delete NUMÉRO [--yes]       supprimer une sauvegarde du serveur
   backup auto on|off|status          sauvegarde chiffrée chaque semaine (off : --yes sans terminal)
   restore [FICHIER] [--passphrase-file FICHIER] [--yes]
                                      sans FICHIER : la liste des sauvegardes trouvées

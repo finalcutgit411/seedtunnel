@@ -554,9 +554,50 @@ screen_backup() {
     ui_menu_add 2 "$(t 'Download the latest backup (one-time link)')"
     ui_menu_add 3 "$(t 'Turn the weekly backup on / off')"
     ui_menu_add 4 "$(t 'Restore a backup')"
+    ui_menu_add 5 "$(t 'My backups (list, download, delete)')"
     ui_menu_show
     echo
     end_menu back
+}
+
+# Backup / restore › My backups (backup_menu_mine)
+screen_backups() {
+    top backups
+    ui_crumbs "$(t 'Backup / restore')" "$(t 'My backups')"
+    echo
+    # as backup_table shows them
+    ui_table "#"$'\t'"$(t 'DATE')"$'\t'"$(t 'SIZE')"$'\t'"$(t 'KIND')"$'\t'"$(t 'FOLDER')" \
+        "1"$'\t'"2026-11-12 17:30"$'\t'"$(human_size 382976)"$'\t'"$(t 'by hand')"$'\t'"$BACKUP_DIR" \
+        "2"$'\t'"2026-11-10 21:10"$'\t'"$(human_size 381952)"$'\t'"$(t 'copied')"$'\t'"/home/ubuntu" \
+        "3"$'\t'"2026-11-09 18:22"$'\t'"$(human_size 380928)"$'\t'"$(t 'by hand')"$'\t'"$BACKUP_DIR" \
+        "4"$'\t'"2026-11-08 03:41"$'\t'"$(human_size 379904)"$'\t'"$(t 'weekly')"$'\t'"$BACKUP_DIR"
+    echo
+    ui_field_add "$(t 'Space used')" "$(human_size_spaced 1143808) $C_GREY$(t 'in %s' "$BACKUP_DIR")$C_RESET"
+    ui_field_add "$(t 'Disk')" "$(t '%s free%s of %s' "$C_GREEN$(human_size_spaced 73014444032)" "$C_RESET" "$(human_size_spaced 85899345920)")"
+    ui_fields_show
+    echo
+    ui_menu_add 1 "$(t 'Download a backup (one-time link)')"
+    ui_menu_add 2 "$(t 'Delete a backup')"
+    ui_menu_show
+    echo
+    end_menu back
+}
+
+# My backups › Delete a backup (backup_delete), the last one of the server
+screen_backup_delete() {
+    top backup-del
+    ui_crumbs "$(t 'Backup / restore')" "$(t 'My backups')"
+    echo
+    ui_print "$(t '%s (empty = back)' "$(t 'Backup to delete (number)')"): 1"
+    echo
+    ui_box bad "$(t 'Delete a backup')" \
+        "$(t 'The backup of %s (%s, %s) is deleted for good.' "2026-11-12 17:30" "$(human_size 382976)" "$(t 'by hand')")" \
+        "$(t 'It is the only backup on the server: keep a copy of it on your computer first.')"
+    echo
+    ui_print "$(t 'Delete this backup?') $(t '[y/N]') $(pv y o)"
+    step "$(t 'Deleting %s' "seedtunnel-mon-serveur-20261112-173000.tar.gz.enc")"
+    said_ok 'Backup deleted: %s' "seedtunnel-mon-serveur-20261112-173000.tar.gz.enc"
+    end_action
 }
 
 # Backup / restore › Weekly backup, turned on (backup_auto_enable), with
@@ -679,6 +720,8 @@ if ((ALL)); then
     screen_backup
     screen_weekly
     screen_restore
+    screen_backups
+    screen_backup_delete
     screen_terminal
     exit 0
 fi
@@ -692,7 +735,7 @@ ui_print "  $(pv 'Enter: next screen · Q: quit' 'Entrée : écran suivant · Q 
 echo
 IFS= read -r -p "  $(pv 'Press Enter to start…' 'Appuyez sur Entrée pour commencer…') " CHOICE || exit 130
 for screen in screen_home screen_home_narrow screen_home_manual screen_vpn screen_clients screen_dns screen_vpn_address screen_add \
-    screen_client_card screen_client_qr screen_client screen_danger screen_seedbox screen_credentials screen_sftp screen_keys screen_key_add screen_bans screen_rules screen_backup screen_weekly screen_restore screen_terminal; do
+    screen_client_card screen_client_qr screen_client screen_danger screen_seedbox screen_credentials screen_sftp screen_keys screen_key_add screen_bans screen_rules screen_backup screen_weekly screen_restore screen_backups screen_backup_delete screen_terminal; do
     if [[ $screen == screen_home_narrow && -n ${UI_COLUMNS-} ]]; then continue; fi
     "$screen" || break
 done

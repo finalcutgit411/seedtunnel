@@ -314,6 +314,26 @@ report_link_test() {
     link_gone "${path}$name"
 }
 
+# My backups: the list numbered; one deleted by its number, only with --yes
+# without a terminal; a backup copied into /root is left alone
+backup_delete_test() {
+    local number status=0 made=/var/backups/seedtunnel/seedtunnel-ci-delete.tar.gz.enc copied=/root/seedtunnel-ci-copied.tar.gz.enc
+    app backup --passphrase-file "$W/passphrase" --output "$made" || return 1
+    printf 'not a real backup\n' >"$copied"
+    number=$(app backup list | awk -v f="$made" '$NF == f { print $1 }')
+    [[ $number =~ ^[0-9]+$ ]] || return 1
+    if app backup delete "$number"; then return 1; fi
+    test -f "$made" || return 1
+    output_has "Backup deleted" app backup delete "$number" --yes || return 1
+    ! test -e "$made" || return 1
+    number=$(app backup list | awk -v f="$copied" '$NF == f { print $1 }')
+    [[ $number =~ ^[0-9]+$ ]] || return 1
+    if app backup delete "$number" --yes; then status=1; fi
+    test -f "$copied" || status=1
+    rm -f "$copied"
+    return "$status"
+}
+
 # A backup made when the server had its VPN only, restored now that it also
 # has a seedbox: refused before anything is replaced
 restore_missing_part_test() {
@@ -1161,6 +1181,7 @@ phase2() {
     check "weekly backup: run by the timer, only the last 4 kept" backup_auto_test
     check_fails "weekly backup off without --yes nor terminal: refused" app backup auto off
     check "weekly backup still on" systemctl is-enabled --quiet seedtunnel-backup.timer
+    check "my backups: numbered, deleted by number with --yes, a copied one left alone" backup_delete_test
     cp "$(ls -1t /var/backups/seedtunnel/*-auto.tar.gz.enc | head -n 1)" "$W/backup.enc"
 
     step "Removal, then restore"

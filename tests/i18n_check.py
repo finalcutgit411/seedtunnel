@@ -4,7 +4,8 @@
 
 Every English message written in the code (first argument of the functions
 that translate: t, say, section, ok, warn, err, die, run, unit_ensure_on,
-log_run, log_title, confirm, doctor_*; second argument of ask) must have its translation in
+log_run, log_title, confirm, doctor_*; second argument of ask, ask_back
+and backup_ask_number) must have its translation in
 lang/fr.txt, not empty, with the same placeholders (%s, %d…) in the same
 order. A message or a translation may only hold %s, %d (with a width, like
 %-10s) or %%: any other « % » would be read by printf (« 100 % » too).
@@ -28,7 +29,7 @@ FUNCTIONS = r"(?:t|say|section|ok|warn|err|die|run|log_run|log_title|unit_ensure
 LITERAL = r"""('[^']*'|"(?:[^"\\]|\\.)*")"""
 # lookahead: calls inside other calls are found too
 CALL = re.compile(r"(?<![\w-])" + FUNCTIONS + r"\s+(?=" + LITERAL + ")")
-ASK = re.compile(r"(?<![\w-])ask(?:_back)?\s+[A-Za-z_]+\s+(?=" + LITERAL + ")")
+ASK = re.compile(r"(?<![\w-])(?:ask(?:_back)?|backup_ask_number)\s+[A-Za-z_]+\s+(?=" + LITERAL + ")")
 TEXT_CALL = re.compile(r"(?<![\w-])text\s+([a-z_]+)")
 PLACEHOLDER = re.compile(r"%[-0-9.]*[sd]")
 # every « % » and what follows it: allowed if group 1 matched
