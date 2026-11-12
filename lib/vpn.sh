@@ -501,7 +501,7 @@ vpn_show_client() {
     fi
     if [[ ${2-} != created ]]; then
         echo
-        vpn_client_card "$name" info "$(t 'Client "%s"' "$name")"
+        vpn_client_card "$name" good "$(t 'Client "%s"' "$name")"
         pause_next
     fi
     vpn_qr_screen "$name"
@@ -777,7 +777,7 @@ vpn_ask_settings() {
     ui_field_add Port "$port"
     ui_field_add DNS "$(vpn_dns_label "$VPN_DNS")"
     ui_field_add "$(t 'Way out')" "$(t 'interface %s' "${VPN_OUT_INTERFACE:-?}")"
-    ui_box_fields info "$(t 'Summary')"
+    ui_box_fields good "$(t 'Summary')"
     echo
     # a new port restarts the VPN: every tunnel is cut, this session too if it
     # goes through the VPN (« no » by default then)

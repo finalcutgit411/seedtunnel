@@ -506,7 +506,7 @@ backup_auto_enable() {
     ui_field_add "$(t 'When')" "$(t 'every week, by itself (encrypted)')"
     ui_field_add "$(t 'Kept')" "$(t 'the last %s, in %s' "$BACKUP_KEEP" "$C_CYAN$BACKUP_DIR$C_RESET")"
     ui_field_add Passphrase "$(t 'saved on the server (root only), so that it runs alone: write it down somewhere else too')"
-    ui_box_fields info "$(t 'Weekly backup')"
+    ui_box_fields good "$(t 'Weekly backup')"
     echo
     if [[ -n $(backup_latest) ]]; then
         warn 'The backups already made keep the passphrase they were made with: the new one only applies to the next ones.'

@@ -332,12 +332,12 @@ ui_crumbs() {
 }
 
 # --- States -----------------------------------------------------------------------
-# ui_level LEVEL → UI_COLOR and UI_MARK: ok (green), info (pink), warn
-# (yellow), bad (red), off (grey, empty circle)
+# ui_level LEVEL → UI_COLOR and UI_MARK: ok and good (green), info (pink),
+# warn (yellow), bad (red), off (grey, empty circle)
 ui_level() {
     UI_MARK="●"
     case $1 in
-        ok) UI_COLOR=$C_GREEN ;;
+        ok | good) UI_COLOR=$C_GREEN ;;
         info) UI_COLOR=$C_BRAND ;;
         warn) UI_COLOR=$C_YELLOW ;;
         bad) UI_COLOR=$C_RED ;;
@@ -708,7 +708,8 @@ ui_table() {
 }
 
 # ui_box LEVEL TITLE [LINE…] — framed message: bad (red, « ! »), ok (green,
-# « ✔ »), warn (yellow), info (pink). Long lines are wrapped.
+# « ✔ »: it is done), good (green, « ● »: a card, a summary before an
+# action), warn (yellow), info (pink). Long lines are wrapped.
 ui_box() {
     local level=$1 title=$2 mark line part width inner
     shift 2

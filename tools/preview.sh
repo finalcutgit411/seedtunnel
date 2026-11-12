@@ -264,6 +264,15 @@ screen_add() {
     end_next
 }
 
+# VPN › Show a client (vpn_show_client): its card, before its QR code
+screen_client_card() {
+    top client-card
+    ui_crumbs VPN "$(t 'Show a client (QR code, file)')"
+    echo
+    example_client vpn_client_card phone2 good "$(t 'Client "%s"' phone2)"
+    end_next
+}
+
 # example_client COMMAND [ARGUMENTS…] — COMMAND run with the client of the
 # examples, phone2, in a folder of its own (its file made as in the menu,
 # vpn_generate_client_conf); its path shown as on a server
@@ -339,7 +348,7 @@ screen_vpn_address() {
     ui_field_add Port "51820 → ${C_BOLD}51821/udp$C_RESET"
     ui_field_add DNS "Quad9 · $VPN_DNS"
     ui_field_add "$(t 'Way out')" "$(t 'interface %s' eth0)"
-    ui_box_fields info "$(t 'Summary')"
+    ui_box_fields good "$(t 'Summary')"
     echo
     said_warn 'New port: the VPN restarts and every client is disconnected until it imports its new configuration.'
     echo
@@ -514,7 +523,7 @@ screen_weekly() {
     ui_field_add "$(t 'When')" "$(t 'every week, by itself (encrypted)')"
     ui_field_add "$(t 'Kept')" "$(t 'the last %s, in %s' "$BACKUP_KEEP" "$C_CYAN$BACKUP_DIR$C_RESET")"
     ui_field_add Passphrase "$(t 'saved on the server (root only), so that it runs alone: write it down somewhere else too')"
-    ui_box_fields info "$(t 'Weekly backup')"
+    ui_box_fields good "$(t 'Weekly backup')"
     echo
     said_warn 'The backups already made keep the passphrase they were made with: the new one only applies to the next ones.'
     echo
@@ -610,6 +619,7 @@ if ((ALL)); then
     screen_dns
     screen_vpn_address
     screen_add
+    screen_client_card
     screen_client_qr
     screen_client
     screen_danger
@@ -635,7 +645,7 @@ ui_print "  $(pv 'Enter: next screen · Q: quit' 'Entrée : écran suivant · Q 
 echo
 IFS= read -r -p "  $(pv 'Press Enter to start…' 'Appuyez sur Entrée pour commencer…') " CHOICE || exit 130
 for screen in screen_home screen_home_narrow screen_home_manual screen_vpn screen_clients screen_dns screen_vpn_address screen_add \
-    screen_client_qr screen_client screen_danger screen_seedbox screen_credentials screen_sftp screen_keys screen_key_add screen_bans screen_backup screen_weekly screen_restore screen_terminal; do
+    screen_client_card screen_client_qr screen_client screen_danger screen_seedbox screen_credentials screen_sftp screen_keys screen_key_add screen_bans screen_backup screen_weekly screen_restore screen_terminal; do
     if [[ $screen == screen_home_narrow && -n ${UI_COLUMNS-} ]]; then continue; fi
     "$screen" || break
 done

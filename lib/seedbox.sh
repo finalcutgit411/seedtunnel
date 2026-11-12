@@ -1295,10 +1295,18 @@ EOF
 # time. Protocol not written: SFTP is the default. Windows line ends, as in
 # the files WinSCP writes. The name of the site is escaped as WinSCP does it
 # (« %20 » for a space).
+# With it, the fingerprint of the server: WinSCP imports it with the site into
+# the keys it knows, and accepts a fingerprint there instead of a whole key.
+# It then checks the server by itself, without a question at the first
+# connection (as with the address of winscp_url).
 winscp_generate_site() {
-    local name="Seedbox $SEEDBOX_DOMAIN"
+    local port=$1 name="Seedbox $SEEDBOX_DOMAIN" fingerprint
+    fingerprint=$(host_key_fingerprint_url)
     printf '[Sessions\\%s]\r\nHostName=%s\r\nPortNumber=%s\r\nUserName=%s\r\n' \
-        "${name// /%20}" "$SEEDBOX_DOMAIN" "$1" "$SEEDBOX_USER"
+        "${name// /%20}" "$SEEDBOX_DOMAIN" "$port" "$SEEDBOX_USER"
+    if [[ -n $fingerprint ]]; then
+        printf '\r\n[SshHostKeys]\r\nssh-ed25519@%s:%s=%s\r\n' "$port" "$SEEDBOX_DOMAIN" "${fingerprint%%=*}"
+    fi
 }
 
 # sftp_profile_share winscp|filezilla PORT — link to the site to import into
@@ -1318,6 +1326,9 @@ sftp_profile_share() {
             "$(text share_steps_filezilla)" "$(t 'The file holds no password.')"
     fi
     rm -f "$tmp"
+    if [[ $SEEDBOX_SFTP_PASSWORD == no ]]; then
+        warn 'This server accepts SSH keys only: once the site is imported, give it your private key (steps on the page).'
+    fi
 }
 
 # SFTP connection settings, and the address for WinSCP. On request (« winscp »
@@ -1359,7 +1370,7 @@ seedbox_sftp_card() {
     ui_field_add Port "$C_CYAN$1$C_RESET"
     ui_field_add "$(t 'User')" "$C_CYAN$SEEDBOX_USER$C_RESET$3"
     if [[ -n $2 ]]; then ui_field_add "$(t 'Fingerprint')" "$2"; fi
-    ui_box_fields info "$(t 'Settings of the connection')"
+    ui_box_fields good "$(t 'Settings of the connection')"
 }
 
 # In the menus: the settings, the profiles to import into WinSCP or FileZilla,

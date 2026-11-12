@@ -149,16 +149,18 @@ text_en_share_steps_winscp() {
 EOF
     if [[ $SEEDBOX_SFTP_PASSWORD == no ]]; then
         cat <<EOF
-<li>The site « Seedbox $SEEDBOX_DOMAIN » shows in the list. This server accepts SSH keys only: edit the site → « Advanced… » → « SSH » → « Authentication » → « Private key file »: choose your key → « OK » → « Save ».</li>
+<li>The site « Seedbox $SEEDBOX_DOMAIN » shows in the list. One step is left: this server accepts SSH keys only, so give the site your private key: edit the site → « Advanced… » → « SSH » → « Authentication » → « Private key file »: choose your key → « OK » → « Save ». No key yet? Menu Seedbox › SFTP connection, choice 3.</li>
 EOF
     else
         cat <<EOF
 <li>The site « Seedbox $SEEDBOX_DOMAIN » shows in the list. The password is asked when connecting.</li>
 EOF
     fi
-    cat <<EOF
-<li>At the first connection, the fingerprint of the server must be: <code>$fingerprint</code></li>
+    if [[ -n $fingerprint ]]; then
+        cat <<EOF
+<li>The fingerprint of the server is in the file: WinSCP checks by itself that it is really your server, without a question at the first connection.</li>
 EOF
+    fi
 }
 
 text_en_share_steps_filezilla() {
@@ -167,7 +169,7 @@ text_en_share_steps_filezilla() {
 EOF
     if [[ $SEEDBOX_SFTP_PASSWORD == no ]]; then
         cat <<EOF
-<li>The site « Seedbox $SEEDBOX_DOMAIN » shows in the Site Manager. This server accepts SSH keys only: « Logon Type »: « Key file » → choose your key.</li>
+<li>The site « Seedbox $SEEDBOX_DOMAIN » shows in the Site Manager. One step is left: this server accepts SSH keys only, so give the site your private key: « Logon Type »: « Key file » → choose your key. No key yet? Menu Seedbox › SFTP connection, choice 3.</li>
 EOF
     else
         cat <<EOF

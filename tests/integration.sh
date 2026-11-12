@@ -620,6 +620,11 @@ sftp_config_test() {
         printf '%s\n' "$ini"
         return 1
     }
+    # the fingerprint of the server, for WinSCP to check it by itself
+    [[ $ini == *"[SshHostKeys]"*"ssh-ed25519@22:127.0.0.1=ssh-ed25519-${fingerprint%%=*}"* ]] || {
+        printf '%s\n' "$ini"
+        return 1
+    }
 }
 
 # Key created by seedtunnel for WinSCP: downloaded once as a .ppk file, it opens

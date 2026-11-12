@@ -6232,20 +6232,25 @@ seedbox_login_and_sftp_screens() (
 )
 
 # The site to import into WinSCP: an INI file of WinSCP with this site only
-# (name escaped as WinSCP does it, Windows line ends), and no password
+# (name escaped as WinSCP does it, Windows line ends), no password, and the
+# fingerprint of the server among the keys WinSCP knows (without the « = »)
 winscp_profile_content() (
     load
     local out expected
     SEEDBOX_DOMAIN=seed.example.net
     SEEDBOX_USER=lancelot
+    host_key_fingerprint_url() { echo "ssh-ed25519-gAp02kYYmtWjmhPTLe83f2mfoeAcy-__GMfI045u0U0="; }
     out=$(winscp_generate_site 2222 | od -c | tr -s ' ')
     winscp_generate_site 2222 >"$WORK/winscp.ini"
-    expected=$(printf '[Sessions\\Seedbox%%20seed.example.net]\r\nHostName=seed.example.net\r\nPortNumber=2222\r\nUserName=lancelot\r\n')
+    expected=$(printf '[Sessions\\Seedbox%%20seed.example.net]\r\nHostName=seed.example.net\r\nPortNumber=2222\r\nUserName=lancelot\r\n\r\n[SshHostKeys]\r\nssh-ed25519@2222:seed.example.net=ssh-ed25519-gAp02kYYmtWjmhPTLe83f2mfoeAcy-__GMfI045u0U0\r\n')
     [[ $(cat "$WORK/winscp.ini") == "$expected" ]] || {
         printf '%s\n' "$out"
         return 1
     }
-    [[ $(grep -c $'\r$' "$WORK/winscp.ini") == 4 ]] && ! grep -qi password "$WORK/winscp.ini"
+    [[ $(grep -c $'\r$' "$WORK/winscp.ini") == 7 ]] && ! grep -qi password "$WORK/winscp.ini" || return 1
+    # key of the server not found: the site alone
+    host_key_fingerprint_url() { :; }
+    [[ $(winscp_generate_site 22) != *SshHostKeys* ]]
 )
 
 # The steps of the download pages: how to import the profile into WinSCP or
@@ -6257,15 +6262,39 @@ sftp_profile_steps() (
     fingerprint="SHA256:x ED25519"
     SEEDBOX_SFTP_PASSWORD=yes
     out=$(text share_steps_winscp)
-    [[ $out == *"« Tools » → « Import Sites… »"*"« INI file »"*"The password is asked when connecting."*"SHA256:x ED25519"* ]] || return 1
+    [[ $out == *"« Tools » → « Import Sites… »"*"« INI file »"*"The password is asked when connecting."*"WinSCP checks by itself"* ]] || return 1
+    out=$(text share_steps_filezilla)
+    [[ $out == *"The password is asked when connecting."*"must be: <code>SHA256:x ED25519</code>"* ]] || return 1
     SEEDBOX_SFTP_PASSWORD=no
     out=$(text share_steps_winscp)
-    [[ $out == *"SSH keys only"*"« Private key file »"* && $out != *"The password is asked"* ]] || return 1
+    [[ $out == *"One step is left"*"give the site your private key"*"« Private key file »"*"choice 3"* && $out != *"The password is asked"* ]] || return 1
     out=$(text share_steps_filezilla)
-    [[ $out == *"SSH keys only"*"« Key file »"* && $out != *"The password is asked"* ]] || return 1
+    [[ $out == *"One step is left"*"« Key file »"* && $out != *"The password is asked"* ]] || return 1
+    # fingerprint not known: not said to be in the file
+    fingerprint=""
+    [[ $(text share_steps_winscp) != *"in the file"* ]] || return 1
+    fingerprint="SHA256:x ED25519"
     i18n_load fr
     out=$(text share_steps_winscp)
-    [[ $out == *"« Outils » → « Importer des sites… »"*"« Fichier INI »"*"Ce serveur n'accepte que les clés SSH"* ]]
+    [[ $out == *"« Outils » → « Importer des sites… »"*"« Fichier INI »"*"Il reste une étape"*"donnez donc votre clé privée au site"* ]]
+)
+
+# Cards and summaries before an action: green with « ● »; « ✔ » stays for
+# what is done
+ui_box_good_and_ok() (
+    load
+    local out
+    C_GREEN=$'\e[1;32m' C_BRAND=$'\e[1;35m' C_RESET=$'\e[0m' C_BOLD=$'\e[1m'
+    UI_COLUMNS=80
+    ui_width
+    ui_field_add Port 51820
+    out=$(ui_box_fields good Summary)
+    [[ $(sed -n 1p <<<"$out") == "  $C_GREEN┌─ $C_BOLD● Summary"* ]] || return 1
+    ui_field_add Port 51820
+    out=$(ui_box_fields ok Done)
+    [[ $(sed -n 1p <<<"$out") == "  $C_GREEN┌─ $C_BOLD✔ Done"* ]] || return 1
+    # every card or summary shown before an action is « good »
+    ! grep -n 'ui_box_fields info\|vpn_client_card "$name" info' "$ROOT"/lib/*.sh
 )
 
 # Choices with a note: beside the labels when there is room, under them on a
@@ -6352,6 +6381,7 @@ check "WinSCP / FileZilla profiles: steps of the page, SSH keys only" sftp_profi
 check "choices with a note: beside or under, nothing cut (80, 40, 30)" ui_choices_layout
 check "SSH keys of the list: two short lines in the menus" sftp_key_list_lines
 check "public key asked: a private key pasted is named, not kept" sftp_private_key_pasted
+check "frames: cards and summaries green with « ● », « ✔ » when done" ui_box_good_and_ok
 check "domain menu: same name, certificate kept without a new request" domain_change_same_name_keeps_certificate
 check "domain menu: warning and confirmation before replacing the certificate" domain_change_warns_before_replacing_certificate
 check "domain menu: B (or Q) goes back when the name points elsewhere" domain_change_back_when_name_points_elsewhere

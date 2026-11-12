@@ -148,16 +148,18 @@ text_fr_share_steps_winscp() {
 EOF
     if [[ $SEEDBOX_SFTP_PASSWORD == no ]]; then
         cat <<EOF
-<li>Le site « Seedbox $SEEDBOX_DOMAIN » apparaît dans la liste. Ce serveur n'accepte que les clés SSH : modifiez le site → « Avancé… » → « SSH » → « Authentification » → « Fichier de clé privée » : choisissez votre clé → « OK » → « Enregistrer ».</li>
+<li>Le site « Seedbox $SEEDBOX_DOMAIN » apparaît dans la liste. Il reste une étape : ce serveur n'accepte que les clés SSH, donnez donc votre clé privée au site : modifiez le site → « Avancé… » → « SSH » → « Authentification » → « Fichier de clé privée » : choisissez votre clé → « OK » → « Enregistrer ». Pas encore de clé ? Menu Seedbox › Connexion SFTP, choix 3.</li>
 EOF
     else
         cat <<EOF
 <li>Le site « Seedbox $SEEDBOX_DOMAIN » apparaît dans la liste. Le mot de passe est demandé à la connexion.</li>
 EOF
     fi
-    cat <<EOF
-<li>À la première connexion, l'empreinte du serveur doit être : <code>$fingerprint</code></li>
+    if [[ -n $fingerprint ]]; then
+        cat <<EOF
+<li>L'empreinte du serveur est dans le fichier : WinSCP vérifie tout seul que c'est bien votre serveur, sans question à la première connexion.</li>
 EOF
+    fi
 }
 
 text_fr_share_steps_filezilla() {
@@ -166,7 +168,7 @@ text_fr_share_steps_filezilla() {
 EOF
     if [[ $SEEDBOX_SFTP_PASSWORD == no ]]; then
         cat <<EOF
-<li>Le site « Seedbox $SEEDBOX_DOMAIN » apparaît dans le gestionnaire de sites. Ce serveur n'accepte que les clés SSH : « Type d'authentification » : « Fichier de clé » → choisissez votre clé.</li>
+<li>Le site « Seedbox $SEEDBOX_DOMAIN » apparaît dans le gestionnaire de sites. Il reste une étape : ce serveur n'accepte que les clés SSH, donnez donc votre clé privée au site : « Type d'authentification » : « Fichier de clé » → choisissez votre clé. Pas encore de clé ? Menu Seedbox › Connexion SFTP, choix 3.</li>
 EOF
     else
         cat <<EOF

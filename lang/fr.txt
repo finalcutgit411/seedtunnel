@@ -2432,3 +2432,6 @@ fr: Ceci est une clé privée : elle reste sur votre ordinateur. Collez la clé 
 
 en: Keep the file in a folder you keep (not in Downloads).
 fr: Gardez le fichier dans un dossier que vous conservez (pas dans Téléchargements).
+
+en: This server accepts SSH keys only: once the site is imported, give it your private key (steps on the page).
+fr: Ce serveur n'accepte que les clés SSH : une fois le site importé, donnez-lui votre clé privée (étapes sur la page).
