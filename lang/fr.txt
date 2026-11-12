@@ -54,8 +54,8 @@ fr: Ce serveur a un VPN, la sauvegarde n'en a pas : il continuerait à tourner s
 en: This server has a seedbox, the backup has none: it would keep running without seedtunnel knowing it. Remove it first (seedtunnel seedbox uninstall, the downloads are kept), or restore on a new server.
 fr: Ce serveur a une seedbox, la sauvegarde n'en a pas : elle continuerait à tourner sans que seedtunnel le sache. Supprimez-la d'abord (seedtunnel seedbox uninstall, les téléchargements sont gardés), ou restaurez sur un serveur neuf.
 
-en: The seedbox of this server uses the account %s, the backup the account %s: %s would stay without its SFTP restrictions. Rename it first (seedtunnel seedbox password --user %s), or remove the seedbox first.
-fr: La seedbox de ce serveur utilise le compte %s, la sauvegarde le compte %s : %s resterait sans ses restrictions SFTP. Renommez-le d'abord (seedtunnel seedbox password --user %s), ou supprimez d'abord la seedbox.
+en: The SFTP account %s takes back the name of the backup: %s.
+fr: Le compte SFTP %s reprend le nom de la sauvegarde : %s.
 
 en: The account %s of the backup already exists on this server: restoring would change its password and shut it in SFTP. Restore on a server without this account.
 fr: Le compte %s de la sauvegarde existe déjà sur ce serveur : la restauration changerait son mot de passe et l'enfermerait en SFTP. Restaurez sur un serveur sans ce compte.

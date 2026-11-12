@@ -386,6 +386,23 @@ torrent_names() {
         | jq -r '.arguments.torrents[].name'
 }
 
+# Seen on a real server: the SFTP account renamed since the backup. The
+# restore gives it back the name of the backup, without a step by hand: the
+# web interface and the SFTP rule under that name, the other name gone,
+# nothing left suspended
+restore_renamed_account_test() {
+    local other=st-renamed-since
+    printf '%s\n' "$PW2" | env PATH=/usr/local/bin:/usr/bin:/bin "$APP" seedbox password --user "$other" || return 1
+    id "$other" &>/dev/null || return 1
+    output_has "The SFTP account $other takes back the name of the backup: $SBU." \
+        app restore "$W/backup.enc" --passphrase-file "$W/passphrase" --yes || return 1
+    id "$SBU" &>/dev/null && ! id "$other" &>/dev/null && [[ -z $(getent shadow "$SBU" | cut -d: -f8) ]] || return 1
+    ! test -e /etc/seedtunnel.restore-unfinished || return 1
+    seedtunnel_function sshd_settings -C "user=$SBU,host=localhost,addr=127.0.0.1" >"$W/rule.out"
+    grep -q "^forcecommand internal-sftp" "$W/rule.out" && grep -qx "chrootdirectory $DATA" "$W/rule.out" || return 1
+    http_is 409 /transmission/rpc -u "$SBU:$PW2"
+}
+
 # The settings replaced by the restores above are said by the diagnostics,
 # with the command to delete them; once deleted, no longer said
 restore_leftovers_test() {
@@ -1169,6 +1186,7 @@ phase2() {
     check "older backup restored: the weekly backup keeps its passphrase" restore_older_backup_test
     check "restore without a file and without a terminal: the usage, nothing done" output_has "Usage: seedtunnel restore FILE" app restore
     check "magnet links of a backup: through watch/ (Transmission 4), to add by hand (Transmission 3)" restore_magnet_test
+    check "SFTP account renamed since the backup: the restore gives it back its name, the other one gone" restore_renamed_account_test
     check "doctor: settings replaced by a restore said, no longer once deleted" restore_leftovers_test
 
     step "Removal"

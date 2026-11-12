@@ -45,6 +45,10 @@ BACKUP_TMP_DIR=""
 # during a restore, once the settings in place are replaced: where they went
 # (« none » if there were none)
 RESTORE_PREVIOUS=""
+# during a restore: the SFTP account of this server that takes the name of the
+# one in the backup (renamed since the backup), and that name
+RESTORE_RENAME_FROM=""
+RESTORE_RENAME_TO=""
 # magnet links of the backup that Transmission 3 cannot take from watch/
 RESTORE_MAGNETS_FILE="/root/seedtunnel-magnets.txt"
 
@@ -80,6 +84,8 @@ restore_backup_setting() {
 # it running without seedtunnel knowing it, or take over an account.
 restore_check_server() {
     local settings="$1/etc/seedtunnel" user
+    RESTORE_RENAME_FROM=""
+    RESTORE_RENAME_TO=""
     if vpn_installed && [[ ! -f $settings/vpn.conf ]]; then
         die 'This server has a VPN, the backup has none: it would keep running without seedtunnel knowing it. Remove it first (seedtunnel vpn uninstall), or restore on a new server.'
     fi
@@ -89,11 +95,20 @@ restore_check_server() {
     [[ -f $settings/seedbox.conf ]] || return 0
     user=$(restore_backup_setting "$settings/seedbox.conf" SEEDBOX_USER)
     if seedbox_installed; then
-        # the SSH rule follows the account of the backup: the other one would
-        # stay, with its password, without its SFTP restrictions
+        # the account renamed since the backup takes back the name of the
+        # backup (in restore_main, once the way back knows it): the SSH rule
+        # follows that name, and the account must not stay under the other
+        # one without its SFTP restrictions. Never an account of the system
+        # that is not the one of the seedbox
         if [[ $user != "$SEEDBOX_USER" ]]; then
-            die 'The seedbox of this server uses the account %s, the backup the account %s: %s would stay without its SFTP restrictions. Rename it first (seedtunnel seedbox password --user %s), or remove the seedbox first.' \
-                "$SEEDBOX_USER" "$user" "$SEEDBOX_USER" "$user"
+            if id -u "$user" &>/dev/null; then
+                die 'The account %s of the backup already exists on this server: restoring would change its password and shut it in SFTP. Restore on a server without this account.' "$user"
+            fi
+            # (an account already gone: seedbox_apply makes the one of the backup)
+            if id -u "$SEEDBOX_USER" &>/dev/null; then
+                RESTORE_RENAME_FROM=$SEEDBOX_USER
+                RESTORE_RENAME_TO=$user
+            fi
         fi
     else
         # as for an installation: an account of the system is never taken over
@@ -174,10 +189,26 @@ for part in torrents resume; do
     rm -rf -- $(printf '%q' "$TRANSMISSION_STATE_DIR")/"\$part"
     if [ -d $(printf '%q' "$outside/transmission")/"\$part" ]; then cp -a -- $(printf '%q' "$outside/transmission")/"\$part" $(printf '%q' "$TRANSMISSION_STATE_DIR")/; fi
 done
+$(restore_undo_rename)
 rm -f -- $(printf '%q' "$RESTORE_MARKER")
 rm -rf -- $(printf '%q' "$outside")
 seedtunnel apply
 rm -f -- "\$0"
+EOF
+}
+
+# In the way back: the SFTP account renamed by the restore gets its name back
+# (nothing if it was not renamed, or not yet)
+restore_undo_rename() {
+    [[ -n $RESTORE_RENAME_FROM ]] || return 0
+    local from to
+    from=$(printf '%q' "$RESTORE_RENAME_FROM")
+    to=$(printf '%q' "$RESTORE_RENAME_TO")
+    cat <<EOF
+if id -u $to >/dev/null 2>&1 && ! id -u $from >/dev/null 2>&1; then
+    usermod --login $from $to
+    if getent group $to >/dev/null; then groupmod --new-name $from $to; fi
+fi
 EOF
 }
 
@@ -1183,6 +1214,10 @@ restore_main() {
     if grep -qx 'etc/seedtunnel/seedbox.conf' <<<"$list"; then say '  - the seedbox (settings, passwords, certificates)'; fi
     if grep -q '/transmission-daemon/torrents' <<<"$list"; then say '  - the list of torrents'; fi
     if grep -qx 'etc/seedtunnel/firewall.conf' <<<"$list"; then say '  - the firewall'; fi
+    if [[ -n $RESTORE_RENAME_FROM ]]; then
+        echo
+        say 'The SFTP account %s takes back the name of the backup: %s.' "$RESTORE_RENAME_FROM" "$RESTORE_RENAME_TO"
+    fi
     echo
     danger "$(t 'Restore a backup')" "$(t 'The current settings of seedtunnel are replaced by those of the backup (a copy of them is kept in /etc).')"
     if ! confirm 'Restore? The current settings of seedtunnel will be replaced' n; then
@@ -1231,6 +1266,9 @@ restore_main() {
         rm -rf "$APP_STATE_DIR"
         RESTORE_PREVIOUS=none
     fi
+    # the account renamed since the backup takes back its name, once the way
+    # back knows it; seedbox_apply below resumes it under that name
+    if [[ -n $RESTORE_RENAME_FROM ]]; then seedbox_rename_account "$RESTORE_RENAME_FROM" "$RESTORE_RENAME_TO"; fi
     # -T: into $APP_STATE_DIR itself, even if something created it again
     # meanwhile (never into $APP_STATE_DIR/seedtunnel)
     cp -aT "$BACKUP_TMP_DIR/x/etc/seedtunnel" "$APP_STATE_DIR"
@@ -1277,6 +1315,8 @@ restore_main() {
         previous=$RESTORE_PREVIOUS
     fi
     RESTORE_PREVIOUS=""
+    RESTORE_RENAME_FROM=""
+    RESTORE_RENAME_TO=""
     rm -f "$RESTORE_MARKER"
     backup_cleanup
     trap - EXIT INT TERM

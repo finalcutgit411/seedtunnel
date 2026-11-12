@@ -2887,16 +2887,41 @@ restore_refused_first() {
     grep -qF "$message" "$WORK/$name.out" && [[ ! -s $RESTORE_STEPS && -f $APP_STATE_DIR/server.conf && ! -e $RESTORE_MARKER ]]
 }
 
-restore_refuses_other_sftp_account() (
+# The SFTP account of this server (lancelot) is not the one of the backup
+# (perceval): said before the question, renamed after it, before the seedbox
+# is set up again. Another account of the system: refused first.
+restore_renames_other_sftp_account() (
     restore_archive_load account
-    printf 'SEEDBOX_USER=perceval\n' >"$RESTORE_ROOT/etc/seedtunnel/seedbox.conf"
+    printf 'SEEDBOX_USER=perceval-test-free\n' >"$RESTORE_ROOT/etc/seedtunnel/seedbox.conf"
     restore_archive_make account
     restore_record_steps account
     # this server: a VPN, and a seedbox with the account lancelot
     vpn_installed() { return 0; }
     seedbox_installed() { return 0; }
+    seedbox_rename_account() { echo "rename $1 $2" >>"$RESTORE_STEPS"; }
+    # the account lancelot exists on this server
+    id() { [[ ${*: -1} == lancelot ]] || command id "$@"; }
     SEEDBOX_USER=lancelot
-    restore_refused_first account "uses the account lancelot, the backup the account perceval"
+    printf 'SERVER=settings\n' >"$APP_STATE_DIR/server.conf"
+    restore_main "$WORK/account.enc" >"$WORK/account.out" 2>&1 || {
+        cat "$WORK/account.out"
+        return 1
+    }
+    cat "$WORK/account.out" "$RESTORE_STEPS"
+    grep -qF "The SFTP account lancelot takes back the name of the backup: perceval-test-free." "$WORK/account.out" \
+        && [[ $(grep -n "takes back the name" "$WORK/account.out" | cut -d: -f1) -lt $(grep -n "Restore finished" "$WORK/account.out" | cut -d: -f1) ]] \
+        && [[ $(sed -n 1p "$RESTORE_STEPS") == asked && $(sed -n 2p "$RESTORE_STEPS") == "rename lancelot perceval-test-free" ]] \
+        && grep -qx seedbox "$RESTORE_STEPS" && [[ ! -e $RESTORE_MARKER ]] || return 1
+    # the name of the backup is another account of this server (here, the one
+    # running the tests): refused before the question, nothing changed
+    restore_archive_load taken
+    printf 'SEEDBOX_USER=%s\n' "$(id -un)" >"$RESTORE_ROOT/etc/seedtunnel/seedbox.conf"
+    restore_archive_make taken
+    restore_record_steps taken
+    vpn_installed() { return 0; }
+    seedbox_installed() { return 0; }
+    SEEDBOX_USER=lancelot
+    restore_refused_first taken "already exists on this server"
 )
 
 restore_refuses_existing_account() (
@@ -5640,6 +5665,81 @@ restore_undo_puts_everything_back() (
     grep -q "seedtunnel apply" "$base/calls"
 )
 
+# Seen on a real server: the SFTP account renamed since the backup. The
+# restore gives it back the name of the backup (said before the question),
+# never takes another account of the system, and its way back gives the old
+# name back
+restore_takes_back_account_name() (
+    load
+    local root="$WORK/rename-root" base="$WORK/rename" previous
+    rm -rf "$root" "$base"
+    mkdir -p "$root/etc/seedtunnel" "$base/bin" "$base/state" "$base/keys"
+    (
+        SEEDBOX_USER=lancelot
+        state_write "$root/etc/seedtunnel/seedbox.conf" SEEDBOX_USER
+    )
+    vpn_installed() { return 1; }
+    seedbox_installed() { return 0; }
+    # this server: arthur only
+    SEEDBOX_USER=arthur
+    id() { [[ ${*: -1} == arthur ]]; }
+    restore_check_server "$root" || return 1
+    [[ $RESTORE_RENAME_FROM == arthur && $RESTORE_RENAME_TO == lancelot ]] || return 1
+    # the same account: nothing to rename
+    SEEDBOX_USER=lancelot
+    id() { [[ ${*: -1} == lancelot ]]; }
+    restore_check_server "$root" || return 1
+    [[ -z $RESTORE_RENAME_FROM && -z $RESTORE_RENAME_TO ]] || return 1
+    # the account of this server is already gone: nothing to rename (the
+    # seedbox makes the one of the backup)
+    SEEDBOX_USER=arthur
+    id() { return 1; }
+    restore_check_server "$root" || return 1
+    [[ -z $RESTORE_RENAME_FROM && -z $RESTORE_RENAME_TO ]] || return 1
+    # lancelot is another account of this server: refused, nothing planned
+    SEEDBOX_USER=arthur
+    id() { return 0; }
+    if (restore_check_server "$root") >"$WORK/rename.out" 2>&1; then return 1; fi
+    grep -q "The account lancelot of the backup already exists on this server" "$WORK/rename.out" || return 1
+    # said before the question of the restore
+    i18n_load fr
+    [[ $(t 'The SFTP account %s takes back the name of the backup: %s.' arthur lancelot) == "Le compte SFTP arthur reprend le nom de la sauvegarde : lancelot." ]] || return 1
+    i18n_load en
+    # the way back: the old name comes back, then « seedtunnel apply »
+    APP_STATE_DIR="$base/state"
+    RESTORE_MARKER="$base/state.restore-unfinished"
+    SFTP_KEYS_DIR="$base/keys"
+    LETSENCRYPT_ROOT="$base/le"
+    TRANSMISSION_STATE_DIR="$base/tr"
+    echo "SEEDBOX_USER=arthur" >"$APP_STATE_DIR/seedbox.conf"
+    echo "key of arthur" >"$SFTP_KEYS_DIR/arthur"
+    previous="$APP_STATE_DIR.before-restore-20261112-152000"
+    echo "$previous" >"$RESTORE_MARKER"
+    mv "$APP_STATE_DIR" "$previous"
+    RESTORE_RENAME_FROM=arthur
+    RESTORE_RENAME_TO=lancelot
+    restore_keep_outside "$previous" || return 1
+    bash -n "$previous.undo" || return 1
+    # renamed, then the restore stops
+    mkdir -p "$APP_STATE_DIR"
+    mv "$SFTP_KEYS_DIR/arthur" "$SFTP_KEYS_DIR/lancelot"
+    printf '#!/bin/sh\necho "$(basename "$0") $*" >>%s\n' "$base/calls" >"$base/bin/systemctl"
+    for command in seedtunnel usermod groupmod; do cp "$base/bin/systemctl" "$base/bin/$command"; done
+    # lancelot exists, arthur no longer; its group too
+    printf '#!/bin/sh\n[ "$2" = lancelot ]\n' >"$base/bin/id"
+    printf '#!/bin/sh\n[ "$2" = lancelot ]\n' >"$base/bin/getent"
+    chmod 755 "$base/bin/"*
+    PATH="$base/bin:$PATH" bash "$previous.undo" || return 1
+    cat "$base/calls"
+    grep -qx "usermod --login arthur lancelot" "$base/calls" && grep -qx "groupmod --new-name arthur lancelot" "$base/calls" \
+        && [[ $(sed -n '$p' "$base/calls") == "seedtunnel apply" ]] \
+        && [[ $(<"$SFTP_KEYS_DIR/arthur") == "key of arthur" && ! -e $SFTP_KEYS_DIR/lancelot ]] || return 1
+    # without a rename, the way back touches no account
+    RESTORE_RENAME_FROM=""
+    RESTORE_RENAME_TO=""
+    ! restore_undo_script "$previous" | grep -q "usermod\|groupmod"
+)
+
 # --- ufw on: the restore says it before the choice of the file --------------------
 
 restore_refused_with_ufw_first() (
@@ -6681,7 +6781,7 @@ check "seedbox: the home page asks for the password first" nginx_home_asks_passw
 check "dates: today, yesterday, N days ago (EN, FR)" backup_dates_in_words
 check "restore of an older backup: the weekly backup keeps its passphrase" restore_keeps_weekly_passphrase
 check "restore: weekly backup without any passphrase → turned off, said" restore_weekly_without_passphrase_off
-check "restore: another SFTP account than this server → refused first" restore_refuses_other_sftp_account
+check "restore: another SFTP account than this server → renamed after the question; another account of the system → refused first" restore_renames_other_sftp_account
 check "restore: account already on this server, or web ports taken → refused" restore_refuses_existing_account
 check "restore: VPN or seedbox of this server missing from the backup → refused" restore_refuses_missing_parts
 check "restore: backup without firewall → the firewall of this server stays on" restore_keeps_firewall
@@ -6798,6 +6898,7 @@ check "restore: the last download of a backup and the start of the weekly backup
 check "report: domains and SFTP accounts used before, administrators (also needrestart of Ubuntu 26.04), backups of another server replaced" report_replaces_former_names
 check "report: the SFTP account logged in is not an administrator, the DNS of the menu kept" report_sftp_account_and_dns
 check "restore cut short: the way back puts back settings, SSH keys, certificate and torrents" restore_undo_puts_everything_back
+check "restore: the SFTP account renamed since the backup takes back its name, never another account, back on the way back" restore_takes_back_account_name
 check "restore: the settings replaced kept aside only if there is something to go back to, how to delete them said" restore_keeps_aside_only_settings
 check "diagnostics: settings replaced by a finished restore said, with the command to delete them" doctor_reports_restore_leftovers
 check "restore without a file: the list of the backups in a terminal, the usage without" restore_command_without_file
