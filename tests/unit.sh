@@ -4372,6 +4372,77 @@ denied_page_discreet() (
     grep -q "Accès refusé" "$page" && grep -q "Access denied" "$page" && ! grep -qE '^web( |/)' "$ROOT/.gitattributes"
 )
 
+# --- pages of the one-time links ----------------------------------------------
+
+# The page of a link, in the colors of seedtunnel: the button, single use, the
+# numbered steps (only if there are some), the note; nothing fetched elsewhere
+share_page_in_colors() (
+    load
+    local page
+    page=$(share_generate_page phone.conf 'VPN configuration "phone"' "<li>One</li>
+<li>Two</li>" "Delete it once imported.")
+    [[ $page == *'<html lang="en">'* && $page == *'<title>VPN configuration "phone"</title>'* &&
+        $page == *'<a class="button" href="phone.conf" download>Download phone.conf</a>'* &&
+        $page == *'File: <code>phone.conf</code>'* &&
+        $page == *"One time only · valid for $((SHARE_LIFETIME / 60)) minutes"* &&
+        $page == *'<h2>Next</h2>'* && $page == *'<li>Two</li>'* &&
+        $page == *'Delete it once imported. Opening this page does not use the link up'* &&
+        $page == *'<b>Seed</b><span>Tunnel</span> · download link'* ]] || {
+        printf '%s\n' "$page"
+        return 1
+    }
+    if grep -qiE 'https?:|src=|url\(|@import|<script|<link' <<<"$page"; then return 1; fi
+    # no step: no title « Next » and no empty list
+    page=$(share_generate_page backup.gpg Backup "" "Encrypted.")
+    [[ $page != *'<h2>'* && $page != *'<ol>'* ]] || return 1
+    # in French
+    i18n_load fr
+    page=$(share_generate_page phone.conf 'Configuration VPN « phone »' "<li>Ouvrez « Outils » : choisissez « OK ».</li>" "Note ?")
+    # French punctuation glued to its word with no-break spaces: never alone
+    # at the start or the end of a line
+    local nbsp=$'\xc2\xa0'
+    [[ $page == *'<html lang="fr">'* && $page == *'Télécharger phone.conf'* && $page == *"Fichier$nbsp: <code>"* &&
+        $page == *'Usage unique · valable 10 minutes'* && $page == *'<h2>Ensuite</h2>'* &&
+        $page == *"<title>Configuration VPN «${nbsp}phone$nbsp»</title>"* &&
+        $page == *"<li>Ouvrez «${nbsp}Outils$nbsp»$nbsp: choisissez «${nbsp}OK$nbsp».</li>"* &&
+        $page == *"Note$nbsp? Ouvrir cette page ne compte pas$nbsp: seul"* ]] || {
+        printf '%s\n' "$page"
+        return 1
+    }
+)
+
+# A link used, expired or unknown: a page that says so instead of the grey 404
+# of nginx, with the headers and the access log of the links (the token stays
+# hidden), only if the page is there; the page names nothing
+share_gone_page() (
+    load
+    SEEDBOX_CERTIFICATE=letsencrypt
+    SEEDBOX_DOMAIN=seed.example.net
+    TRANSMISSION_RPC_PORT=9091
+    dpkg-query() { echo "4.1.0~beta2+dfsg-3+deb13u1"; }
+    nginx_generate_site >"$WORK/site"
+    local share gone
+    share=$(sed -n '/location ^~ \/share\/ {/,/^    }/p' "$WORK/site")
+    gone=$(sed -n '/location = \/seedtunnel\/link-gone.html {/,/^    }/p' "$WORK/site")
+    grep -qF "error_page 404 /seedtunnel/link-gone.html;" <<<"$share" \
+        && grep -qF "internal;" <<<"$gone" && grep -qF "auth_basic off;" <<<"$gone" \
+        && grep -qF "alias $ROOT/web/link-gone.html;" <<<"$gone" \
+        && grep -qF "access_log /var/log/nginx/access.log seedtunnel_share;" <<<"$gone" \
+        && grep -qF "Content-Security-Policy \"default-src 'none'" <<<"$gone" \
+        && grep -qF 'X-Robots-Tag "noindex, nofollow"' <<<"$gone" \
+        && grep -qF 'Strict-Transport-Security' <<<"$gone" || {
+        cat "$WORK/site"
+        return 1
+    }
+    # page missing: the 404 of nginx, as before
+    if (APP_DIR=$WORK/elsewhere nginx_generate_site | grep -q "link-gone"); then return 1; fi
+    # the page stands alone and names nothing; its lifetime is the real one
+    local page=$ROOT/web/link-gone.html
+    if grep -qiE 'https?:|src=|href=|url\(|<script|transmission|seedtunnel|seedbox' "$page"; then return 1; fi
+    grep -q "Lien déjà utilisé ou expiré" "$page" && grep -q "Link already used or expired" "$page" \
+        && (($(grep -c "pendant $((SHARE_LIFETIME / 60))&nbsp;minutes\|for $((SHARE_LIFETIME / 60))&nbsp;minutes" "$page") == 2))
+)
+
 # The request for the password names nothing: « Seedbox » went to anyone,
 # robots included (header WWW-Authenticate), before any password
 password_request_names_nothing() (
@@ -6640,6 +6711,8 @@ check "files changed by hand: a copy is kept and it is said" changed_by_hand_cop
 check "files changed by hand: nothing taken for a change after a restore or a return" fingerprints_forgotten_when_unknown
 check "nginx: the site « default » of the administrator stays on" nginx_default_site_kept_if_changed
 check "page « access denied »: colors of seedtunnel, without its name, only if the page is there" denied_page_discreet
+check "page of a link: colors of seedtunnel, single use, numbered steps, nothing fetched elsewhere" share_page_in_colors
+check "link used or expired: a page that says so, token still hidden in the log" share_gone_page
 check "web interface: style of seedtunnel on Transmission 3 too (Debian 12)" web_interface_style_transmission3
 check "systems: Debian 12/13 and Ubuntu 24.04/26.04, the others refused with the list" systems_supported
 check "systems: Debian 11 refused with the way up (Debian 12, then 13)" debian11_refused_with_the_way_up

@@ -1341,8 +1341,20 @@ fr: Les liens de téléchargement passent par le site HTTPS de la seedbox, qui n
 en: Download %s
 fr: Télécharger %s
 
-en: This link works only once and expires after %s minutes.
-fr: Ce lien ne fonctionne qu'une fois et expire au bout de %s minutes.
+en: download link
+fr: lien de téléchargement
+
+en: File:
+fr: Fichier :
+
+en: One time only · valid for %s minutes
+fr: Usage unique · valable %s minutes
+
+en: Next
+fr: Ensuite
+
+en: Opening this page does not use the link up: only the download does.
+fr: Ouvrir cette page ne compte pas : seul le téléchargement utilise le lien.
 
 en: Cannot start the watcher of the link (details in %s).
 fr: Impossible de lancer la surveillance du lien (détails dans %s).

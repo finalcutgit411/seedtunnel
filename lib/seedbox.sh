@@ -809,7 +809,7 @@ NGINX_DENIED_PAGE="web/unauthorized.html"
 # answer stays a 401 with the header that makes the browser ask for the
 # password. Only if the page is there: without it, nginx would answer 404 and
 # never ask for the password again. A location with an error_page of its own
-# would not use this one (none has).
+# would not use this one (only /share/ has one, and asks for no password).
 nginx_generate_denied_page() {
     [[ -r $APP_DIR/$NGINX_DENIED_PAGE ]] || return 0
     cat <<EOF

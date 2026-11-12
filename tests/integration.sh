@@ -469,7 +469,18 @@ share_test() {
     }
     curl -skf --max-time 10 -o "$W/shared.conf" "https://127.0.0.1${path}phone.conf" || return 1
     cmp "$W/shared.conf" /etc/seedtunnel/vpn/clients/phone.conf || return 1
-    link_gone "${path}phone.conf"
+    link_gone "${path}phone.conf" || return 1
+    # used: a page that says so (still a 404), the page of the link too
+    page=$(curl -sk --max-time 10 "https://127.0.0.1${path}phone.conf")
+    [[ $page == *"Link already used or expired"* ]] || {
+        printf 'unexpected page for a used link:\n%s\n' "$page"
+        return 1
+    }
+    page=$(curl -sk --max-time 10 "https://127.0.0.1$path")
+    [[ $page == *"Link already used or expired"* ]] || {
+        printf 'unexpected page for a used link:\n%s\n' "$page"
+        return 1
+    }
 }
 
 # The tokens of the links never reach the access log of nginx: /share/<token>/
@@ -483,12 +494,15 @@ share_log_test() {
     curl -sk --max-time 10 -o /dev/null "https://127.0.0.1$path" || return 1
     curl -skf --max-time 10 -o /dev/null "https://127.0.0.1${path}phone.conf" || return 1
     curl -s --max-time 10 -o /dev/null "http://127.0.0.1${path}phone.conf" || true
+    # used up: the page « link already used » is logged like the link
+    curl -sk --max-time 10 -o /dev/null "https://127.0.0.1${path}phone.conf" || true
     sleep 1
     if grep -qF "$token" /var/log/nginx/access.log; then
         echo "token found in the access log"
         return 1
     fi
-    grep -qF '"GET /share/<token>/phone.conf HTTP' /var/log/nginx/access.log
+    grep -qF '"GET /share/<token>/phone.conf HTTP' /var/log/nginx/access.log \
+        && grep -qE '"GET /share/<token>/phone.conf HTTP/[0-9.]+" 404 ' /var/log/nginx/access.log
 }
 
 # Another form of the address (here with « ?x ») does not get around the
@@ -1043,6 +1057,8 @@ EOF
     check "seedbox sftp-config: WinSCP address with fingerprint, FileZilla and WinSCP files" sftp_config_test
     check "list of links impossible" http_is 403 /share/
     check "unknown token: 404" http_is 404 /share/0123456789abcdef0123456789abcdef/
+    check "unknown token: the page « link already used or expired »" output_has "Link already used or expired" \
+        curl -sk --max-time 10 https://127.0.0.1/share/0123456789abcdef0123456789abcdef/
 
     step "SFTP"
     check "connection and folders visible" output_has "watch" sftp_password "$PW1" "ls"

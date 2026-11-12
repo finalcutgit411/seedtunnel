@@ -74,9 +74,41 @@ log_format seedtunnel_share '$remote_addr - $remote_user [$time_local] '
 EOF
 }
 
+SHARE_GONE_PAGE="web/link-gone.html"
+
+# A link used or expired (or a wrong token) answers 404 with a page that says
+# so, in the colors of seedtunnel but without its name (like the page « access
+# denied »: anyone can try an address under /share/). Only if the page is
+# there: otherwise the 404 of nginx, as before.
+# The page has the headers of the links and their access log: the address
+# asked (with its token) is the one logged, even after the redirect to the page.
+# $1: HSTS header, if any, already formatted.
+share_generate_gone_page() {
+    [[ -r $APP_DIR/$SHARE_GONE_PAGE ]] || return 0
+    cat <<EOF
+
+    location = /seedtunnel/link-gone.html {
+        auth_basic off;
+        internal;
+        alias $APP_DIR/$SHARE_GONE_PAGE;
+        default_type text/html;
+        access_log /var/log/nginx/access.log seedtunnel_share;
+        add_header Cache-Control "no-store" always;
+        add_header X-Content-Type-Options nosniff always;
+        add_header Referrer-Policy no-referrer always;
+        add_header X-Robots-Tag "noindex, nofollow" always;
+        add_header Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'" always;${1-}
+    }
+EOF
+}
+
 # nginx block inside the HTTPS server of the seedbox (see nginx_generate_site).
 # $1: HSTS header, if any, already formatted.
 share_generate_nginx() {
+    local gone=""
+    if [[ -r $APP_DIR/$SHARE_GONE_PAGE ]]; then
+        gone=$'\n        # used, expired or unknown: a page that says so\n        error_page 404 /seedtunnel/link-gone.html;'
+    fi
     cat <<EOF
 
     # One-time links (seedtunnel vpn share, seedbox sftp-config, backup share):
@@ -92,7 +124,7 @@ share_generate_nginx() {
             return 405;
         }
         limit_req zone=seedtunnel_share;
-        limit_req_status 404;
+        limit_req_status 404;$gone
         max_ranges 0;
         open_file_cache off;
         if_modified_since off;
@@ -106,7 +138,7 @@ share_generate_nginx() {
         add_header Referrer-Policy no-referrer always;
         add_header X-Robots-Tag "noindex, nofollow" always;
         add_header Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'" always;${1-}
-    }
+    }$(share_generate_gone_page "${1-}")
 EOF
 }
 
@@ -127,10 +159,35 @@ share_purge() {
     done
 }
 
-# Home page of a link: download button + how to use the file.
-# Everything inserted here was checked before (names, domain): no HTML.
+# French punctuation stays with its word in a page: « and the space after
+# it, the space before » : ; ? ! become no-break spaces (like ui_glue in the
+# terminal), so that a « never ends a line and a » never starts one
+share_glue() {
+    local text=$1 nbsp=$'\xc2\xa0' sign
+    text=${text//"« "/"«$nbsp"}
+    for sign in '»' ':' ';' '?' '!'; do
+        text=${text//" $sign"/"$nbsp$sign"}
+    done
+    printf '%s' "$text"
+}
+
+# Home page of a link, in the colors of seedtunnel (dark, like the terminal):
+# download button, single use, then how to use the file, numbered. Nothing
+# fetched elsewhere (no font, no image, no script): the emblem is drawn in
+# the page. Everything inserted here was checked before (names, domain): no
+# HTML.
 share_generate_page() {
-    local name=$1 title=$2 steps=$3 note=$4
+    local name=$1 title=$2 steps=$3 note=$4 next="" file
+    title=$(share_glue "$title")
+    steps=$(share_glue "$steps")
+    note=$(share_glue "$note $(t 'Opening this page does not use the link up: only the download does.')")
+    file=$(share_glue "$(t 'File:')")
+    if [[ -n $steps ]]; then
+        next="<h2>$(t 'Next')</h2>
+<ol>
+$steps
+</ol>"
+    fi
     cat <<EOF
 <!doctype html>
 <html lang="$APP_LANG">
@@ -140,26 +197,42 @@ share_generate_page() {
 <meta name="robots" content="noindex, nofollow">
 <title>$title</title>
 <style>
-body { font: 16px/1.55 system-ui, sans-serif; max-width: 34rem; margin: 2.5rem auto; padding: 0 1rem; color: #1f2328; background: #f6f8fa; }
-h1 { font-size: 1.35rem; }
-.button { display: inline-block; margin: .5rem 0 1rem; padding: .75rem 1.3rem; border-radius: .5rem; background: #1f6feb; color: #fff; font-weight: 600; text-decoration: none; }
-li { margin: .35rem 0; }
-code { background: #eaeef2; padding: .1rem .3rem; border-radius: .25rem; word-break: break-all; }
-.note { color: #57606a; font-size: .92rem; }
-@media (prefers-color-scheme: dark) {
-  body { color: #e6edf3; background: #0d1117; }
-  code { background: #2d333b; }
-  .note { color: #8d96a0; }
-}
+html { color-scheme: dark; }
+body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #0f0e16; color: #e6e6e6; font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, "DejaVu Sans", sans-serif; }
+main { box-sizing: border-box; width: min(560px, calc(100% - 32px)); margin: 32px 16px; padding: 36px 36px 30px; background: #16141f; border: 1px solid #2b2838; border-radius: 16px; box-shadow: 0 24px 60px rgba(0, 0, 0, .5); }
+header { display: flex; align-items: center; gap: 14px; }
+svg { flex: none; }
+.brand { font-size: 13px; color: #8a8499; letter-spacing: .02em; }
+.brand b { color: #f4f2f8; }
+.brand span { color: #ff5fff; font-weight: 700; }
+h1 { margin: 22px 0 6px; font-size: 22px; line-height: 1.3; }
+.file { margin: 0; color: #8a8499; font-size: 14px; }
+.file code { color: #5fd7d7; }
+.button { display: block; margin: 22px 0 6px; padding: 14px 18px; border-radius: 10px; text-align: center; font-weight: 700; color: #fff; text-decoration: none; overflow-wrap: anywhere; background: linear-gradient(90deg, #af00af, #ff5fff); box-shadow: 0 8px 24px rgba(175, 0, 175, .35); }
+.button:focus-visible { outline: 3px solid #ffd75f; outline-offset: 3px; }
+.once { margin: 0 0 24px; text-align: center; font-size: 13px; color: #ffd75f; }
+h2 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: #8a8499; }
+ol { list-style: none; counter-reset: step; margin: 0; padding: 0; display: grid; gap: 12px; }
+ol li { counter-increment: step; position: relative; padding-left: 38px; }
+ol li::before { content: counter(step); position: absolute; left: 0; top: 0; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 700; color: #ff5fff; border: 1.5px solid #ff5fff; box-sizing: border-box; }
+code { background: #221f2d; color: #e8e6ef; padding: .1rem .35rem; border-radius: 5px; word-break: break-all; font-size: .92em; }
+.note { margin: 24px 0 0; padding-top: 16px; border-top: 1px solid #2b2838; color: #8a8499; font-size: 14px; }
+@media (max-width: 480px) { main { padding: 28px 22px 24px; } h1 { font-size: 20px; } }
 </style>
 </head>
 <body>
+<main>
+<header>
+<svg width="56" height="36" viewBox="0 6 28 18" aria-hidden="true"><rect x="1" y="7" width="26" height="16" rx="3" fill="none" stroke="#ff5fff" stroke-width="2"/><circle cx="8" cy="15" r="2.6" fill="#ff5fff"/><circle cx="20" cy="15" r="2.6" fill="#ff5fff"/><path d="M8 15h12" stroke="#ff5fff" stroke-width="2"/></svg>
+<div class="brand"><b>Seed</b><span>Tunnel</span> · $(t 'download link')</div>
+</header>
 <h1>$title</h1>
+<p class="file">$file <code>$name</code></p>
 <a class="button" href="$name" download>$(t 'Download %s' "$name")</a>
-<ol>
-$steps
-</ol>
-<p class="note">$note $(t 'This link works only once and expires after %s minutes.' "$((SHARE_LIFETIME / 60))")</p>
+<p class="once">$(t 'One time only · valid for %s minutes' "$((SHARE_LIFETIME / 60))")</p>
+$next
+<p class="note">$note</p>
+</main>
 </body>
 </html>
 EOF
