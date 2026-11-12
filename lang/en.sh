@@ -147,7 +147,11 @@ text_en_share_steps_winscp() {
     cat <<EOF
 <li>WinSCP: in the login window, « Tools » → « Import Sites… » → « Import from »: « INI file » → « Browse… »: choose this file → tick the site → « OK ».</li>
 EOF
-    if [[ $SEEDBOX_SFTP_PASSWORD == no ]]; then
+    if ((${key_in_profile:-0})); then
+        cat <<EOF
+<li>The site « Seedbox $SEEDBOX_DOMAIN » shows in the list. It uses the SSH key made by seedtunnel, the file seedbox-$SEEDBOX_USER.ppk: keep it, without renaming it, in the .ssh folder of your personal folder (C:\Users\YOUR-NAME\.ssh, create it if needed). Saved somewhere else? Edit the site → « Advanced… » → « SSH » → « Authentication » → « Private key file ».</li>
+EOF
+    elif [[ $SEEDBOX_SFTP_PASSWORD == no ]]; then
         cat <<EOF
 <li>The site « Seedbox $SEEDBOX_DOMAIN » shows in the list. One step is left: this server accepts SSH keys only, so give the site your private key: edit the site → « Advanced… » → « SSH » → « Authentication » → « Private key file »: choose your key → « OK » → « Save ». No key yet? Menu Seedbox › SFTP connection, choice 3.</li>
 EOF
@@ -183,8 +187,8 @@ EOF
 
 text_en_share_steps_sftp_key() {
     cat <<'EOF'
-<li>Keep this file on your computer, in a folder you keep (not in Downloads).</li>
-<li>WinSCP: in the login window, on your site (for a saved site, edit it first): « Advanced… » → « SSH » → « Authentication » → « Private key file »: choose this file → « OK » → « Save ».</li>
+<li>Keep this file on your computer without renaming it, in a folder you keep (not in Downloads). On Windows: the .ssh folder of your personal folder, C:\Users\YOUR-NAME\.ssh (create it if needed).</li>
+<li>WinSCP: the profile of seedtunnel (Seedbox › SFTP connection, choice 1) finds this key by itself in that folder. For another site: in the login window, on the site (for a saved site, edit it first): « Advanced… » → « SSH » → « Authentication » → « Private key file »: choose this file → « OK » → « Save ».</li>
 <li>FileZilla: « Site Manager » → your site → « Logon Type »: « Key file » → choose this file.</li>
 EOF
 }

@@ -2430,8 +2430,17 @@ fr: Votre clé est un fichier .ppk de PuTTY ? Ouvrez-le dans PuTTYgen : la clé 
 en: This is a private key: it stays on your computer. Paste the public key (.pub file).
 fr: Ceci est une clé privée : elle reste sur votre ordinateur. Collez la clé publique (fichier .pub).
 
-en: Keep the file in a folder you keep (not in Downloads).
-fr: Gardez le fichier dans un dossier que vous conservez (pas dans Téléchargements).
+en: Keep the file without renaming it, in a folder you keep. On Windows: %s (the WinSCP profile looks for it there).
+fr: Gardez le fichier sans le renommer, dans un dossier que vous conservez. Sous Windows : %s (le profil WinSCP le cherche là).
 
 en: This server accepts SSH keys only: once the site is imported, give it your private key (steps on the page).
 fr: Ce serveur n'accepte que les clés SSH : une fois le site importé, donnez-lui votre clé privée (étapes sur la page).
+
+en: The site uses the SSH key made by seedtunnel: keep the file seedbox-%s.ppk in %s (create the folder if needed).
+fr: Le site utilise la clé SSH créée par seedtunnel : gardez le fichier seedbox-%s.ppk dans %s (créez le dossier s'il n'existe pas).
+
+en: YOUR-NAME
+fr: VOTRE-NOM
+
+en: Linux or macOS: your public key is in ~/.ssh/id_ed25519.pub (no key? ssh-keygen -t ed25519).
+fr: Linux ou macOS : votre clé publique est dans ~/.ssh/id_ed25519.pub (pas de clé ? ssh-keygen -t ed25519).

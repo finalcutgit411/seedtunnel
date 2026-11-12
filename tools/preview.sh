@@ -469,6 +469,7 @@ screen_key_add() {
     echo
     ui_paragraph "$(t 'Paste the public key: one line, which starts with ssh-ed25519 or ssh-rsa. Never paste the private key.')"
     ui_paragraph "$(t 'Your key is a .ppk file of PuTTY? Open it in PuTTYgen: the public key is in the frame at the top.')"
+    ui_paragraph "$(t 'Linux or macOS: your public key is in ~/.ssh/id_ed25519.pub (no key? ssh-keygen -t ed25519).')"
     echo
     ui_print "$(t '%s (empty = back)' "$(t 'Public key')"): "
 }

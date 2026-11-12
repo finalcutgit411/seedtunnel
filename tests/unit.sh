@@ -6239,6 +6239,8 @@ winscp_profile_content() (
     local out expected
     SEEDBOX_DOMAIN=seed.example.net
     SEEDBOX_USER=lancelot
+    SFTP_KEYS_DIR="$WORK/profile-keys"
+    rm -rf "$SFTP_KEYS_DIR"
     host_key_fingerprint_url() { echo "ssh-ed25519-gAp02kYYmtWjmhPTLe83f2mfoeAcy-__GMfI045u0U0="; }
     out=$(winscp_generate_site 2222 | od -c | tr -s ' ')
     winscp_generate_site 2222 >"$WORK/winscp.ini"
@@ -6248,6 +6250,13 @@ winscp_profile_content() (
         return 1
     }
     [[ $(grep -c $'\r$' "$WORK/winscp.ini") == 7 ]] && ! grep -qi password "$WORK/winscp.ini" || return 1
+    # a key made by seedtunnel: the site uses it, from the .ssh folder of the
+    # personal folder (« % » and « \ » escaped as in WinSCP.ini)
+    mkdir -p "$SFTP_KEYS_DIR"
+    echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEWuSJMjcPMEGcGPXYQTMQwKBZWAmPq5xBrlCvTXnDEn my laptop" >"$SFTP_KEYS_DIR/lancelot"
+    [[ $(winscp_generate_site 22) != *PublicKeyFile* ]] || return 1
+    echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEWuSJMjcPMEGcGPXYQTMQwKBZWAmPq5xBrlCvTXnDEn seedtunnel-lancelot-20261112-085500" >>"$SFTP_KEYS_DIR/lancelot"
+    [[ $(winscp_generate_site 22) == *$'UserName=lancelot\r\nPublicKeyFile=%25USERPROFILE%25%5C.ssh%5Cseedbox-lancelot.ppk\r\n\r\n[SshHostKeys]'* ]] || return 1
     # key of the server not found: the site alone
     host_key_fingerprint_url() { :; }
     [[ $(winscp_generate_site 22) != *SshHostKeys* ]]
@@ -6274,9 +6283,20 @@ sftp_profile_steps() (
     fingerprint=""
     [[ $(text share_steps_winscp) != *"in the file"* ]] || return 1
     fingerprint="SHA256:x ED25519"
+    # the key made by seedtunnel in the profile: where to keep its file
+    SEEDBOX_USER=lancelot
+    key_in_profile=1
+    out=$(text share_steps_winscp)
+    [[ $out == *"seedbox-lancelot.ppk"*'C:\Users\YOUR-NAME\.ssh'* && $out != *"One step is left"* ]] || return 1
+    out=$(text share_steps_sftp_key)
+    [[ $out == *'C:\Users\YOUR-NAME\.ssh'*"finds this key by itself"* ]] || return 1
+    key_in_profile=0
     i18n_load fr
     out=$(text share_steps_winscp)
-    [[ $out == *"« Outils » → « Importer des sites… »"*"« Fichier INI »"*"Il reste une étape"*"donnez donc votre clé privée au site"* ]]
+    [[ $out == *"« Outils » → « Importer des sites… »"*"« Fichier INI »"*"Il reste une étape"*"donnez donc votre clé privée au site"* ]] || return 1
+    # the Windows folder given as a value: printf keeps its « \ »
+    out=$(t 'Keep the file without renaming it, in a folder you keep. On Windows: %s (the WinSCP profile looks for it there).' "$(windows_ssh_folder)" 2>&1)
+    [[ $out == *'Sous Windows : C:\Users\VOTRE-NOM\.ssh (le profil WinSCP'* ]]
 )
 
 # Cards and summaries before an action: green with « ● »; « ✔ » stays for

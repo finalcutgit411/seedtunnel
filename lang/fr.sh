@@ -146,7 +146,11 @@ text_fr_share_steps_winscp() {
     cat <<EOF
 <li>WinSCP : dans la fenêtre de connexion, « Outils » → « Importer des sites… » → « Importer depuis » : « Fichier INI » → « Parcourir… » : choisissez ce fichier → cochez le site → « OK ».</li>
 EOF
-    if [[ $SEEDBOX_SFTP_PASSWORD == no ]]; then
+    if ((${key_in_profile:-0})); then
+        cat <<EOF
+<li>Le site « Seedbox $SEEDBOX_DOMAIN » apparaît dans la liste. Il utilise la clé SSH créée par seedtunnel, le fichier seedbox-$SEEDBOX_USER.ppk : gardez-le, sans le renommer, dans le dossier .ssh de votre dossier personnel (C:\Users\VOTRE-NOM\.ssh, à créer s'il n'existe pas). Enregistré ailleurs ? Modifiez le site → « Avancé… » → « SSH » → « Authentification » → « Fichier de clé privée ».</li>
+EOF
+    elif [[ $SEEDBOX_SFTP_PASSWORD == no ]]; then
         cat <<EOF
 <li>Le site « Seedbox $SEEDBOX_DOMAIN » apparaît dans la liste. Il reste une étape : ce serveur n'accepte que les clés SSH, donnez donc votre clé privée au site : modifiez le site → « Avancé… » → « SSH » → « Authentification » → « Fichier de clé privée » : choisissez votre clé → « OK » → « Enregistrer ». Pas encore de clé ? Menu Seedbox › Connexion SFTP, choix 3.</li>
 EOF
@@ -182,8 +186,8 @@ EOF
 
 text_fr_share_steps_sftp_key() {
     cat <<'EOF'
-<li>Gardez ce fichier sur votre ordinateur, dans un dossier que vous conservez (pas dans Téléchargements).</li>
-<li>WinSCP : dans la fenêtre de connexion, sur votre site (pour un site déjà enregistré, passez-le d'abord en modification) : « Avancé… » → « SSH » → « Authentification » → « Fichier de clé privée » : choisissez ce fichier → « OK » → « Enregistrer ».</li>
+<li>Gardez ce fichier sur votre ordinateur sans le renommer, dans un dossier que vous conservez (pas dans Téléchargements). Sous Windows : le dossier .ssh de votre dossier personnel, C:\Users\VOTRE-NOM\.ssh (à créer s'il n'existe pas).</li>
+<li>WinSCP : le profil de seedtunnel (Seedbox › Connexion SFTP, choix 1) trouve tout seul cette clé dans ce dossier. Pour un autre site : dans la fenêtre de connexion, sur le site (pour un site déjà enregistré, passez-le d'abord en modification) : « Avancé… » → « SSH » → « Authentification » → « Fichier de clé privée » : choisissez ce fichier → « OK » → « Enregistrer ».</li>
 <li>FileZilla : « Gestionnaire de sites » → votre site → « Type d'authentification » : « Fichier de clé » → choisissez ce fichier.</li>
 EOF
 }

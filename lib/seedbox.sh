@@ -915,6 +915,16 @@ seedbox_apply_https() {
 
 sftp_has_keys() { [[ -s $SFTP_KEYS_DIR/$SEEDBOX_USER ]] && grep -q '^ssh-\|^ecdsa-\|^sk-' "$SFTP_KEYS_DIR/$SEEDBOX_USER"; }
 
+# The .ssh folder of the personal folder on Windows, where the WinSCP profile
+# looks for the key made by seedtunnel (as a value: printf would read « \U »)
+windows_ssh_folder() { printf 'C:\\Users\\%s\\.ssh' "$(t 'YOUR-NAME')"; }
+
+# A key made by seedtunnel (sftp_key_generate) among those of the account: its
+# private part is then the file seedbox-USER.ppk on the computer of the user
+sftp_has_seedtunnel_key() {
+    [[ -s $SFTP_KEYS_DIR/$SEEDBOX_USER ]] && grep -q " seedtunnel-$SEEDBOX_USER-[0-9]" "$SFTP_KEYS_DIR/$SEEDBOX_USER"
+}
+
 # Effective SSH settings of the seedbox account connecting from the address
 # $1, as sshd applies them
 seedbox_sshd_settings() { sshd_settings -C "user=$SEEDBOX_USER,host=$1,addr=$1"; }
@@ -1299,11 +1309,17 @@ EOF
 # the keys it knows, and accepts a fingerprint there instead of a whole key.
 # It then checks the server by itself, without a question at the first
 # connection (as with the address of winscp_url).
+# With a key made by seedtunnel: the site uses it, from the .ssh folder of the
+# personal folder (%USERPROFILE%, replaced by WinSCP at connection time;
+# written « %25 » and « %5C » for « % » and « \ », as in WinSCP.ini).
 winscp_generate_site() {
     local port=$1 name="Seedbox $SEEDBOX_DOMAIN" fingerprint
     fingerprint=$(host_key_fingerprint_url)
     printf '[Sessions\\%s]\r\nHostName=%s\r\nPortNumber=%s\r\nUserName=%s\r\n' \
         "${name// /%20}" "$SEEDBOX_DOMAIN" "$port" "$SEEDBOX_USER"
+    if sftp_has_seedtunnel_key; then
+        printf 'PublicKeyFile=%%25USERPROFILE%%25%%5C.ssh%%5Cseedbox-%s.ppk\r\n' "$SEEDBOX_USER"
+    fi
     if [[ -n $fingerprint ]]; then
         printf '\r\n[SshHostKeys]\r\nssh-ed25519@%s:%s=%s\r\n' "$port" "$SEEDBOX_DOMAIN" "${fingerprint%%=*}"
     fi
@@ -1312,9 +1328,10 @@ winscp_generate_site() {
 # sftp_profile_share winscp|filezilla PORT — link to the site to import into
 # WinSCP or FileZilla
 sftp_profile_share() {
-    local program=$1 port=$2 tmp fingerprint
+    local program=$1 port=$2 tmp fingerprint key_in_profile=0
     systemctl is-active --quiet nginx || die 'nginx is stopped:  seedtunnel seedbox restart'
     fingerprint=$(host_key_fingerprint)
+    if [[ $program == winscp ]] && sftp_has_seedtunnel_key; then key_in_profile=1; fi
     tmp=$(mktemp)
     if [[ $program == winscp ]]; then
         winscp_generate_site "$port" >"$tmp"
@@ -1326,7 +1343,9 @@ sftp_profile_share() {
             "$(text share_steps_filezilla)" "$(t 'The file holds no password.')"
     fi
     rm -f "$tmp"
-    if [[ $SEEDBOX_SFTP_PASSWORD == no ]]; then
+    if ((key_in_profile)); then
+        say 'The site uses the SSH key made by seedtunnel: keep the file seedbox-%s.ppk in %s (create the folder if needed).' "$SEEDBOX_USER" "$(windows_ssh_folder)"
+    elif [[ $SEEDBOX_SFTP_PASSWORD == no ]]; then
         warn 'This server accepts SSH keys only: once the site is imported, give it your private key (steps on the page).'
     fi
 }
@@ -1440,6 +1459,7 @@ sftp_key_add_screen() {
     section 'Add my public key'
     ui_paragraph "$(t 'Paste the public key: one line, which starts with ssh-ed25519 or ssh-rsa. Never paste the private key.')"
     ui_paragraph "$(t 'Your key is a .ppk file of PuTTY? Open it in PuTTYgen: the public key is in the frame at the top.')"
+    ui_paragraph "$(t 'Linux or macOS: your public key is in ~/.ssh/id_ed25519.pub (no key? ssh-keygen -t ed25519).')"
     echo
     if sftp_ask_public_key answer; then
         sftp_keys_import - <<<"$answer"
@@ -1624,7 +1644,7 @@ sftp_key_generate() {
     # in a subshell of its own: the temporary folder with the private key is
     # deleted whatever happens, even if a step stops the script
     in_subshell sftp_key_create_and_share "$comment" "$name"
-    say 'Keep the file in a folder you keep (not in Downloads).'
+    say 'Keep the file without renaming it, in a folder you keep. On Windows: %s (the WinSCP profile looks for it there).' "$(windows_ssh_folder)"
     say 'Link unused? Remove the key "%s" (seedtunnel seedbox sftp-key list) and create another one.' "$comment"
 }
 
