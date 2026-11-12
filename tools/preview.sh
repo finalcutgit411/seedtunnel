@@ -26,6 +26,12 @@ APP_DIR=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
 # vpn_last_connection: the column of the table of the clients
 # shellcheck source=lib/vpn.sh
 . "$APP_DIR/lib/vpn.sh"
+# the texts of the screens of the seedbox and of the backups (lang/), and the
+# file of a client (its QR code): the same as in the menus
+# shellcheck source=lib/seedbox.sh
+. "$APP_DIR/lib/seedbox.sh"
+# shellcheck source=lib/backup.sh
+. "$APP_DIR/lib/backup.sh"
 
 trap 'on_error $? $LINENO "$BASH_COMMAND" "${BASH_SOURCE[0]:-}"' ERR
 
@@ -37,6 +43,21 @@ CHOICE=""
 
 # Free space of the examples (68 GB)
 EXAMPLE_FREE=73014444032
+
+# The server of the examples, read by the texts of lang/ (text …)
+# shellcheck disable=SC2034
+{
+    VPN_PUBLIC_ADDRESS=203.0.113.10
+    VPN_PORT=51820
+    VPN_DNS="9.9.9.9, 149.112.112.112"
+    SEEDBOX_DOMAIN=seed.example.net
+    SEEDBOX_USER=lancelot
+    SEEDBOX_CERTIFICATE=letsencrypt
+}
+# Key of the SSH server of the examples: as ssh-keygen shows it, and in the
+# address for WinSCP (host_key_fingerprint, host_key_fingerprint_url)
+EXAMPLE_FINGERPRINT="SHA256:gAp02kYYmtWjmhPTLe83f2mfoeAcy+//GMfI045u0U0 ED25519"
+EXAMPLE_FINGERPRINT_URL="ssh-ed25519-gAp02kYYmtWjmhPTLe83f2mfoeAcy-__GMfI045u0U0="
 
 # pv ENGLISH FRENCH — texts of the preview itself; those of the real menus go
 # through t and lang/fr.txt, as in the menus (a unit test checks it)
@@ -63,6 +84,28 @@ end_action() {
     fi
     ui_pause
 }
+
+# The same, when another screen follows (pause_next)
+end_next() {
+    if ((ALL)); then
+        echo
+        ui_print "  $C_GREY$(t 'Enter ↵ continue · Q quit')$C_RESET"
+        return 0
+    fi
+    ui_pause next
+}
+
+# print_lines — the lines read on the standard input, each one cut to the
+# width of the screen (a text of lang/, a QR code)
+print_lines() {
+    local line
+    while IFS= read -r line || [[ -n $line ]]; do ui_print "$line"; done
+}
+
+# Lines of the menus that show what is done (run), and their messages
+step() { ui_print "  $(t "$1")… $C_GREEN$(t 'ok')$C_RESET"; }
+said_ok() { ui_print "$C_GREEN✔$C_RESET $(t "$@")"; }
+said_warn() { ui_print "$C_YELLOW!$C_RESET $(t "$@")"; }
 
 top() {
     SCREENS=$((SCREENS + 1))
@@ -175,6 +218,72 @@ screen_add() {
     ui_print "  $(t 'Applying the configuration')… $C_GREEN$(t 'ok')$C_RESET"
     ui_print "  $(t 'Updating the firewall')… $C_GREEN$(t 'ok')$C_RESET"
     ui_print "$C_GREEN✔$C_RESET $(t 'Client "%s" created: IP %s, open port %s, file %s' phone2 10.8.0.5 60004 /etc/seedtunnel/vpn/clients/phone2.conf)"
+    end_next
+}
+
+# The QR code of the client of the examples, made by qrencode from its file
+# (vpn_generate_client_conf), as in the menu; its lines are cut to the width
+# of the screen (a terminal would wrap them). Without qrencode, a note.
+example_qr() {
+    local dir type=utf8
+    if ! command -v qrencode >/dev/null; then
+        ui_print "  $C_GREY$(pv '(QR code: qrencode is not installed here)' "(QR code : qrencode n'est pas installé ici)")$C_RESET"
+        return 0
+    fi
+    if [[ -n $C_RESET ]]; then type=ansiutf8; fi
+    dir=$(mktemp -d)
+    (
+        VPN_STATE_DIR=$dir
+        VPN_CLIENTS_DIR=$dir/clients
+        mkdir "$VPN_CLIENTS_DIR"
+        echo 'xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=' >"$dir/server.pub"
+        cat >"$VPN_CLIENTS_DIR/phone2.env" <<'EOF'
+CLIENT_NUMBER=4
+CLIENT_PUBLIC_KEY=Hrl5Wv0hrZ0n3PB0Uc6nGcqIhAb8eOS2t8Wf8V9tS0E=
+CLIENT_PRESHARED_KEY=/UwcSPg38hW/D9Y3tcS1FOV0K1wuURMbS/sesJEP5ak=
+CLIENT_PRIVATE_KEY=yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk=
+EOF
+        vpn_generate_client_conf phone2 | qrencode -t "$type"
+    ) | print_lines
+    rm -rf "$dir"
+}
+
+# The screen that follows « Add a client » (vpn_show_client)
+screen_client() {
+    local name=phone2 port=60004
+    top client
+    ui_crumbs VPN "$(t 'Client "%s"' "$name")"
+    echo
+    example_qr
+    echo
+    text vpn_client_help | print_lines
+    echo
+    ui_print "$(t 'Show the content of the file (to copy and paste)?') $(t '[y/N]')"
+    end_action
+}
+
+# VPN › Change the address or the port (vpn_change_settings), a new port
+screen_vpn_address() {
+    top vpn-address
+    ui_crumbs VPN "$(t 'Change the address or the port')"
+    echo
+    said_warn 'After a change, every client will have to import its configuration again.'
+    echo
+    ui_print "$(t '%s (empty = back)' "$(t 'Public address of the server (IP or domain name)')"): $VPN_PUBLIC_ADDRESS"
+    ui_print "$(t '%s (empty = back)' "$(t 'UDP port of the VPN')"): 51821"
+    echo
+    ui_print "$(t 'Summary:')"
+    ui_print "$(t '  Address : %s' "$VPN_PUBLIC_ADDRESS")"
+    ui_print "$(t '  Port    : %s/udp' 51821)"
+    ui_print "$(t '  DNS     : %s' "Quad9 · $VPN_DNS")"
+    ui_print "$(t '  Out     : interface %s' eth0)"
+    echo
+    said_warn 'New port: the VPN restarts and every client is disconnected until it imports its new configuration.'
+    echo
+    ui_print "$(t 'Is that right?') $(t '[Y/n]')"
+    step 'Updating the firewall'
+    step 'Restarting the VPN (new port)'
+    said_ok 'Settings saved. Show the clients again to get their new QR codes.'
     end_action
 }
 
@@ -223,6 +332,47 @@ screen_seedbox() {
     end_menu back
 }
 
+# Seedbox › Change the user or the password (seedbox_change_credentials), the
+# password generated
+screen_credentials() {
+    local port=22 SEEDBOX_NEW_PASSWORD="dGgNV5GVohRrW1ClQuk4"
+    top credentials
+    ui_crumbs Seedbox "$(t 'Change the user or the password')"
+    echo
+    ui_print "$(t '%s (empty = back)' "$(t 'User name (web and SFTP)')"): $SEEDBOX_USER"
+    ui_print "$(t 'Password (leave empty to generate one):')"
+    ui_print "$(t 'Generated password: %s  ← write it down' "$C_BOLD$SEEDBOX_NEW_PASSWORD$C_RESET")"
+    echo
+    ui_print "$(t 'Save the user %s with this password?' "$SEEDBOX_USER") $(t '[Y/n]')"
+    echo
+    step 'Stopping Transmission'
+    step 'Starting Transmission'
+    echo
+    said_ok 'Login test on the web interface: passed'
+    echo
+    text seedbox_summary | print_lines
+    end_action
+}
+
+# Seedbox › SFTP connection (seedbox_sftp_config), keys only
+screen_sftp() {
+    local url="sftp://$SEEDBOX_USER;fingerprint=$EXAMPLE_FINGERPRINT_URL@$SEEDBOX_DOMAIN:22/"
+    top sftp
+    ui_crumbs Seedbox "$(t 'SFTP connection: settings for WinSCP and FileZilla')"
+    echo
+    ui_print "$(t '  Protocol    : SFTP')"
+    ui_print "$(t '  Host        : %s' "$SEEDBOX_DOMAIN")"
+    ui_print "$(t '  Port        : %s' 22)"
+    ui_print "$(t '  User        : %s' "$SEEDBOX_USER $(t '(SSH key only)')")"
+    ui_print "$(t '  Fingerprint : %s' "$EXAMPLE_FINGERPRINT")"
+    echo
+    text sftp_config_help | print_lines
+    echo
+    ui_print "$(t 'Also create a link to a file to import into FileZilla?') $(t '[y/N]')"
+    ui_print "$(t 'Create an SSH key for WinSCP / FileZilla (connection without a password)?') $(t '[y/N]')"
+    end_action
+}
+
 screen_bans() {
     top bans
     ui_crumbs Seedbox "$(t 'Banned IP addresses (fail2ban)')"
@@ -239,6 +389,43 @@ screen_bans() {
     ui_print "  $C_GREY$(t 'Banned? The VPN still connects, and nobody is banned through it.')$C_RESET"
     echo
     ui_print "$(t '%s (empty = back)' "$(t 'Address to unban (number or IP)')"): 1"
+    end_action
+}
+
+# Backup / restore (backup_menu), the weekly backup on
+screen_backup() {
+    top backup
+    ui_crumbs "$(t 'Backup / restore')"
+    echo
+    ui_print "$(t 'Weekly backup: on (the last %s are kept in %s)' "$BACKUP_KEEP" "$BACKUP_DIR")"
+    ui_print "$(t '  Last one: %s' '2026-11-08 03:41')"
+    ui_print "$(t 'Last download of a backup started: %s' "$(days_ago 3)")"
+    echo
+    ui_menu_add 1 "$(t 'Create an encrypted backup now')"
+    ui_menu_add 2 "$(t 'Download the latest backup (one-time link)')"
+    ui_menu_add 3 "$(t 'Turn the weekly backup on / off')"
+    ui_menu_add 4 "$(t 'Restore a backup')"
+    ui_menu_show
+    echo
+    end_menu back
+}
+
+# Backup / restore › Weekly backup, turned on (backup_auto_enable), with
+# backups already made
+screen_weekly() {
+    top weekly
+    ui_crumbs "$(t 'Backup / restore')" "$(t 'Weekly backup')"
+    echo
+    text backup_auto_help | print_lines
+    echo
+    said_warn 'The backups already made keep the passphrase they were made with: the new one only applies to the next ones.'
+    echo
+    ui_print "$(t 'Passphrase of the backup (empty = back):')"
+    ui_print "$(t 'Type it again:')"
+    step 'Reloading systemd'
+    step 'Enabling the weekly backup'
+    said_ok 'Weekly backup on: the last %s are kept in %s.' "$BACKUP_KEEP" "$BACKUP_DIR"
+    said_warn 'Write the passphrase down somewhere else: without it, no backup can be restored.'
     end_action
 }
 
@@ -321,10 +508,16 @@ if ((ALL)); then
     screen_vpn
     screen_clients
     screen_dns
+    screen_vpn_address
     screen_add
+    screen_client
     screen_danger
     screen_seedbox
+    screen_credentials
+    screen_sftp
     screen_bans
+    screen_backup
+    screen_weekly
     screen_restore
     screen_terminal
     exit 0
@@ -338,7 +531,8 @@ ui_print "  $(pv 'Example screens, with example data: nothing is changed on this
 ui_print "  $(pv 'Enter: next screen · Q: quit' 'Entrée : écran suivant · Q : quitter')"
 echo
 IFS= read -r -p "  $(pv 'Press Enter to start…' 'Appuyez sur Entrée pour commencer…') " CHOICE || exit 130
-for screen in screen_home screen_home_narrow screen_vpn screen_clients screen_dns screen_add screen_danger screen_seedbox screen_bans screen_restore screen_terminal; do
+for screen in screen_home screen_home_narrow screen_vpn screen_clients screen_dns screen_vpn_address screen_add screen_client \
+    screen_danger screen_seedbox screen_credentials screen_sftp screen_bans screen_backup screen_weekly screen_restore screen_terminal; do
     if [[ $screen == screen_home_narrow && -n ${UI_COLUMNS-} ]]; then continue; fi
     "$screen" || break
 done

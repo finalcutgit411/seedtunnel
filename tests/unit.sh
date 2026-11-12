@@ -4409,7 +4409,7 @@ preview_labels_are_those_of_the_menus() (
     local out key label function unseen=0
     out=$(TERM=xterm "$ROOT/tools/preview.sh" --all --fr --no-color --columns 100 2>&1) || return 1
     i18n_load fr
-    for function in main_menu vpn_menu seedbox_menu; do
+    for function in main_menu vpn_menu seedbox_menu backup_menu; do
         while IFS='|' read -r key label; do
             # the preview shows a server with everything installed
             [[ $label == Install* ]] && continue
