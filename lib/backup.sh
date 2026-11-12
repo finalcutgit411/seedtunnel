@@ -1279,7 +1279,7 @@ restore_cli() {
 }
 
 restore_main() {
-    local file=${1-} list bad stamp was=$INTERACTIVE kept_passphrase=0 kept_firewall=0 kept previous=""
+    local file=${1-} list bad stamp was=$INTERACTIVE kept_passphrase=0 kept_firewall=0 kept previous="" tries=0
     WENT_BACK=0
     [[ -n $file ]] || die 'Usage: seedtunnel restore FILE'
     [[ -r $file ]] || die 'File not found: %s' "$file"
@@ -1303,7 +1303,15 @@ restore_main() {
             backup_cleanup
             die 'Cannot decrypt: wrong passphrase or damaged file.'
         fi
-        # typed in a terminal: asked again, or back
+        # typed in a terminal: asked again, 3 tries as sudo, or back. What
+        # was pasted with it is dropped (seen on a real server: 8 lines of
+        # a text pasted by mistake, 8 tries in 8 seconds)
+        input_drop
+        tries=$((tries + 1))
+        if ((tries >= 3)); then
+            backup_cleanup
+            die 'Cannot decrypt after %s tries: wrong passphrase or damaged file. Nothing was changed.' "$tries"
+        fi
         warn 'Cannot decrypt: wrong passphrase or damaged file.'
         if ! backup_read_passphrase 0; then
             backup_cleanup

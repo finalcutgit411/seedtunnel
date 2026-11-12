@@ -2633,3 +2633,6 @@ fr: Cette sauvegarde a été copiée dans %s : seedtunnel la laisse, supprimez-l
 
 en: No backup number %s (seedtunnel backup list).
 fr: Pas de sauvegarde numéro %s (seedtunnel backup list).
+
+en: Cannot decrypt after %s tries: wrong passphrase or damaged file. Nothing was changed.
+fr: Déchiffrement impossible après %s essais : passphrase fausse ou fichier abîmé. Rien n'a été changé.

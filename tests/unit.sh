@@ -2232,12 +2232,29 @@ restore_wrong_passphrase_asked_again() (
     APP_STATE_DIR="$WORK/restore3-state"
     mkdir -p "$APP_STATE_DIR"
     echo "VPN_PORT=1194" >"$APP_STATE_DIR/vpn.conf"
-    # a wrong passphrase: asked again; then empty: back, nothing touched
-    restore_main "$WORK/restore3.enc" >"$WORK/restore3.out" 2>&1 <<<$'wrong passphrase\n'
+    # typed one after the other: nothing is waiting to be dropped
+    (
+        input_drop() { :; }
+        # a wrong passphrase: asked again; then empty: back, nothing touched
+        restore_main "$WORK/restore3.enc" >"$WORK/restore3.out" 2>&1 <<<$'wrong passphrase\n'
+        rc=$?
+        cat "$WORK/restore3.out"
+        ((rc == 0 && WENT_BACK == 1)) && grep -q "Cannot decrypt" "$WORK/restore3.out" \
+            && [[ $(<"$APP_STATE_DIR/vpn.conf") == "VPN_PORT=1194" && -z $BACKUP_TMP_DIR ]] || exit 1
+        # 3 wrong passphrases, as sudo: stopped, nothing touched
+        : >"$APP_LOG"
+        if (restore_main "$WORK/restore3.enc") >"$WORK/restore3.out" 2>&1 <<<$'wrong 1\nwrong 2\nwrong 3\na test passphrase\n'; then exit 1; fi
+        cat "$WORK/restore3.out"
+        grep -q "Cannot decrypt after 3 tries" "$WORK/restore3.out" && (($(grep -c "Decrypting" "$APP_LOG") == 3)) \
+            && [[ $(<"$APP_STATE_DIR/vpn.conf") == "VPN_PORT=1194" ]]
+    ) || return 1
+    # seen on a real server: a text of several lines pasted at the question is
+    # one try, the rest is dropped (here, then the end of the input)
+    : >"$APP_LOG"
+    (restore_main "$WORK/restore3.enc") >"$WORK/restore3.out" 2>&1 <<<$'line 1 of a text\nline 2\nline 3\nline 4\n'
     rc=$?
     cat "$WORK/restore3.out"
-    ((rc == 0 && WENT_BACK == 1)) && grep -q "Cannot decrypt" "$WORK/restore3.out" \
-        && [[ $(<"$APP_STATE_DIR/vpn.conf") == "VPN_PORT=1194" && -z $BACKUP_TMP_DIR ]]
+    ((rc == 130)) && (($(grep -c "Decrypting" "$APP_LOG") == 1)) && [[ $(<"$APP_STATE_DIR/vpn.conf") == "VPN_PORT=1194" ]]
 )
 
 # --- reliability --------------------------------------------------------------
@@ -6831,7 +6848,7 @@ check "back: domain name at the installation" seedbox_domain_install_can_go_back
 check "back: passphrase of a backup (wrong entries asked again)" backup_passphrase_can_go_back
 check "back: backup now and weekly backup (empty passphrase)" backup_create_and_weekly_can_go_back
 check "back: restore, path of the file (asked again if missing)" backup_menu_can_go_back
-check "back: restore, wrong passphrase asked again, then back" restore_wrong_passphrase_asked_again
+check "back: restore, wrong passphrase asked again (3 tries, a pasted text is one), then back" restore_wrong_passphrase_asked_again
 check "df failing: free space unreadable, nothing stops (diagnostics, full disk)" df_failure_does_not_stop
 check "network settings: one value off (IPv6 too) → said, and loaded again" net_hardening_checked_everywhere
 check "diagnostics: NAT made for another network interface → error" doctor_nat_checks_interface

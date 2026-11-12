@@ -314,6 +314,16 @@ require_terminal() {
 # Is the standard input a terminal? (a function, so that the tests can say yes)
 stdin_is_terminal() { [[ -t 0 ]]; }
 
+# What was typed or pasted and not read yet is dropped (in a terminal only):
+# after a refused answer, a text of several lines pasted by mistake is not
+# taken for as many answers
+input_drop() {
+    local _drop_line
+    stdin_is_terminal || return 0
+    while IFS= read -r -t 0.3 _drop_line; do :; done
+    return 0
+}
+
 # ask_back VARIABLE "Question" [suggested value] — like ask, but an empty answer
 # goes back: status 1, the variable is left alone, nothing is to be changed.
 # Every question of the menus can be left this way (a suggestion is erased
