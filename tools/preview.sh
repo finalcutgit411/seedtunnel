@@ -32,6 +32,9 @@ APP_DIR=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
 . "$APP_DIR/lib/seedbox.sh"
 # shellcheck source=lib/backup.sh
 . "$APP_DIR/lib/backup.sh"
+# the rules of the firewall, in words
+# shellcheck source=lib/firewall.sh
+. "$APP_DIR/lib/firewall.sh"
 
 trap 'on_error $? $LINENO "$BASH_COMMAND" "${BASH_SOURCE[0]:-}"' ERR
 
@@ -493,6 +496,47 @@ screen_bans() {
     end_action
 }
 
+# Firewall › Show the rules (firewall_rules_menu): on, with the VPN, the
+# seedbox and two clients; the rules as nftables gives them
+screen_rules() {
+    top rules
+    ui_crumbs "$(t 'Firewall')" "$(t 'Show the rules')"
+    echo
+    (
+        firewall_enabled() { return 0; }
+        vpn_installed() { return 0; }
+        seedbox_installed() { return 0; }
+        firewall_ssh_ports() { echo 22; }
+        VPN_CLIENTS_DIR=$(mktemp -d)
+        printf 'CLIENT_NUMBER=1\n' >"$VPN_CLIENTS_DIR/phone.env"
+        printf 'CLIENT_NUMBER=2\n' >"$VPN_CLIENTS_DIR/laptop.env"
+        nft() {
+            case "$*" in
+                "list table inet $FIREWALL_TABLE")
+                    printf '%s\n' "table inet $FIREWALL_TABLE {" '	chain input {' \
+                        '		type filter hook input priority filter; policy drop;' \
+                        '		ct state established,related accept' '		ct state invalid drop' '		iifname "lo" accept' \
+                        '		meta l4proto { icmp, ipv6-icmp } accept' '		ip6 saddr fe80::/10 udp dport 546 accept' \
+                        '		tcp dport 22 accept' "		udp dport $VPN_PORT accept" "		iifname \"$VPN_INTERFACE\" accept" \
+                        '		tcp dport { 80, 443 } accept' "		meta l4proto { tcp, udp } th dport $TORRENT_PORT accept" '	}' '}'
+                    ;;
+                "list table ip seedtunnel")
+                    printf '%s\n' 'table ip seedtunnel {' '	chain prerouting {' \
+                        '		iifname "eth0" meta l4proto { tcp, udp } th dport 60001 dnat to 10.8.0.2' \
+                        '		iifname "eth0" meta l4proto { tcp, udp } th dport 60002 dnat to 10.8.0.3' '	}' '}'
+                    ;;
+            esac
+        }
+        firewall_rules_screen
+        rm -rf "$VPN_CLIENTS_DIR"
+    ) 2>&1 | print_lines
+    echo
+    ui_menu_add 1 "$(t 'Show the raw rules (nftables)')"
+    ui_menu_show
+    echo
+    end_keys b "$(t 'Back')" q "$(t 'Quit')"
+}
+
 # Backup / restore (backup_menu), the weekly backup on
 screen_backup() {
     top backup
@@ -630,6 +674,7 @@ if ((ALL)); then
     screen_keys
     screen_key_add
     screen_bans
+    screen_rules
     screen_backup
     screen_weekly
     screen_restore
@@ -646,7 +691,7 @@ ui_print "  $(pv 'Enter: next screen · Q: quit' 'Entrée : écran suivant · Q 
 echo
 IFS= read -r -p "  $(pv 'Press Enter to start…' 'Appuyez sur Entrée pour commencer…') " CHOICE || exit 130
 for screen in screen_home screen_home_narrow screen_home_manual screen_vpn screen_clients screen_dns screen_vpn_address screen_add \
-    screen_client_card screen_client_qr screen_client screen_danger screen_seedbox screen_credentials screen_sftp screen_keys screen_key_add screen_bans screen_backup screen_weekly screen_restore screen_terminal; do
+    screen_client_card screen_client_qr screen_client screen_danger screen_seedbox screen_credentials screen_sftp screen_keys screen_key_add screen_bans screen_rules screen_backup screen_weekly screen_restore screen_terminal; do
     if [[ $screen == screen_home_narrow && -n ${UI_COLUMNS-} ]]; then continue; fi
     "$screen" || break
 done

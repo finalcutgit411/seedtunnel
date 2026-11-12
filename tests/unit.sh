@@ -3070,6 +3070,31 @@ firewall_rules_differences_said() (
         && grep -q "Missing from the rules loaded, although the settings need it: SSH 22/tcp" "$WORK/rules-diff.out"
 )
 
+# The same rules in the menu: a green frame that sums them up, the open ports,
+# what every server allows, the other port pointed out, the ports forwarded to
+# the clients in a table; off, or accepting everything: said in a frame
+firewall_rules_screen_laid_out() (
+    firewall_rules_load
+    local out
+    UI_COLUMNS=80
+    ui_width
+    out=$(firewall_rules_screen 2>&1)
+    printf '%s\n' "$out"
+    [[ $out == *"┌─ ● Firewall on"*"│ By default  everything coming in is refused"* ]] || return 1
+    [[ $out == *"● Ports open on the server"*"SSH / SFTP     22/tcp"*"VPN WireGuard  51820/udp"*"Web site       80, 443/tcp"*"BitTorrent     60000 (TCP and UDP)"* ]] || return 1
+    [[ $out == *"! Other port open: 8080/tcp"*"● Always allowed"*"Replies        to the connections already open"* ]] || return 1
+    [[ $(tr -s ' \n' ' ' <<<"$out") == *"Network ping and ICMP (IPv4 and IPv6), IPv6 address from the provider (DHCPv6)"* ]] || return 1
+    [[ $out == *"● Ports forwarded to the VPN clients"*"reachable from the Internet"*"PORT   CLIENT  ADDRESS"*"60002  laptop  10.8.0.3"* ]] || return 1
+    # every rule found is said in the menu as for the commands
+    [[ $out != *"✔ "* ]] || return 1
+    RULES_POLICY=accept
+    out=$(firewall_rules_screen 2>&1)
+    [[ $out == *"┌─ ! Everything is accepted"*"seedtunnel firewall enable --yes"* ]] || return 1
+    printf 'FIREWALL_ENABLED=0\n' >"$FIREWALL_CONF_FILE"
+    out=$(firewall_rules_screen 2>&1)
+    [[ $out == *"┌─ ! Firewall off"*"Nothing is refused"*"60002  laptop"* && $out != *"reachable from the Internet"* ]]
+)
+
 firewall_rules_when_off() (
     firewall_rules_load
     printf 'FIREWALL_ENABLED=0\n' >"$FIREWALL_CONF_FILE"
@@ -6435,6 +6460,7 @@ check "choices with a note: beside or under, nothing cut (80, 40, 30)" ui_choice
 check "SSH keys of the list: two short lines in the menus" sftp_key_list_lines
 check "public key asked: a private key pasted is named, not kept" sftp_private_key_pasted
 check "frames: cards and summaries green with « ● », « ✔ » when done" ui_box_good_and_ok
+check "firewall rules in the menu: frame, open ports, always allowed, forwarded ports" firewall_rules_screen_laid_out
 check "client screen: three parts, values under themselves, colors kept, nothing cut" vpn_client_guide_layout
 check "domain menu: same name, certificate kept without a new request" domain_change_same_name_keeps_certificate
 check "domain menu: warning and confirmation before replacing the certificate" domain_change_warns_before_replacing_certificate

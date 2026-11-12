@@ -812,9 +812,6 @@ fr: Tout le reste est accepté : ces règles ne refusent rien par défaut   → 
 en: Ports forwarded to the VPN clients (they can be reached from the Internet, the firewall does not filter them):
 fr: Ports redirigés vers les clients du VPN (joignables depuis Internet, le pare-feu ne les filtre pas) :
 
-en: Show the raw rules (nftables)?
-fr: Afficher les règles brutes (nftables) ?
-
 en: Raw rules:  nft list table inet %s ; nft list table ip seedtunnel
 fr: Règles brutes :  nft list table inet %s ; nft list table ip seedtunnel
 
@@ -2485,3 +2482,89 @@ fr: Paramètres → VPN → WireGuard (roue dentée) → « VPN permanent » et 
 
 en: Options → Advanced → Network interface → the WireGuard tunnel
 fr: Options → Avancé → Interface réseau → le tunnel WireGuard
+
+# --- Firewall › Show the rules, laid out (1.0.0) ----------------------------------
+
+en: Replies
+fr: Réponses
+
+en: to the connections already open
+fr: aux connexions déjà ouvertes
+
+en: Local
+fr: Local
+
+en: the server itself
+fr: le serveur lui-même
+
+en: everything coming from the VPN clients
+fr: tout ce qui vient des clients du VPN
+
+en: Network
+fr: Réseau
+
+en: ping and ICMP (IPv4 and IPv6)
+fr: ping et ICMP (IPv4 et IPv6)
+
+en: Web site
+fr: Site web
+
+en: VPN WireGuard
+fr: VPN WireGuard
+
+en: Show the raw rules (nftables)
+fr: Afficher les règles brutes (nftables)
+
+en: Raw rules (nftables)
+fr: Règles brutes (nftables)
+
+en: Firewall off
+fr: Pare-feu désactivé
+
+en: Nothing is refused: every port of the server can be reached.
+fr: Rien n'est refusé : tous les ports du serveur sont joignables.
+
+en: To turn it on: choice 1 of the Firewall menu.
+fr: Pour l'activer : choix 1 du menu Pare-feu.
+
+en: Rules missing
+fr: Règles absentes
+
+en: The firewall is on, but its rules are not loaded:
+fr: Le pare-feu est activé, mais ses règles ne sont pas chargées :
+
+en: By default
+fr: Par défaut
+
+en: everything coming in is refused
+fr: tout ce qui arrive est refusé
+
+en: Rules
+fr: Règles
+
+en: those loaded right now
+fr: celles chargées en ce moment
+
+en: Firewall on
+fr: Pare-feu actif
+
+en: Everything is accepted
+fr: Tout est accepté
+
+en: These rules refuse nothing by default:
+fr: Ces règles ne refusent rien par défaut :
+
+en: Ports open on the server
+fr: Ports ouverts sur le serveur
+
+en: Always allowed
+fr: Toujours autorisé
+
+en: Ports forwarded to the VPN clients
+fr: Ports redirigés vers les clients du VPN
+
+en: reachable from the Internet: the firewall does not filter them
+fr: joignables depuis Internet : le pare-feu ne les filtre pas
+
+en: IPv6 address from the provider (DHCPv6)
+fr: adresse IPv6 de l'hébergeur (DHCPv6)

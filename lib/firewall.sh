@@ -82,6 +82,30 @@ firewall_refuses_by_default() { grep -qE 'type filter hook input priority [^;]*;
 # One allowed line of the list (text already translated)
 firewall_rule_line() { printf '  %s✔%s %s\n' "$C_GREEN" "$C_RESET" "$1"; }
 
+# firewall_rule_found KIND LABEL VALUE TEXT — what firewall_rules_in_words
+# found. For the commands, TEXT on its line (KIND other: a warning). With
+# FW_COLLECT=1 (the screen of the menu): kept in FW_OPEN_* (open, a port),
+# FW_ALWAYS_* (always, a rule of every server) or FW_OTHERS (other).
+firewall_rule_found() {
+    if ((${FW_COLLECT:-0})); then
+        case $1 in
+            open)
+                FW_OPEN_LABELS+=("$2")
+                FW_OPEN_VALUES+=("$3")
+                ;;
+            always)
+                FW_ALWAYS_LABELS+=("$2")
+                FW_ALWAYS_VALUES+=("$3")
+                ;;
+            *) FW_OTHERS+=("$4") ;;
+        esac
+    elif [[ $1 == other ]]; then
+        printf '  %s!%s %s\n' "$C_YELLOW" "$C_RESET" "$4"
+    else
+        firewall_rule_line "$4"
+    fi
+}
+
 # Numbers in a rule: « tcp dport { 22, 2222 } accept » → 22 2222
 firewall_rule_numbers() { grep -oE '[0-9]+' <<<"${1#*dport}" | paste -sd' ' -; }
 
@@ -97,15 +121,23 @@ firewall_rules_in_words() {
             *) continue ;;
         esac
         case $line in
-            "ct state established,related accept") firewall_rule_line "$(t 'Replies to the connections already open')" ;;
-            'iifname "lo" accept') firewall_rule_line "$(t 'The server talking to itself')" ;;
-            "iifname \"$VPN_INTERFACE\" accept") firewall_rule_line "$(t 'Everything coming from the VPN clients')" ;;
-            "ip6 saddr fe80::/10 udp dport 546 accept") firewall_rule_line "$(t 'IPv6 address given by the provider (DHCPv6)')" ;;
+            "ct state established,related accept")
+                firewall_rule_found always "$(t 'Replies')" "$(t 'to the connections already open')" "$(t 'Replies to the connections already open')"
+                ;;
+            'iifname "lo" accept')
+                firewall_rule_found always "$(t 'Local')" "$(t 'the server itself')" "$(t 'The server talking to itself')"
+                ;;
+            "iifname \"$VPN_INTERFACE\" accept")
+                firewall_rule_found always VPN "$(t 'everything coming from the VPN clients')" "$(t 'Everything coming from the VPN clients')"
+                ;;
+            "ip6 saddr fe80::/10 udp dport 546 accept")
+                firewall_rule_found always "$(t 'Network')" "$(t 'IPv6 address from the provider (DHCPv6)')" "$(t 'IPv6 address given by the provider (DHCPv6)')"
+                ;;
             "meta l4proto {"*"} accept")
                 if [[ $line == *icmp* || $line == *"1, 58"* ]]; then
-                    firewall_rule_line "$(t 'Ping and ICMP messages (IPv4 and IPv6)')"
+                    firewall_rule_found always "$(t 'Network')" "$(t 'ping and ICMP (IPv4 and IPv6)')" "$(t 'Ping and ICMP messages (IPv4 and IPv6)')"
                 else
-                    printf '  %s!%s %s\n' "$C_YELLOW" "$C_RESET" "$(t 'Other rule: %s' "$line")"
+                    firewall_rule_found other "" "" "$(t 'Other rule: %s' "$line")"
                 fi
                 ;;
             "tcp dport "*" accept")
@@ -119,27 +151,31 @@ firewall_rules_in_words() {
                         other+="${other:+, }$port"
                     fi
                 done
-                if [[ -n $ssh ]]; then firewall_rule_line "$(t 'SSH / SFTP: port %s/tcp' "$ssh")"; fi
-                if [[ -n $web ]]; then firewall_rule_line "$(t 'Web site: ports %s/tcp' "$web")"; fi
-                if [[ -n $other ]]; then printf '  %s!%s %s\n' "$C_YELLOW" "$C_RESET" "$(t 'Other port open: %s/tcp' "$other")"; fi
+                if [[ -n $ssh ]]; then
+                    firewall_rule_found open "SSH / SFTP" "$C_CYAN$ssh$C_RESET/tcp" "$(t 'SSH / SFTP: port %s/tcp' "$ssh")"
+                fi
+                if [[ -n $web ]]; then
+                    firewall_rule_found open "$(t 'Web site')" "$C_CYAN$web$C_RESET/tcp" "$(t 'Web site: ports %s/tcp' "$web")"
+                fi
+                if [[ -n $other ]]; then firewall_rule_found other "" "" "$(t 'Other port open: %s/tcp' "$other")"; fi
                 ;;
             "udp dport "*" accept")
                 port=$(firewall_rule_numbers "$line")
                 if vpn_installed && [[ $port == "$VPN_PORT" ]]; then
-                    firewall_rule_line "$(t 'VPN WireGuard: port %s/udp' "$port")"
+                    firewall_rule_found open "$(t 'VPN WireGuard')" "$C_CYAN$port$C_RESET/udp" "$(t 'VPN WireGuard: port %s/udp' "$port")"
                 else
-                    printf '  %s!%s %s\n' "$C_YELLOW" "$C_RESET" "$(t 'Other port open: %s/udp' "$port")"
+                    firewall_rule_found other "" "" "$(t 'Other port open: %s/udp' "$port")"
                 fi
                 ;;
             "meta l4proto { "*" } th dport "*" accept")
                 port=$(firewall_rule_numbers "$line")
                 if seedbox_installed && [[ $port == "$TORRENT_PORT" ]]; then
-                    firewall_rule_line "$(t 'BitTorrent: port %s (TCP and UDP)' "$port")"
+                    firewall_rule_found open BitTorrent "$(t '%s (TCP and UDP)' "$C_CYAN$port$C_RESET")" "$(t 'BitTorrent: port %s (TCP and UDP)' "$port")"
                 else
-                    printf '  %s!%s %s\n' "$C_YELLOW" "$C_RESET" "$(t 'Other port open: %s (TCP and UDP)' "$port")"
+                    firewall_rule_found other "" "" "$(t 'Other port open: %s (TCP and UDP)' "$port")"
                 fi
                 ;;
-            *) printf '  %s!%s %s\n' "$C_YELLOW" "$C_RESET" "$(t 'Other rule: %s' "$line")" ;;
+            *) firewall_rule_found other "" "" "$(t 'Other rule: %s' "$line")" ;;
         esac
     done
 }
@@ -163,10 +199,14 @@ firewall_rules_missing() {
     fi
 }
 
-# Ports forwarded to the clients of the VPN (NAT of the VPN, loaded right now)
-firewall_forwarded_ports() {
-    local nat line port address number name file found=0
+# Ports forwarded to the clients of the VPN (NAT of the VPN, loaded right now):
+# FW_FORWARDED, rows « port<tab>client<tab>address ». Status 1: the VPN does
+# not run (no NAT loaded).
+firewall_forwarded_rows() {
+    local nat line port address number name file
+    FW_FORWARDED=()
     nat=$(nft list table ip seedtunnel 2>/dev/null || true)
+    [[ -n $nat ]] || return 1
     while IFS= read -r line; do
         [[ $line =~ th\ dport\ ([0-9]+)\ dnat\ (ip\ )?to\ ([0-9.]+) ]] || continue
         port=${BASH_REMATCH[1]}
@@ -181,14 +221,25 @@ firewall_forwarded_ports() {
                 name=${name%.env}
             fi
         done
-        printf '  %s●%s %s\n' "$C_GREEN" "$C_RESET" "$(t 'port %s (TCP and UDP) → %s (%s)' "$port" "$name" "$address")"
-        found=1
+        FW_FORWARDED+=("$port"$'\t'"$name"$'\t'"$address")
     done <<<"$nat"
-    if [[ -z $nat ]]; then
+}
+
+# Ports forwarded to the clients of the VPN, for the commands
+firewall_forwarded_ports() {
+    local row port name address
+    if ! firewall_forwarded_rows; then
         printf '  %s\n' "$(t 'none: the VPN is not running')"
-    elif ((!found)); then
-        printf '  %s\n' "$(t 'none: no client yet')"
+        return 0
     fi
+    if ((${#FW_FORWARDED[@]} == 0)); then
+        printf '  %s\n' "$(t 'none: no client yet')"
+        return 0
+    fi
+    for row in "${FW_FORWARDED[@]}"; do
+        IFS=$'\t' read -r port name address <<<"$row"
+        printf '  %s●%s %s\n' "$C_GREEN" "$C_RESET" "$(t 'port %s (TCP and UDP) → %s (%s)' "$port" "$name" "$address")"
+    done
 }
 
 firewall_rules_show() {
@@ -217,18 +268,111 @@ firewall_rules_show() {
     fi
 }
 
-# From the menu: the list, then the raw rules on request
+# In the menus: the rules loaded right now, laid out (a frame that sums them
+# up, the open ports, what every server allows, the ports forwarded to the
+# clients of the VPN), and the raw rules at hand ([1])
 firewall_rules_menu() {
-    banner
-    section 'Show the rules'
-    firewall_rules_show
-    echo
-    if confirm 'Show the raw rules (nftables)?' n; then
+    local choice
+    while true; do
+        banner
+        section 'Show the rules'
+        firewall_rules_screen
         echo
-        nft list table inet "$FIREWALL_TABLE" 2>/dev/null || true
-        nft list table ip seedtunnel 2>/dev/null || true
-    fi
+        ui_menu_add 1 "$(t 'Show the raw rules (nftables)')"
+        ui_menu_show
+        echo
+        ui_ask_choice choice b "$(t 'Back')" q "$(t 'Quit')"
+        case ${choice,,} in
+            1) ui_action firewall_raw_rules ;;
+            "" | b) return 0 ;;
+            q) ui_quit ;;
+        esac
+    done
+}
+
+firewall_raw_rules() {
+    banner
+    section 'Raw rules (nftables)'
+    nft list table inet "$FIREWALL_TABLE" 2>/dev/null || true
+    nft list table ip seedtunnel 2>/dev/null || true
     pause
+}
+
+firewall_rules_screen() {
+    local rules width=0 label i
+    local -a FW_OPEN_LABELS=() FW_OPEN_VALUES=() FW_ALWAYS_LABELS=() FW_ALWAYS_VALUES=() FW_OTHERS=() FW_FORWARDED=()
+    if ! firewall_enabled; then
+        ui_box warn "$(t 'Firewall off')" "$(t 'Nothing is refused: every port of the server can be reached.')" \
+            "$(t 'To turn it on: choice 1 of the Firewall menu.')"
+        firewall_rules_forwarded_group 0
+        return 0
+    fi
+    rules=$(nft list table inet "$FIREWALL_TABLE" 2>/dev/null || true)
+    if [[ -z $rules ]]; then
+        ui_box bad "$(t 'Rules missing')" "$(t 'The firewall is on, but its rules are not loaded:')" "seedtunnel firewall enable --yes"
+        firewall_rules_forwarded_group 0
+        return 0
+    fi
+    if firewall_refuses_by_default <<<"$rules"; then
+        ui_field_add "$(t 'By default')" "$(t 'everything coming in is refused')"
+        ui_field_add "$(t 'Rules')" "$(t 'those loaded right now')"
+        ui_box_fields good "$(t 'Firewall on')"
+    else
+        ui_box bad "$(t 'Everything is accepted')" "$(t 'These rules refuse nothing by default:')" "seedtunnel firewall enable --yes"
+    fi
+    firewall_rules_missing "$rules"
+    FW_COLLECT=1 firewall_rules_in_words <<<"$rules"
+    # the merged « Network » line: ping and ICMP, DHCPv6
+    for i in "${!FW_ALWAYS_LABELS[@]}"; do
+        if ((i > 0)) && [[ ${FW_ALWAYS_LABELS[i]} == "${FW_ALWAYS_LABELS[i - 1]}" ]]; then
+            FW_ALWAYS_VALUES[i - 1]+=", ${FW_ALWAYS_VALUES[i]}"
+            FW_ALWAYS_LABELS[i]=""
+        fi
+    done
+    for label in "${FW_OPEN_LABELS[@]}" "${FW_ALWAYS_LABELS[@]}"; do
+        ui_len "$label"
+        if ((UI_LEN > width)); then width=$UI_LEN; fi
+    done
+    echo
+    for i in "${!FW_OPEN_LABELS[@]}"; do ui_field_add "${FW_OPEN_LABELS[i]}" "${FW_OPEN_VALUES[i]}"; done
+    ui_group "$(t 'Ports open on the server')" "$width"
+    for label in "${FW_OTHERS[@]}"; do printf '    %s!%s %s\n' "$C_YELLOW" "$C_RESET" "$label"; done
+    echo
+    for i in "${!FW_ALWAYS_LABELS[@]}"; do
+        if [[ -n ${FW_ALWAYS_LABELS[i]} ]]; then ui_field_add "${FW_ALWAYS_LABELS[i]}" "${FW_ALWAYS_VALUES[i]}"; fi
+    done
+    ui_group "$(t 'Always allowed')" "$width"
+    firewall_rules_forwarded_group 1
+}
+
+# firewall_rules_note COLOR TEXT — a line under the title of a part (indented
+# 4), wrapped to the screen
+firewall_rules_note() {
+    local part
+    ui_wrap_words "$2" $((UI_WIDTH - 4))
+    for part in "${UI_LINES[@]}"; do printf '    %s%s%s\n' "$1" "${part//$'\x01'/ }" "${1:+$C_RESET}"; done
+}
+
+# firewall_rules_forwarded_group FILTERED — the ports forwarded to the clients
+# of the VPN, in a table (FILTERED 1: the firewall runs, and does not filter
+# them; 0: it does not run)
+firewall_rules_forwarded_group() {
+    vpn_installed || return 0
+    echo
+    ui_group "$(t 'Ports forwarded to the VPN clients')"
+    if ((${1:-1})); then
+        firewall_rules_note "$C_GREY" "$(t 'reachable from the Internet: the firewall does not filter them')"
+    fi
+    if ! firewall_forwarded_rows; then
+        firewall_rules_note "" "$(t 'none: the VPN is not running')"
+    elif ((${#FW_FORWARDED[@]} == 0)); then
+        firewall_rules_note "" "$(t 'none: no client yet')"
+    else
+        (
+            UI_WIDTH=$((UI_WIDTH - 2))
+            ui_table "PORT"$'\t'"CLIENT"$'\t'"$(t 'ADDRESS')" "${FW_FORWARDED[@]}"
+        ) | sed 's/^/  /'
+    fi
 }
 
 # What is open, in words
