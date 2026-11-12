@@ -60,7 +60,7 @@ Les menus sont en bash pur : ils marchent en SSH, dans PuTTY tel quel, avec ou s
 seedtunnel vpn install [--config FICHIER]   seedtunnel seedbox install [--config FICHIER] [--staging]
 seedtunnel vpn add telephone [--qr]         seedtunnel seedbox password [--user NOM]
 seedtunnel vpn remove telephone --yes       seedtunnel seedbox domain mon.domaine.fr [--staging]
-seedtunnel vpn list                         seedtunnel seedbox sftp-config [filezilla]
+seedtunnel vpn list                         seedtunnel seedbox sftp-config [winscp|filezilla]
 seedtunnel vpn show telephone               seedtunnel seedbox sftp-key add ma-cle.pub
 seedtunnel vpn share pc-bureau              seedtunnel seedbox sftp-key new
 seedtunnel vpn dns adguard                  seedtunnel seedbox sftp-password off
@@ -142,7 +142,7 @@ Plus besoin de `scp` pour récupérer un fichier sur son ordinateur :
 
 - `seedtunnel vpn share pc-bureau` donne un lien vers la configuration WireGuard du client ;
 - `seedtunnel backup share` donne un lien vers la dernière sauvegarde ;
-- `seedtunnel seedbox sftp-config` donne une adresse à coller dans WinSCP, qui contient l'empreinte du serveur : WinSCP vérifie tout seul que c'est le bon serveur, sans question à la première connexion. Avec `filezilla`, elle crée en plus un lien vers un fichier à importer dans FileZilla ;
+- `seedtunnel seedbox sftp-config` donne une adresse à coller dans WinSCP, qui contient l'empreinte du serveur : WinSCP vérifie tout seul que c'est le bon serveur, sans question à la première connexion. Avec `winscp` ou `filezilla`, elle crée en plus un lien vers un profil à importer dans ce logiciel (le site, sans le mot de passe) ;
 - `seedtunnel seedbox sftp-key new` crée une clé SSH et donne un lien vers elle au format .ppk, prête pour WinSCP et FileZilla : SFTP sans mot de passe. Aucune copie de la clé privée ne reste sur le serveur.
 
 Le lien passe par le site HTTPS de la seedbox. Il contient un jeton aléatoire impossible à deviner, ne fonctionne **qu'une fois** et expire au bout de **10 minutes**. nginx ne sert le fichier qu'une fois : toute autre requête est refusée, même juste après sur la même connexion ou avec une autre forme de l'adresse, jamais de téléchargement partiel, et le fichier est aussitôt supprimé. Une requête HEAD est refusée sans consommer le lien. Ouvrir la page ne compte pas, seul le téléchargement du fichier compte : l'aperçu automatique d'une messagerie ne gâche donc pas le lien.

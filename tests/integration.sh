@@ -587,9 +587,9 @@ share_head_test() {
 
 # SFTP settings: WinSCP address with the fingerprint of the server (computed
 # here in another way: SHA-256 of the public key, in base64 « URL »), then
-# FileZilla site downloadable
+# the FileZilla and WinSCP sites downloadable
 sftp_config_test() {
-    local out path xml fingerprint
+    local out path xml ini fingerprint
     fingerprint=$(awk '{ print $2 }' /etc/ssh/ssh_host_ed25519_key.pub | base64 -d \
         | openssl dgst -sha256 -binary | openssl base64 -A | tr '+/' '-_')
     out=$(app seedbox sftp-config 2>&1) || {
@@ -608,6 +608,16 @@ sftp_config_test() {
     xml=$(curl -skf --max-time 10 "https://127.0.0.1${path}seedbox-filezilla.xml") || return 1
     [[ $xml == *"<User>$SBU</User>"* && $xml == *"<Protocol>1</Protocol>"* ]] || {
         printf '%s\n' "$xml"
+        return 1
+    }
+    out=$(app seedbox sftp-config winscp 2>&1) || {
+        printf '%s\n' "$out"
+        return 1
+    }
+    path=$(share_path "$out") || return 1
+    ini=$(curl -skf --max-time 10 "https://127.0.0.1${path}seedbox-winscp.ini") || return 1
+    [[ $ini == *"[Sessions\\Seedbox%20127.0.0.1]"* && $ini == *"HostName=127.0.0.1"* && $ini == *"UserName=$SBU"* ]] || {
+        printf '%s\n' "$ini"
         return 1
     }
 }
@@ -1024,7 +1034,7 @@ EOF
     check "HEAD refused (405) without using the link up" share_head_test
     check "watcher killed: the link is deleted anyway" share_watcher_killed_test
     check "tokens of the links hidden in the access log of nginx" share_log_test
-    check "seedbox sftp-config: WinSCP address with fingerprint, FileZilla file" sftp_config_test
+    check "seedbox sftp-config: WinSCP address with fingerprint, FileZilla and WinSCP files" sftp_config_test
     check "list of links impossible" http_is 403 /share/
     check "unknown token: 404" http_is 404 /share/0123456789abcdef0123456789abcdef/
 

@@ -28,9 +28,10 @@ Seedbox
   seedbox password [--user NAME]     change the password (and the name)
                                      (read from standard input without a terminal)
   seedbox domain NAME [--staging]    change the domain / request the certificate again
-  seedbox sftp-config [filezilla]    SFTP settings: address for WinSCP, FileZilla file
+  seedbox sftp-config [winscp|filezilla]
+                                     SFTP settings; profile to import (one-time link)
   seedbox sftp-key add FILE.pub | list | remove N
-  seedbox sftp-key new               key for WinSCP / FileZilla (one-time download link)
+  seedbox sftp-key new               key for WinSCP / FileZilla (one-time link)
   seedbox sftp-password on|off       allow the password in SFTP
   seedbox bans | unban IP            addresses banned by fail2ban
   seedbox restart | uninstall [--yes] [--purge-data]
@@ -142,10 +143,38 @@ that it is really your server, without a question at the first connection.
 EOF
 }
 
+text_en_share_steps_winscp() {
+    cat <<EOF
+<li>WinSCP: in the login window, « Tools » → « Import Sites… » → « Import from »: « INI file » → « Browse… »: choose this file → tick the site → « OK ».</li>
+EOF
+    if [[ $SEEDBOX_SFTP_PASSWORD == no ]]; then
+        cat <<EOF
+<li>The site « Seedbox $SEEDBOX_DOMAIN » shows in the list. This server accepts SSH keys only: edit the site → « Advanced… » → « SSH » → « Authentication » → « Private key file »: choose your key → « OK » → « Save ».</li>
+EOF
+    else
+        cat <<EOF
+<li>The site « Seedbox $SEEDBOX_DOMAIN » shows in the list. The password is asked when connecting.</li>
+EOF
+    fi
+    cat <<EOF
+<li>At the first connection, the fingerprint of the server must be: <code>$fingerprint</code></li>
+EOF
+}
+
 text_en_share_steps_filezilla() {
     cat <<EOF
 <li>FileZilla: « File » → « Import… » → choose this file.</li>
+EOF
+    if [[ $SEEDBOX_SFTP_PASSWORD == no ]]; then
+        cat <<EOF
+<li>The site « Seedbox $SEEDBOX_DOMAIN » shows in the Site Manager. This server accepts SSH keys only: « Logon Type »: « Key file » → choose your key.</li>
+EOF
+    else
+        cat <<EOF
 <li>The site « Seedbox $SEEDBOX_DOMAIN » shows in the Site Manager. The password is asked when connecting.</li>
+EOF
+    fi
+    cat <<EOF
 <li>At the first connection, the fingerprint of the server must be: <code>$fingerprint</code></li>
 EOF
 }

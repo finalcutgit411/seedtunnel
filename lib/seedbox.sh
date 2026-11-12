@@ -1289,43 +1289,65 @@ filezilla_generate_site() {
 EOF
 }
 
-# Link to the site to import into FileZilla
-filezilla_share() {
-    local port=$1 tmp fingerprint
+# Site to import into WinSCP (login window → Tools → Import Sites → INI file):
+# a WinSCP.ini that holds this site only. Sites already saved are kept (same
+# name: WinSCP adds a number). No password in it: it is asked at connection
+# time. Protocol not written: SFTP is the default. Windows line ends, as in
+# the files WinSCP writes. The name of the site is escaped as WinSCP does it
+# (« %20 » for a space).
+winscp_generate_site() {
+    local name="Seedbox $SEEDBOX_DOMAIN"
+    printf '[Sessions\\%s]\r\nHostName=%s\r\nPortNumber=%s\r\nUserName=%s\r\n' \
+        "${name// /%20}" "$SEEDBOX_DOMAIN" "$1" "$SEEDBOX_USER"
+}
+
+# sftp_profile_share winscp|filezilla PORT — link to the site to import into
+# WinSCP or FileZilla
+sftp_profile_share() {
+    local program=$1 port=$2 tmp fingerprint
     systemctl is-active --quiet nginx || die 'nginx is stopped:  seedtunnel seedbox restart'
     fingerprint=$(host_key_fingerprint)
     tmp=$(mktemp)
-    filezilla_generate_site "$port" >"$tmp"
-    share_create "$tmp" "seedbox-filezilla.xml" "$(t 'SFTP connection to the seedbox (FileZilla)')" \
-        "$(text share_steps_filezilla)" "$(t 'The file holds no password.')"
+    if [[ $program == winscp ]]; then
+        winscp_generate_site "$port" >"$tmp"
+        share_create "$tmp" "seedbox-winscp.ini" "$(t 'SFTP connection to the seedbox (WinSCP)')" \
+            "$(text share_steps_winscp)" "$(t 'The file holds no password.')"
+    else
+        filezilla_generate_site "$port" >"$tmp"
+        share_create "$tmp" "seedbox-filezilla.xml" "$(t 'SFTP connection to the seedbox (FileZilla)')" \
+            "$(text share_steps_filezilla)" "$(t 'The file holds no password.')"
+    fi
     rm -f "$tmp"
 }
 
-# SFTP connection settings: address for WinSCP and, on request (« filezilla »),
-# a link to the file to import into FileZilla
+# SFTP connection settings, and the address for WinSCP. On request (« winscp »
+# or « filezilla »), a link to the profile to import into that program. In the
+# menus, without a request: the settings and the choices (seedbox_sftp_screen).
 seedbox_sftp_config() {
     local port fingerprint keys_only="" url
     port=$(ssh_first_port)
     port=${port:-22}
     fingerprint=$(host_key_fingerprint)
-    url=$(winscp_url "$port")
     if [[ $SEEDBOX_SFTP_PASSWORD == no ]]; then keys_only=" $(t '(SSH key only)')"; fi
-    if [[ ${1-} != filezilla ]] && ((INTERACTIVE)); then
-        seedbox_sftp_screen "$port" "$fingerprint" "$url" "$keys_only"
+    if [[ -z ${1-} ]] && ((INTERACTIVE)); then
+        seedbox_sftp_screen "$port" "$fingerprint" "$keys_only"
         return 0
     fi
+    url=$(winscp_url "$port")
     banner
-    section 'SFTP connection: settings for WinSCP and FileZilla'
+    section 'SFTP connection (WinSCP, FileZilla)'
     seedbox_sftp_card "$port" "$fingerprint" "$keys_only"
     echo
     text sftp_config_help
     echo
-    if [[ ${1-} == filezilla ]]; then
-        filezilla_share "$port"
-    else
-        say 'FileZilla: file to import with  seedtunnel seedbox sftp-config filezilla'
-        say 'Connection without a password: key for WinSCP / FileZilla with  seedtunnel seedbox sftp-key new'
-    fi
+    case ${1-} in
+        winscp | filezilla) sftp_profile_share "$1" "$port" ;;
+        *)
+            say 'WinSCP: profile to import with  seedtunnel seedbox sftp-config winscp'
+            say 'FileZilla: profile to import with  seedtunnel seedbox sftp-config filezilla'
+            say 'Connection without a password: key for WinSCP / FileZilla with  seedtunnel seedbox sftp-key new'
+            ;;
+    esac
 }
 
 # seedbox_sftp_card PORT FINGERPRINT NOTE — what to type in WinSCP or
@@ -1340,43 +1362,79 @@ seedbox_sftp_card() {
     ui_box_fields info "$(t 'Settings of the connection')"
 }
 
-# In the menus: the settings, the address for WinSCP, and the keys for the
-# file to import into FileZilla and for an SSH key (instead of two questions)
+# In the menus: the settings, the profiles to import into WinSCP or FileZilla,
+# and the two ways to connect without a password
 seedbox_sftp_screen() {
-    local port=$1 fingerprint=$2 url=$3 keys_only=$4 choice
+    local port=$1 fingerprint=$2 keys_only=$3 choice
     while true; do
         banner
-        section 'SFTP connection: settings for WinSCP and FileZilla'
+        section 'SFTP connection (WinSCP, FileZilla)'
         seedbox_sftp_card "$port" "$fingerprint" "$keys_only"
         echo
-        text sftp_config_help | ui_text
-        echo
-        ui_menu_add f "$(t 'File to import into FileZilla (one-time link)')"
-        ui_menu_add k "$(t 'SSH key for WinSCP / FileZilla (connection without a password)')"
+        ui_paragraph "$(t 'Profiles to import (one-time links):')"
+        ui_menu_add 1 "$(t 'WinSCP profile')"
+        ui_menu_add 2 "$(t 'FileZilla profile')"
         ui_menu_show
+        echo
+        sftp_key_choices 3 4
         echo
         ui_ask_choice choice b "$(t 'Back')" q "$(t 'Quit')"
         case ${choice,,} in
-            f) ui_action seedbox_sftp_filezilla "$port" ;;
-            k) ui_action seedbox_sftp_new_key ;;
+            1) ui_action seedbox_sftp_profile winscp "$port" ;;
+            2) ui_action seedbox_sftp_profile filezilla "$port" ;;
+            3) ui_action sftp_key_new_screen ;;
+            4) ui_action sftp_key_add_screen ;;
             "" | b) return 0 ;;
             q) ui_quit ;;
         esac
     done
 }
 
-seedbox_sftp_filezilla() {
+# seedbox_sftp_profile winscp|filezilla PORT
+seedbox_sftp_profile() {
     banner
-    section 'File to import into FileZilla (one-time link)'
-    filezilla_share "$1"
+    if [[ $1 == winscp ]]; then
+        section 'WinSCP profile (one-time link)'
+    else
+        section 'FileZilla profile (one-time link)'
+    fi
+    sftp_profile_share "$1" "$2"
     pause
 }
 
-seedbox_sftp_new_key() {
+# sftp_key_choices KEY_NEW KEY_ADD — what an SSH key is, in words anyone can
+# follow, and the two ways to get one: a new key made by seedtunnel (the
+# simplest), or the public key of a key the user already has (the safest)
+sftp_key_choices() {
+    ui_paragraph "$(t 'Connection without a password (SSH key): an SSH key is two files. The private key stays on your computer, the public key goes on the server.')"
+    ui_choices "$1" "$(t 'I have no key')" \
+        "$(t 'seedtunnel creates one and gives you the private key through a one-time link. The simplest.')" \
+        "$2" "$(t 'I already have a key')" \
+        "$(t 'paste its public key (.pub file): the private key never leaves your computer. The safest.')"
+}
+
+# « I have no key »: a new key, its private part through a one-time link
+sftp_key_new_screen() {
     banner
-    section 'SSH key for WinSCP / FileZilla (connection without a password)'
+    section 'New SSH key (one-time link)'
     sftp_key_generate
     pause
+}
+
+# « I already have a key »: its public part, pasted. A private key pasted by
+# mistake is named as such (and not kept anywhere).
+sftp_key_add_screen() {
+    local answer
+    banner
+    section 'Add my public key'
+    ui_paragraph "$(t 'Paste the public key: one line, which starts with ssh-ed25519 or ssh-rsa. Never paste the private key.')"
+    ui_paragraph "$(t 'Your key is a .ppk file of PuTTY? Open it in PuTTYgen: the public key is in the frame at the top.')"
+    echo
+    if sftp_ask_public_key answer; then
+        sftp_keys_import - <<<"$answer"
+        seedbox_apply_sftp
+        pause
+    fi
 }
 
 # --- SSH keys for SFTP ---------------------------------------------------------------
@@ -1445,10 +1503,16 @@ sftp_keys_count() {
 
 # Menu questions: asked again when the answer is wrong. Status 1: back.
 sftp_ask_public_key() {
-    local _key_var=$1 _key
+    local _key_var=$1 _key _rest
     while true; do
         ask_back _key 'Public key' "" || return 1
         if ssh-keygen -l -f - <<<"$_key" &>/dev/null; then break; fi
+        if [[ $_key == *"PRIVATE KEY"* || $_key == PuTTY-User-Key-File* ]]; then
+            # the other lines of the pasted private key, not read as answers
+            while IFS= read -r -t 1 _rest; do :; done
+            warn 'This is a private key: it stays on your computer. Paste the public key (.pub file).'
+            continue
+        fi
         warn 'Invalid SSH key: %s…' "${_key:0:40}"
     done
     printf -v "$_key_var" '%s' "$_key"
@@ -1474,7 +1538,7 @@ sftp_ask_key_number() {
 }
 
 sftp_keys_list() {
-    local index=0 line
+    local index=0 line info
     if ! sftp_has_keys; then
         say 'No SSH key saved for %s.' "$SEEDBOX_USER"
         return 0
@@ -1482,8 +1546,26 @@ sftp_keys_list() {
     while IFS= read -r line; do
         [[ -z $line || $line == \#* ]] && continue
         index=$((index + 1))
-        printf '  %2d) %s\n' "$index" "$(ssh-keygen -l -f - <<<"$line" 2>/dev/null || printf '%s' "${line:0:50}")"
+        info=$(ssh-keygen -l -f - <<<"$line" 2>/dev/null || true)
+        sftp_key_line "$index" "${info:-${line:0:50}}"
     done <"$SFTP_KEYS_DIR/$SEEDBOX_USER"
+}
+
+# sftp_key_line NUMBER INFO — a key of the list. INFO: what « ssh-keygen -l »
+# says (« 256 SHA256:… comment (ED25519) »). For the commands, as it is. In
+# the menus, on two lines that fit the screen: its name (the comment), then
+# its type and the beginning and end of its fingerprint, in grey.
+sftp_key_line() {
+    local number=$1 info=$2 comment kind fingerprint pattern='^[0-9]+ (SHA256:[^ ]+) (.*) \(([^)]+)\)$'
+    if ((!INTERACTIVE)) || [[ ! $info =~ $pattern ]]; then
+        printf '  %2d) %s\n' "$number" "$info"
+        return 0
+    fi
+    fingerprint=${BASH_REMATCH[1]}
+    comment=${BASH_REMATCH[2]}
+    kind=${BASH_REMATCH[3]}
+    ui_print "  $(printf '%2d)' "$number") $comment"
+    ui_print "      $C_GREY$kind · ${fingerprint:0:15}…${fingerprint: -6}$C_RESET"
 }
 
 sftp_keys_remove() {
@@ -1531,6 +1613,7 @@ sftp_key_generate() {
     # in a subshell of its own: the temporary folder with the private key is
     # deleted whatever happens, even if a step stops the script
     in_subshell sftp_key_create_and_share "$comment" "$name"
+    say 'Keep the file in a folder you keep (not in Downloads).'
     say 'Link unused? Remove the key "%s" (seedtunnel seedbox sftp-key list) and create another one.' "$comment"
 }
 
@@ -1568,15 +1651,6 @@ seedbox_set_sftp_password() {
     fi
 }
 
-sftp_keys_menu_add() {
-    local answer
-    if sftp_ask_public_key answer; then
-        sftp_keys_import - <<<"$answer"
-        seedbox_apply_sftp
-        pause
-    fi
-}
-
 sftp_keys_menu_remove() {
     local answer
     if sftp_ask_key_number answer; then
@@ -1587,11 +1661,6 @@ sftp_keys_menu_remove() {
 
 sftp_keys_menu_password() {
     if [[ $SEEDBOX_SFTP_PASSWORD == yes ]]; then seedbox_set_sftp_password off; else seedbox_set_sftp_password on; fi
-    pause
-}
-
-sftp_keys_menu_generate() {
-    sftp_key_generate
     pause
 }
 
@@ -1611,25 +1680,21 @@ sftp_keys_menu() {
         seedbox_load
         UI_PLACE=(Seedbox "$(t 'SSH keys for SFTP')")
         ui_top "${UI_PLACE[@]}"
-        ui_print "  $(t 'An SSH key is a good replacement for the password in SFTP.')"
-        ui_print "  $(t 'Paste the PUBLIC key (.pub file, starts with ssh-ed25519 or ssh-rsa).')"
-        ui_print "  $(t 'No key yet? Choice 2 creates one, ready for WinSCP and FileZilla.')"
-        echo
         sftp_keys_list
         echo
         ui_field_add "$(t 'SFTP password')" "$(sftp_password_state)"
         ui_fields_show
         echo
-        ui_menu_add 1 "$(t 'Add a key')"
-        ui_menu_add 2 "$(t 'Create a key for WinSCP / FileZilla (one-time download link)')"
+        sftp_key_choices 1 2
+        echo
         ui_menu_add 3 "$(t 'Remove a key')"
         ui_menu_add 4 "$(t 'Allow / refuse the password in SFTP')"
         ui_menu_show
         echo
         ui_menu_ask choice back
         case ${choice,,} in
-            1) ui_action sftp_keys_menu_add ;;
-            2) ui_action sftp_keys_menu_generate ;;
+            1) ui_action sftp_key_new_screen ;;
+            2) ui_action sftp_key_add_screen ;;
             3) ui_action sftp_keys_menu_remove ;;
             4) ui_action sftp_keys_menu_password ;;
             "" | b) return 0 ;;
@@ -2156,7 +2221,7 @@ seedbox_menu() {
         ui_menu_add 1 "$(t 'Change the user or the password')"
         ui_menu_add 2 "$(t 'Domain name and HTTPS certificate')"
         ui_menu_add 3 "$(t 'SSH keys for SFTP')"
-        ui_menu_add 4 "$(t 'SFTP connection: settings for WinSCP and FileZilla')"
+        ui_menu_add 4 "$(t 'SFTP connection (WinSCP, FileZilla)')"
         ui_menu_add 5 "$(t 'Banned IP addresses (fail2ban)')"
         ui_menu_gap
         ui_menu_add 6 "$(t 'Restart the services')"
@@ -2215,8 +2280,8 @@ seedbox_cli() {
         sftp-config)
             seedbox_require_installed
             case ${1-} in
-                "" | filezilla) seedbox_sftp_config "${1-}" ;;
-                *) die 'Usage: seedtunnel seedbox sftp-config [filezilla]' ;;
+                "" | winscp | filezilla) seedbox_sftp_config "${1-}" ;;
+                *) die 'Usage: seedtunnel seedbox sftp-config [winscp|filezilla]' ;;
             esac
             ;;
         sftp-key)

@@ -221,6 +221,26 @@ ui_text() {
     done
 }
 
+# ui_paragraph TEXT — a paragraph wrapped to the width of the screen, every
+# line indented 2. The French « : », « ? », « ! » and « » » stay with the word
+# before them, « « » with the word after it.
+ui_paragraph() {
+    local part
+    ui_glue "$1"
+    ui_wrap "$UI_GLUED" $((UI_WIDTH - 2))
+    for part in "${UI_LINES[@]}"; do printf '  %s\n' "${part//$'\x01'/ }"; done
+}
+
+# ui_glue TEXT → UI_GLUED: the spaces before « : », « ? », « ! », « ; » and
+# « » », and after « « », replaced by \x01 for the time of a ui_wrap (put back
+# as spaces when printed)
+ui_glue() {
+    local sign
+    UI_GLUED=$1
+    for sign in : '?' '!' ';' »; do UI_GLUED=${UI_GLUED//" $sign"/$'\x01'$sign}; done
+    UI_GLUED=${UI_GLUED//"« "/«$'\x01'}
+}
+
 # ui_line LEFT RIGHT — LEFT, and RIGHT against the right edge if there is room
 ui_line() {
     local left=$1 right=${2-} size
@@ -520,6 +540,49 @@ ui_menu_show() {
     fi
     UI_MENU_KEYS=()
     UI_MENU_LABELS=()
+}
+
+# ui_choices KEY LABEL NOTE [KEY LABEL NOTE…] — entries of a menu, each with
+# a note in grey that says what it does: beside the labels (aligned), wrapped
+# under itself, when it has at least 30 columns there; otherwise under its
+# label, indented. The notes are never cut.
+ui_choices() {
+    local width=0 column i part first indent
+    local -a keys=() labels=() notes=()
+    while (($# >= 3)); do
+        keys+=("$1")
+        labels+=("$2")
+        notes+=("$3")
+        ui_len "$2"
+        if ((UI_LEN > width)); then width=$UI_LEN; fi
+        shift 3
+    done
+    # « ··[K]·LABEL·· »
+    column=$((6 + width + 2))
+    for i in "${!keys[@]}"; do
+        ui_key "${keys[i]}"
+        if ((UI_WIDTH - column >= 30)); then
+            ui_pad "${labels[i]}" "$width"
+            ui_glue "${notes[i]}"
+            ui_wrap "$UI_GLUED" $((UI_WIDTH - column))
+            printf -v indent '%*s' "$column" ''
+            first=1
+            for part in "${UI_LINES[@]}"; do
+                part=${part//$'\x01'/ }
+                if ((first)); then
+                    printf '  %s %s  %s%s%s\n' "$UI_KEY" "$UI_PAD" "$C_GREY" "$part" "$C_RESET"
+                    first=0
+                else
+                    printf '%s%s%s%s\n' "$indent" "$C_GREY" "$part" "$C_RESET"
+                fi
+            done
+            continue
+        fi
+        ui_print "  $UI_KEY ${labels[i]}"
+        ui_glue "${notes[i]}"
+        ui_wrap "$UI_GLUED" $((UI_WIDTH - 6))
+        for part in "${UI_LINES[@]}"; do printf '      %s%s%s\n' "$C_GREY" "${part//$'\x01'/ }" "$C_RESET"; done
+    done
 }
 
 # ui_footer KEY TEXT [KEY TEXT…] — bottom of a menu: a line, then the keys

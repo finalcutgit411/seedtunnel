@@ -62,7 +62,7 @@ The menus are pure bash: they work over SSH, in PuTTY as it is, with or without 
 seedtunnel vpn install [--config FILE]      seedtunnel seedbox install [--config FILE] [--staging]
 seedtunnel vpn add phone [--qr]             seedtunnel seedbox password [--user NAME]
 seedtunnel vpn remove phone --yes           seedtunnel seedbox domain my.domain.com [--staging]
-seedtunnel vpn list                         seedtunnel seedbox sftp-config [filezilla]
+seedtunnel vpn list                         seedtunnel seedbox sftp-config [winscp|filezilla]
 seedtunnel vpn show phone                   seedtunnel seedbox sftp-key add my-key.pub
 seedtunnel vpn share laptop                 seedtunnel seedbox sftp-key new
 seedtunnel vpn dns adguard                  seedtunnel seedbox sftp-password off
@@ -144,7 +144,7 @@ No need for `scp` to get a file onto your computer:
 
 - `seedtunnel vpn share laptop` gives a link to the WireGuard configuration of the client;
 - `seedtunnel backup share` gives a link to the latest backup;
-- `seedtunnel seedbox sftp-config` gives an address to paste into WinSCP, with the fingerprint of the server inside: WinSCP checks by itself that it is the right server, without a question at the first connection. With `filezilla`, it also gives a link to a file to import into FileZilla;
+- `seedtunnel seedbox sftp-config` gives an address to paste into WinSCP, with the fingerprint of the server inside: WinSCP checks by itself that it is the right server, without a question at the first connection. With `winscp` or `filezilla`, it also gives a link to a profile to import into that program (the site, without the password);
 - `seedtunnel seedbox sftp-key new` creates an SSH key and gives a link to it as a .ppk file, ready for WinSCP and FileZilla: SFTP without a password. No copy of the private key stays on the server.
 
 The link goes through the HTTPS site of the seedbox. It holds a random token that cannot be guessed, works **only once** and expires after **10 minutes**. nginx serves the file once: any other request on it is refused, even right after on the same connection or with another form of the address, never a partial download, and the file is deleted right away. A HEAD request is refused without using the link up. Opening the page does not count, only downloading the file does, so an automatic link preview in a messaging app does not waste it.

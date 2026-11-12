@@ -27,9 +27,10 @@ Seedbox
   seedbox password [--user NOM]      changer le mot de passe (et le nom)
                                      (lu sur l'entrée standard hors terminal)
   seedbox domain NOM [--staging]     changer de domaine / redemander le certificat
-  seedbox sftp-config [filezilla]    réglages SFTP : adresse pour WinSCP, fichier FileZilla
+  seedbox sftp-config [winscp|filezilla]
+                                     réglages SFTP ; profil à importer (lien à usage unique)
   seedbox sftp-key add FICHIER.pub | list | remove N
-  seedbox sftp-key new               clé pour WinSCP / FileZilla (lien de téléchargement unique)
+  seedbox sftp-key new               clé pour WinSCP / FileZilla (lien à usage unique)
   seedbox sftp-password on|off       autoriser le mot de passe en SFTP
   seedbox bans | unban IP            adresses bannies par fail2ban
   seedbox restart | uninstall [--yes] [--purge-data]
@@ -141,10 +142,38 @@ bien votre serveur, sans question à la première connexion.
 EOF
 }
 
+text_fr_share_steps_winscp() {
+    cat <<EOF
+<li>WinSCP : dans la fenêtre de connexion, « Outils » → « Importer des sites… » → « Importer depuis » : « Fichier INI » → « Parcourir… » : choisissez ce fichier → cochez le site → « OK ».</li>
+EOF
+    if [[ $SEEDBOX_SFTP_PASSWORD == no ]]; then
+        cat <<EOF
+<li>Le site « Seedbox $SEEDBOX_DOMAIN » apparaît dans la liste. Ce serveur n'accepte que les clés SSH : modifiez le site → « Avancé… » → « SSH » → « Authentification » → « Fichier de clé privée » : choisissez votre clé → « OK » → « Enregistrer ».</li>
+EOF
+    else
+        cat <<EOF
+<li>Le site « Seedbox $SEEDBOX_DOMAIN » apparaît dans la liste. Le mot de passe est demandé à la connexion.</li>
+EOF
+    fi
+    cat <<EOF
+<li>À la première connexion, l'empreinte du serveur doit être : <code>$fingerprint</code></li>
+EOF
+}
+
 text_fr_share_steps_filezilla() {
     cat <<EOF
 <li>FileZilla : « Fichier » → « Importer… » → choisissez ce fichier.</li>
+EOF
+    if [[ $SEEDBOX_SFTP_PASSWORD == no ]]; then
+        cat <<EOF
+<li>Le site « Seedbox $SEEDBOX_DOMAIN » apparaît dans le gestionnaire de sites. Ce serveur n'accepte que les clés SSH : « Type d'authentification » : « Fichier de clé » → choisissez votre clé.</li>
+EOF
+    else
+        cat <<EOF
 <li>Le site « Seedbox $SEEDBOX_DOMAIN » apparaît dans le gestionnaire de sites. Le mot de passe est demandé à la connexion.</li>
+EOF
+    fi
+    cat <<EOF
 <li>À la première connexion, l'empreinte du serveur doit être : <code>$fingerprint</code></li>
 EOF
 }

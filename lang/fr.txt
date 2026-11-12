@@ -1071,9 +1071,6 @@ fr: (clé SSH uniquement)
 en:   User        : %s
 fr:   Utilisateur : %s
 
-en: FileZilla: file to import with  seedtunnel seedbox sftp-config filezilla
-fr: FileZilla : fichier à importer avec  seedtunnel seedbox sftp-config filezilla
-
 en: Connection without a password: key for WinSCP / FileZilla with  seedtunnel seedbox sftp-key new
 fr: Connexion sans mot de passe : clé pour WinSCP / FileZilla avec  seedtunnel seedbox sftp-key new
 
@@ -1124,15 +1121,6 @@ fr: SFTP : mot de passe autorisé.
 
 en: SFTP: SSH keys only (the password still works for the web interface).
 fr: SFTP : clés SSH uniquement (le mot de passe reste valable pour l'interface web).
-
-en: An SSH key is a good replacement for the password in SFTP.
-fr: Une clé SSH remplace avantageusement le mot de passe pour le SFTP.
-
-en: Paste the PUBLIC key (.pub file, starts with ssh-ed25519 or ssh-rsa).
-fr: Collez la clé PUBLIQUE (fichier .pub, commence par ssh-ed25519 ou ssh-rsa).
-
-en: No key yet? Choice 2 creates one, ready for WinSCP and FileZilla.
-fr: Pas encore de clé ? Le choix 2 en crée une, prête pour WinSCP et FileZilla.
 
 
 en: refused (keys only)
@@ -1330,8 +1318,8 @@ fr: La seedbox est déjà installée (seedtunnel seedbox pour la gérer).
 en: Usage: seedtunnel seedbox domain NAME [--staging]
 fr: Utilisation : seedtunnel seedbox domain NOM [--staging]
 
-en: Usage: seedtunnel seedbox sftp-config [filezilla]
-fr: Utilisation : seedtunnel seedbox sftp-config [filezilla]
+en: Usage: seedtunnel seedbox sftp-config [winscp|filezilla]
+fr: Utilisation : seedtunnel seedbox sftp-config [winscp|filezilla]
 
 en: Usage: seedtunnel seedbox sftp-key add FILE.pub   (- for standard input)
 fr: Utilisation : seedtunnel seedbox sftp-key add FICHIER.pub   (- pour l'entrée standard)
@@ -1868,20 +1856,14 @@ fr: Mettre à jour seedtunnel
 en:   B) Back, nothing is changed
 fr:   B) Revenir, sans rien changer
 
-en: SFTP connection: settings for WinSCP and FileZilla
-fr: Connexion SFTP : réglages pour WinSCP et FileZilla
+en: SFTP connection (WinSCP, FileZilla)
+fr: Connexion SFTP (WinSCP, FileZilla)
 
 en: SSH keys for SFTP
 fr: Clés SSH pour le SFTP
 
 en: SFTP password
 fr: Mot de passe SFTP
-
-en: Add a key
-fr: Ajouter une clé
-
-en: Create a key for WinSCP / FileZilla (one-time download link)
-fr: Créer une clé pour WinSCP / FileZilla (lien de téléchargement unique)
 
 en: Remove a key
 fr: Supprimer une clé
@@ -2251,8 +2233,8 @@ fr: Fichier
 en: Window too small for the QR code: it needs %s columns and %s lines, this one has %s and %s. Make it bigger (or the font smaller), then R to show it again.
 fr: Fenêtre trop petite pour le QR code : il lui faut %s colonnes et %s lignes, celle-ci en a %s et %s. Agrandissez-la (ou réduisez la police), puis R pour le réafficher.
 
-en: Or Enter, then L: a one-time download link, to open on the device.
-fr: Ou Entrée, puis L : un lien de téléchargement à usage unique, à ouvrir sur l'appareil.
+en: Or Enter, then 2: a one-time download link, to open on the device.
+fr: Ou Entrée, puis 2 : un lien de téléchargement à usage unique, à ouvrir sur l'appareil.
 
 en: Show it again
 fr: Réafficher
@@ -2323,12 +2305,6 @@ fr: Empreinte
 en: Settings of the connection
 fr: Réglages de la connexion
 
-en: File to import into FileZilla (one-time link)
-fr: Fichier à importer dans FileZilla (lien à usage unique)
-
-en: SSH key for WinSCP / FileZilla (connection without a password)
-fr: Clé SSH pour WinSCP / FileZilla (connexion sans mot de passe)
-
 en: Weekly
 fr: Hebdomadaire
 
@@ -2397,3 +2373,62 @@ fr: les %s dernières, dans %s
 
 en: saved on the server (root only), so that it runs alone: write it down somewhere else too
 fr: enregistrée sur le serveur (root uniquement), pour qu'elle tourne seule : notez-la aussi ailleurs
+
+# --- SFTP connection: WinSCP and FileZilla profiles, SSH keys explained (1.0.0) ----
+
+en: SFTP connection to the seedbox (WinSCP)
+fr: Connexion SFTP à la seedbox (WinSCP)
+
+en: WinSCP: profile to import with  seedtunnel seedbox sftp-config winscp
+fr: WinSCP : profil à importer avec  seedtunnel seedbox sftp-config winscp
+
+en: FileZilla: profile to import with  seedtunnel seedbox sftp-config filezilla
+fr: FileZilla : profil à importer avec  seedtunnel seedbox sftp-config filezilla
+
+en: Profiles to import (one-time links):
+fr: Profils à importer (liens à usage unique) :
+
+en: WinSCP profile
+fr: Profil WinSCP
+
+en: FileZilla profile
+fr: Profil FileZilla
+
+en: WinSCP profile (one-time link)
+fr: Profil WinSCP (lien à usage unique)
+
+en: FileZilla profile (one-time link)
+fr: Profil FileZilla (lien à usage unique)
+
+en: Connection without a password (SSH key): an SSH key is two files. The private key stays on your computer, the public key goes on the server.
+fr: Connexion sans mot de passe (clé SSH) : une clé SSH, ce sont deux fichiers. La clé privée reste sur votre ordinateur, la clé publique va sur le serveur.
+
+en: I have no key
+fr: Je n'ai pas de clé
+
+en: seedtunnel creates one and gives you the private key through a one-time link. The simplest.
+fr: seedtunnel en crée une et vous donne la clé privée par un lien à usage unique. Le plus simple.
+
+en: I already have a key
+fr: J'ai déjà une clé
+
+en: paste its public key (.pub file): the private key never leaves your computer. The safest.
+fr: collez sa clé publique (fichier .pub) : la clé privée ne quitte pas votre ordinateur. Le plus sûr.
+
+en: New SSH key (one-time link)
+fr: Nouvelle clé SSH (lien à usage unique)
+
+en: Add my public key
+fr: Ajouter ma clé publique
+
+en: Paste the public key: one line, which starts with ssh-ed25519 or ssh-rsa. Never paste the private key.
+fr: Collez la clé publique : une seule ligne, qui commence par ssh-ed25519 ou ssh-rsa. Ne collez jamais la clé privée.
+
+en: Your key is a .ppk file of PuTTY? Open it in PuTTYgen: the public key is in the frame at the top.
+fr: Votre clé est un fichier .ppk de PuTTY ? Ouvrez-le dans PuTTYgen : la clé publique est dans le cadre du haut.
+
+en: This is a private key: it stays on your computer. Paste the public key (.pub file).
+fr: Ceci est une clé privée : elle reste sur votre ordinateur. Collez la clé publique (fichier .pub).
+
+en: Keep the file in a folder you keep (not in Downloads).
+fr: Gardez le fichier dans un dossier que vous conservez (pas dans Téléchargements).

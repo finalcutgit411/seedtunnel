@@ -2147,7 +2147,7 @@ sftp_keys_menu_can_go_back() (
     sftp_keys_import() { echo "import" >>"$WORK/back-calls"; }
     sftp_keys_remove() { echo "remove $1" >>"$WORK/back-calls"; }
     # add: a wrong key asked again, then empty; remove: a wrong number, then empty
-    answers "1" "not a key" "" "3" "5" "" "b"
+    answers "2" "not a key" "" "3" "5" "" "b"
     sftp_keys_menu >/dev/null 2>&1 || return 1
     back_nothing_done
 )
@@ -6020,8 +6020,8 @@ ui_text_wraps_but_never_cuts_an_address() (
 )
 
 # Add or show a client, in the menus: the card, then the QR code alone (the
-# key to go on right under it), then what to do, with [F] for the file and
-# [L] for a one-time link (with the seedbox only)
+# key to go on right under it), then what to do, with [1] for the file and
+# [2] for a one-time link (with the seedbox only)
 vpn_client_screens() (
     qr_client_load || return 1
     local out
@@ -6029,7 +6029,7 @@ vpn_client_screens() (
     clear() { echo "--- clear"; }
     stdout_is_terminal() { return 1; }
     seedbox_installed() { return 1; }
-    out=$(printf '\n\nf\n\nb\n' | vpn_show_client telephone-salon 2>&1) || {
+    out=$(printf '\n\n1\n\nb\n' | vpn_show_client telephone-salon 2>&1) || {
         printf '%s\n' "$out"
         return 1
     }
@@ -6041,20 +6041,20 @@ vpn_client_screens() (
     [[ $(grep -A1 -- "--- clear" <<<"$out" | sed -n 2p) == *█* ]] || return 1
     # (the key line is the prompt of « read »: shown only on a terminal)
     [[ $(grep -A1 '█' <<<"$out" | tail -n 1) == "--- clear" ]] && declare -f vpn_qr_screen | grep -q "ui_pause next tight" || return 1
-    # then what to do, the keys, the file shown by F
-    [[ $out == *"Phone    : WireGuard app"*"[F] Show the file (to copy and paste)"*"[Interface]"* ]] || return 1
-    [[ $out != *"[L]"* && $out != *"[y/N]"* ]] || return 1
-    # with the seedbox: L too
+    # then what to do, the keys, the file shown by 1
+    [[ $out == *"Phone    : WireGuard app"*"[1] Show the file (to copy and paste)"*"[Interface]"* ]] || return 1
+    [[ $out != *"[2]"* && $out != *"[y/N]"* ]] || return 1
+    # with the seedbox: 2 too
     seedbox_installed() { return 0; }
     out=$(printf '\n\nb\n' | vpn_show_client telephone-salon 2>&1)
-    [[ $out == *"[L] One-time download link for the file"* ]] || return 1
+    [[ $out == *"[2] One-time download link for the file"* ]] || return 1
     # after « Add a client »: no card again (it was just shown)
     out=$(printf '\nb\n' | vpn_show_client telephone-salon created 2>&1)
     [[ $out != *"Address in the VPN"* && $out == *█* ]] || return 1
     # for the commands: unchanged (the QR code, what to do, the file)
     INTERACTIVE=0
     out=$(vpn_show_client telephone-salon 2>&1)
-    [[ $out == *█*"Phone    : WireGuard app"*"[Interface]"* && $out != *"[F]"* ]]
+    [[ $out == *█*"Phone    : WireGuard app"*"[Interface]"* && $out != *"[1]"* ]]
 )
 
 # The QR code too big for the window, in the menus: said with R to show it
@@ -6073,7 +6073,7 @@ vpn_qr_screen_too_small() (
     }
     printf '%s\n' "$out"
     (($(grep -c "Window too small for the QR code" <<<"$out") == 2)) || return 1
-    [[ $out == *"then R to show it again"*"Or Enter, then L"* && $out != *"seedtunnel vpn show"* && $out != *█* ]] || return 1
+    [[ $out == *"then R to show it again"*"Or Enter, then 2"* && $out != *"seedtunnel vpn show"* && $out != *█* ]] || return 1
     # 37 lines for the QR code of this client (the longest file), and one
     # more for the key: 38
     ui_terminal_size() { echo "37 80"; }
@@ -6189,7 +6189,8 @@ language_back_after_restore() (
 )
 
 # The seedbox: the new login in a frame after a change; the SFTP settings in a
-# frame, with keys for the FileZilla file and the SSH key (no questions)
+# frame, with the profiles for WinSCP and FileZilla and the two ways to get an
+# SSH key (no questions)
 seedbox_login_and_sftp_screens() (
     load
     local out
@@ -6214,12 +6215,121 @@ seedbox_login_and_sftp_screens() (
         return 1
     }
     printf '%s\n' "$out"
-    [[ $out == *"● Settings of the connection"*"│ Host         seed.example.net"*"│ Port         2222"*"│ User         lancelot (SSH key only)"*"│ Fingerprint  SHA256:"* ]] || return 1
-    [[ $out == *"sftp://lancelot;fingerprint=x@seed.example.net:2222/"*"[F] File to import into FileZilla (one-time link)"*"[K] SSH key for WinSCP"* && $out != *"[y/N]"* ]] || return 1
-    # for the commands: the same frame, and the commands to use
+    [[ $out == *"SFTP connection (WinSCP, FileZilla)"*"● Settings of the connection"*"│ Host         seed.example.net"*"│ Port         2222"*"│ User         lancelot (SSH key only)"*"│ Fingerprint  SHA256:"* ]] || return 1
+    [[ $out == *"Profiles to import (one-time links):"*"[1] WinSCP profile"*"[2] FileZilla profile"* ]] || return 1
+    [[ $out == *"an SSH key is two files"*"[3] I have no key"*"through a one-time link. The simplest."*"[4] I already have a key"*"never leaves your computer. The safest."* ]] || return 1
+    # the address to paste stays for the commands: the profile does it here
+    [[ $out != *"sftp://"* && $out != *"[y/N]"* ]] || return 1
+    # for the commands: the same frame, the address, and the commands to use
     INTERACTIVE=0
     out=$(seedbox_sftp_config 2>&1)
-    [[ $out == *"│ Host         seed.example.net"*"seedtunnel seedbox sftp-config filezilla"* && $out != *"[F]"* ]]
+    [[ $out == *"│ Host         seed.example.net"*"sftp://lancelot;fingerprint=x@seed.example.net:2222/"* ]] || return 1
+    [[ $out == *"seedtunnel seedbox sftp-config winscp"*"seedtunnel seedbox sftp-config filezilla"*"seedtunnel seedbox sftp-key new"* && $out != *"[1]"* ]] || return 1
+    # a request that is not known: refused
+    seedbox_require_installed() { :; }
+    out=$(seedbox_cli sftp-config cyberduck 2>&1) && return 1
+    [[ $out == *"Usage: seedtunnel seedbox sftp-config [winscp|filezilla]"* ]]
+)
+
+# The site to import into WinSCP: an INI file of WinSCP with this site only
+# (name escaped as WinSCP does it, Windows line ends), and no password
+winscp_profile_content() (
+    load
+    local out expected
+    SEEDBOX_DOMAIN=seed.example.net
+    SEEDBOX_USER=lancelot
+    out=$(winscp_generate_site 2222 | od -c | tr -s ' ')
+    winscp_generate_site 2222 >"$WORK/winscp.ini"
+    expected=$(printf '[Sessions\\Seedbox%%20seed.example.net]\r\nHostName=seed.example.net\r\nPortNumber=2222\r\nUserName=lancelot\r\n')
+    [[ $(cat "$WORK/winscp.ini") == "$expected" ]] || {
+        printf '%s\n' "$out"
+        return 1
+    }
+    [[ $(grep -c $'\r$' "$WORK/winscp.ini") == 4 ]] && ! grep -qi password "$WORK/winscp.ini"
+)
+
+# The steps of the download pages: how to import the profile into WinSCP or
+# FileZilla, and with SSH keys only, how to give the key to the site
+sftp_profile_steps() (
+    load
+    local out
+    SEEDBOX_DOMAIN=seed.example.net
+    fingerprint="SHA256:x ED25519"
+    SEEDBOX_SFTP_PASSWORD=yes
+    out=$(text share_steps_winscp)
+    [[ $out == *"« Tools » → « Import Sites… »"*"« INI file »"*"The password is asked when connecting."*"SHA256:x ED25519"* ]] || return 1
+    SEEDBOX_SFTP_PASSWORD=no
+    out=$(text share_steps_winscp)
+    [[ $out == *"SSH keys only"*"« Private key file »"* && $out != *"The password is asked"* ]] || return 1
+    out=$(text share_steps_filezilla)
+    [[ $out == *"SSH keys only"*"« Key file »"* && $out != *"The password is asked"* ]] || return 1
+    i18n_load fr
+    out=$(text share_steps_winscp)
+    [[ $out == *"« Outils » → « Importer des sites… »"*"« Fichier INI »"*"Ce serveur n'accepte que les clés SSH"* ]]
+)
+
+# Choices with a note: beside the labels when there is room, under them on a
+# narrow screen; never wider than the screen, nothing cut, and in French no
+# line starts with « : » or « ? »
+ui_choices_layout() (
+    load
+    local out line
+    i18n_load fr
+    for UI_COLUMNS in 80 40 30; do
+        ui_width
+        out=$(sftp_key_choices 3 4)
+        printf '%s\n' "$out"
+        while IFS= read -r line; do
+            ui_len "$line"
+            ((UI_LEN <= UI_WIDTH)) || return 1
+            [[ $line != *…* && ! $line =~ ^\ *[:?] ]] || return 1
+        done <<<"$out"
+        [[ $(tr -s ' \n' ' ' <<<"$out") == *"Le plus simple."*"Le plus sûr."* ]] || return 1
+        if ((UI_COLUMNS == 80)); then
+            [[ $out == *"[3] Je n'ai pas de clé  seedtunnel en crée une"* ]] || return 1
+        else
+            [[ $(grep -A1 -F "[4] J'ai déjà une clé" <<<"$out" | sed -n 2p) == "      collez sa clé publique"* ]] || return 1
+        fi
+    done
+)
+
+# The keys of the list: on two short lines in the menus, as they are for the
+# commands
+sftp_key_list_lines() (
+    load
+    local out info="256 SHA256:Hp3cC5YyhRZmLxvU4Lw0dCq9yb6tJ8Sg2kPpd1ZfQ7c seedtunnel-lancelot-20261112-085500 (ED25519)"
+    UI_COLUMNS=80
+    ui_width
+    INTERACTIVE=1
+    out=$(sftp_key_line 1 "$info")
+    [[ $out == "   1) seedtunnel-lancelot-20261112-085500"$'\n'"      ED25519 · SHA256:Hp3cC5Yy…1ZfQ7c" ]] || {
+        printf '%s\n' "$out"
+        return 1
+    }
+    INTERACTIVE=0
+    [[ $(sftp_key_line 1 "$info") == "   1) $info" ]]
+)
+
+# « I already have a key »: a private key pasted by mistake is named as such,
+# its other lines are not read as answers, then the public key is taken
+sftp_private_key_pasted() (
+    load
+    local out key="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEWuSJMjcPMEGcGPXYQTMQwKBZWAmPq5xBrlCvTXnDEn laptop"
+    # a public key for ssh-keygen: the line that starts with « ssh-ed25519 »
+    ssh-keygen() { [[ $(cat) == "ssh-ed25519 "* ]]; }
+    INTERACTIVE=1
+    sftp_check() {
+        local answer
+        sftp_ask_public_key answer && printf 'got: %s\n' "$answer"
+    }
+    out=$({
+        printf '%s\n' "-----BEGIN OPENSSH PRIVATE KEY-----" "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ" "-----END OPENSSH PRIVATE KEY-----"
+        sleep 2.5
+        printf '%s\n' "$key"
+    } | sftp_check 2>&1)
+    printf '%s\n' "$out"
+    [[ $out == *"This is a private key: it stays on your computer."* && $out == *"got: $key"* ]] || return 1
+    [[ $(grep -c "Invalid SSH key" <<<"$out") == 0 ]]
 )
 
 check "vpn_sync: WireGuard refusing the configuration shows « failed »" vpn_sync_reports_wg_failure
@@ -6237,6 +6347,11 @@ check "translation: long texts in French" long_texts_exist_in_french
 check "firewall: open TCP ports read from the rules" firewall_ports_parsing
 check "lock: the message names the process holding it" lock_message_names_the_holder
 check "domain menu: an empty answer goes back, nothing changed" domain_change_empty_answer_goes_back
+check "WinSCP profile: this site only, Windows line ends, no password" winscp_profile_content
+check "WinSCP / FileZilla profiles: steps of the page, SSH keys only" sftp_profile_steps
+check "choices with a note: beside or under, nothing cut (80, 40, 30)" ui_choices_layout
+check "SSH keys of the list: two short lines in the menus" sftp_key_list_lines
+check "public key asked: a private key pasted is named, not kept" sftp_private_key_pasted
 check "domain menu: same name, certificate kept without a new request" domain_change_same_name_keeps_certificate
 check "domain menu: warning and confirmation before replacing the certificate" domain_change_warns_before_replacing_certificate
 check "domain menu: B (or Q) goes back when the name points elsewhere" domain_change_back_when_name_points_elsewhere
@@ -6493,6 +6608,6 @@ check "DNS of the clients: the choices like a menu, a ● on the one in use" vpn
 check "VPN address or port: summary in a frame, « before → after »" vpn_settings_summary_shows_the_change
 check "backups menu: weekly on/off/failed, latest, on the server, downloaded" backup_status_fields_states
 check "restore from the menu: the menus go on in the language of the backup" language_back_after_restore
-check "seedbox: new login in a frame, SFTP settings in a frame with keys F and K" seedbox_login_and_sftp_screens
+check "seedbox: new login in a frame, SFTP settings with profiles and key choices" seedbox_login_and_sftp_screens
 printf '\n\033[1m%s passed, %s failed\033[0m\n' "$PASS" "$FAIL"
 ((FAIL == 0))

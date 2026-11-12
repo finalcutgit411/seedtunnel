@@ -318,8 +318,8 @@ screen_client() {
     echo
     text vpn_client_help | ui_text | print_lines
     echo
-    ui_menu_add f "$(t 'Show the file (to copy and paste)')"
-    ui_menu_add l "$(t 'One-time download link for the file')"
+    ui_menu_add 1 "$(t 'Show the file (to copy and paste)')"
+    ui_menu_add 2 "$(t 'One-time download link for the file')"
     ui_menu_show
     echo
     end_keys b "$(t 'Back')" q "$(t 'Quit')"
@@ -385,7 +385,7 @@ screen_seedbox() {
     ui_menu_add 1 "$(t 'Change the user or the password')"
     ui_menu_add 2 "$(t 'Domain name and HTTPS certificate')"
     ui_menu_add 3 "$(t 'SSH keys for SFTP')"
-    ui_menu_add 4 "$(t 'SFTP connection: settings for WinSCP and FileZilla')"
+    ui_menu_add 4 "$(t 'SFTP connection (WinSCP, FileZilla)')"
     ui_menu_add 5 "$(t 'Banned IP addresses (fail2ban)')"
     ui_menu_gap
     ui_menu_add 6 "$(t 'Restart the services')"
@@ -417,21 +417,51 @@ screen_credentials() {
     end_action
 }
 
-# Seedbox › SFTP connection (seedbox_sftp_config), keys only
+# Seedbox › SFTP connection (seedbox_sftp_screen), keys only
 screen_sftp() {
-    local url="sftp://$SEEDBOX_USER;fingerprint=$EXAMPLE_FINGERPRINT_URL@$SEEDBOX_DOMAIN:22/"
     top sftp
-    ui_crumbs Seedbox "$(t 'SFTP connection: settings for WinSCP and FileZilla')"
+    ui_crumbs Seedbox "$(t 'SFTP connection (WinSCP, FileZilla)')"
     echo
     seedbox_sftp_card 22 "$EXAMPLE_FINGERPRINT" " $(t '(SSH key only)')"
     echo
-    text sftp_config_help | ui_text | print_lines
-    echo
-    ui_menu_add f "$(t 'File to import into FileZilla (one-time link)')"
-    ui_menu_add k "$(t 'SSH key for WinSCP / FileZilla (connection without a password)')"
+    ui_paragraph "$(t 'Profiles to import (one-time links):')"
+    ui_menu_add 1 "$(t 'WinSCP profile')"
+    ui_menu_add 2 "$(t 'FileZilla profile')"
     ui_menu_show
     echo
+    sftp_key_choices 3 4
+    echo
     end_keys b "$(t 'Back')" q "$(t 'Quit')"
+}
+
+# Seedbox › SSH keys for SFTP (sftp_keys_menu), one key, keys only
+screen_keys() {
+    top keys
+    ui_crumbs Seedbox "$(t 'SSH keys for SFTP')"
+    echo
+    INTERACTIVE=1 sftp_key_line 1 "256 SHA256:Hp3cC5YyhRZmLxvU4Lw0dCq9yb6tJ8Sg2kPpd1ZfQ7c seedtunnel-lancelot-20261112-085500 (ED25519)"
+    echo
+    ui_field_add "$(t 'SFTP password')" "$C_GREEN● $(t 'refused (keys only)')$C_RESET"
+    ui_fields_show
+    echo
+    sftp_key_choices 1 2
+    echo
+    ui_menu_add 3 "$(t 'Remove a key')"
+    ui_menu_add 4 "$(t 'Allow / refuse the password in SFTP')"
+    ui_menu_show
+    echo
+    end_menu back
+}
+
+# « I already have a key » (sftp_key_add_screen): the question
+screen_key_add() {
+    top key-add
+    ui_crumbs Seedbox "$(t 'Add my public key')"
+    echo
+    ui_paragraph "$(t 'Paste the public key: one line, which starts with ssh-ed25519 or ssh-rsa. Never paste the private key.')"
+    ui_paragraph "$(t 'Your key is a .ppk file of PuTTY? Open it in PuTTYgen: the public key is in the frame at the top.')"
+    echo
+    ui_print "$(t '%s (empty = back)' "$(t 'Public key')"): "
 }
 
 screen_bans() {
@@ -586,6 +616,8 @@ if ((ALL)); then
     screen_seedbox
     screen_credentials
     screen_sftp
+    screen_keys
+    screen_key_add
     screen_bans
     screen_backup
     screen_weekly
@@ -603,7 +635,7 @@ ui_print "  $(pv 'Enter: next screen · Q: quit' 'Entrée : écran suivant · Q 
 echo
 IFS= read -r -p "  $(pv 'Press Enter to start…' 'Appuyez sur Entrée pour commencer…') " CHOICE || exit 130
 for screen in screen_home screen_home_narrow screen_home_manual screen_vpn screen_clients screen_dns screen_vpn_address screen_add \
-    screen_client_qr screen_client screen_danger screen_seedbox screen_credentials screen_sftp screen_bans screen_backup screen_weekly screen_restore screen_terminal; do
+    screen_client_qr screen_client screen_danger screen_seedbox screen_credentials screen_sftp screen_keys screen_key_add screen_bans screen_backup screen_weekly screen_restore screen_terminal; do
     if [[ $screen == screen_home_narrow && -n ${UI_COLUMNS-} ]]; then continue; fi
     "$screen" || break
 done

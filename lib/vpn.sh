@@ -467,7 +467,7 @@ vpn_print_qr() {
         if [[ -n $menu ]]; then
             warn 'Window too small for the QR code: it needs %s columns and %s lines, this one has %s and %s. Make it bigger (or the font smaller), then R to show it again.' \
                 "$width" "$height" "$columns" "$rows"
-            if seedbox_installed; then say 'Or Enter, then L: a one-time download link, to open on the device.'; fi
+            if seedbox_installed; then say 'Or Enter, then 2: a one-time download link, to open on the device.'; fi
             return 0
         fi
         warn 'Window too small for the QR code: it needs %s columns and %s lines, this one has %s and %s. Make it bigger (or the font smaller), then:  seedtunnel vpn show %s' \
@@ -538,14 +538,14 @@ vpn_client_screen() {
         section 'Client "%s"' "$name"
         text vpn_client_help | ui_text
         echo
-        ui_menu_add f "$(t 'Show the file (to copy and paste)')"
-        if seedbox_installed; then ui_menu_add l "$(t 'One-time download link for the file')"; fi
+        ui_menu_add 1 "$(t 'Show the file (to copy and paste)')"
+        if seedbox_installed; then ui_menu_add 2 "$(t 'One-time download link for the file')"; fi
         ui_menu_show
         echo
         ui_ask_choice choice b "$(t 'Back')" q "$(t 'Quit')"
         case ${choice,,} in
-            f) ui_action vpn_client_file "$name" ;;
-            l) if seedbox_installed; then ui_action vpn_client_link "$name"; fi ;;
+            1) ui_action vpn_client_file "$name" ;;
+            2) if seedbox_installed; then ui_action vpn_client_link "$name"; fi ;;
             "" | b) return 0 ;;
             q) ui_quit ;;
         esac
