@@ -502,7 +502,11 @@ backup_auto_enable() {
     banner
     section 'Weekly backup'
     backup_require_something
-    text backup_auto_help
+    ui_width
+    ui_field_add "$(t 'When')" "$(t 'every week, by itself (encrypted)')"
+    ui_field_add "$(t 'Kept')" "$(t 'the last %s, in %s' "$BACKUP_KEEP" "$C_CYAN$BACKUP_DIR$C_RESET")"
+    ui_field_add Passphrase "$(t 'saved on the server (root only), so that it runs alone: write it down somewhere else too')"
+    ui_box_fields info "$(t 'Weekly backup')"
     echo
     if [[ -n $(backup_latest) ]]; then
         warn 'The backups already made keep the passphrase they were made with: the new one only applies to the next ones.'
@@ -601,6 +605,38 @@ backup_auto_status() {
     fi
 }
 
+# The state of the backups in the menu, in aligned fields: the weekly backup
+# (green on, yellow off, red failed: the last run failed, or its passphrase is
+# missing), the latest backup, how many are on the server, the last download
+# (yellow: none yet)
+backup_status_fields() {
+    local weekly latest age value count=0 file
+    if ! backup_auto_enabled; then
+        weekly="$C_YELLOW● $(t 'turned off')$C_RESET"
+    elif systemctl is-failed --quiet seedtunnel-backup.service 2>/dev/null || [[ ! -s $BACKUP_PASSPHRASE_FILE ]]; then
+        weekly="$C_RED● $(t 'failed')$C_RESET"
+    else
+        weekly="$C_GREEN● $(t 'turned on')$C_RESET · $C_GREY$(t 'the last %s are kept' "$BACKUP_KEEP")$C_RESET"
+    fi
+    ui_field_add "$(t 'Weekly')" "$weekly"
+    latest=$(backup_latest || true)
+    if [[ -n $latest ]]; then
+        age=$(file_age_days "$latest")
+        value="$(date -r "$latest" '+%F %R') $C_GREY($(days_ago "$age"))$C_RESET"
+    else
+        value="$C_YELLOW● $(t 'none yet')$C_RESET"
+    fi
+    ui_field_add "$(t 'Latest')" "$value"
+    for file in "$BACKUP_DIR"/*.tar.gz.enc; do
+        if [[ -f $file ]]; then count=$((count + 1)); fi
+    done
+    ui_field_add "$(t 'On the server')" "$(t '%s in %s' "$count" "$C_CYAN$BACKUP_DIR$C_RESET")"
+    age=$(file_age_days "$BACKUP_DOWNLOADED_MARK")
+    if [[ -n $age ]]; then value=$(days_ago "$age"); else value="$C_YELLOW● $(t 'not yet')$C_RESET"; fi
+    ui_field_add "$(t 'Downloaded')" "$value"
+    ui_fields_show
+}
+
 # seedtunnel backup …
 backup_cli() {
     case ${1-} in
@@ -621,20 +657,32 @@ backup_cli() {
     esac
 }
 
-# backup_pick_file VARIABLE — the backups found, numbered, the newest first:
+# backup_pick_file VARIABLE — the backups found, in a table, the newest first:
 # one is chosen by its number (Enter: the newest), or any file by its path.
 # Asked again while the file cannot be read. Status 1: back.
 backup_pick_file() {
-    local _bp_var=$1 _bp_answer _bp_file _bp_index=0 _bp_default=""
-    local -a _bp_files
+    local _bp_var=$1 _bp_answer _bp_file _bp_index=0 _bp_default="" _bp_kind _bp_folder
+    local -a _bp_files _bp_rows=()
     mapfile -t _bp_files < <(backup_candidates)
-    # the name of the file, then in grey its date, its size and its folder (no
-    # character that the terminal would take for a command)
+    _bp_rows+=("#"$'\t'"$(t 'DATE')"$'\t'"$(t 'SIZE')"$'\t'"$(t 'KIND')"$'\t'"$(t 'FOLDER')")
     for _bp_file in "${_bp_files[@]}"; do
         _bp_index=$((_bp_index + 1))
-        printf '  %2d) %s\n      %s%s · %s · %s%s\n' "$_bp_index" "${_bp_file##*/}" "$C_GREY" "$(date -r "$_bp_file" '+%F %R')" \
-            "$(human_size "$(stat -c %s "$_bp_file")")" "${_bp_file%/*}" "$C_RESET" | tr '\000-\010\013-\037\177' '?'
+        if [[ $_bp_file != "$BACKUP_DIR"/* ]]; then
+            _bp_kind=$(t 'copied')
+        elif [[ $_bp_file == *-auto.tar.gz.enc ]]; then
+            _bp_kind=$(t 'weekly')
+        else
+            _bp_kind=$(t 'by hand')
+        fi
+        # no character that the terminal would take for a command
+        _bp_folder=${_bp_file%/*}
+        _bp_folder=${_bp_folder//[$'\001'-$'\037'$'\177']/?}
+        _bp_rows+=("$_bp_index"$'\t'"$(date -r "$_bp_file" '+%F %R')"$'\t'"$(human_size "$(stat -c %s "$_bp_file")")"$'\t'"$_bp_kind"$'\t'"$_bp_folder")
     done
+    if ((_bp_index)); then
+        ui_width
+        ui_table "${_bp_rows[@]}"
+    fi
     # Enter takes the newest one only if it was made by this server
     if [[ ${_bp_files[0]-} == "$BACKUP_DIR"/* ]]; then _bp_default=1; fi
     if ((_bp_index == 0)); then say 'No backup found in %s, nor in /root and /home.' "$BACKUP_DIR"; fi
@@ -695,7 +743,7 @@ backup_menu() {
     while true; do
         UI_PLACE=("$(t 'Backup / restore')")
         ui_top "${UI_PLACE[@]}"
-        backup_auto_status
+        backup_status_fields
         echo
         ui_menu_add 1 "$(t 'Create an encrypted backup now')"
         ui_menu_add 2 "$(t 'Download the latest backup (one-time link)')"
@@ -708,7 +756,11 @@ backup_menu() {
             1) ui_action backup_main ;;
             2) ui_action backup_menu_share ;;
             3) ui_action backup_menu_weekly ;;
-            4) ui_action backup_menu_restore ;;
+            4)
+                ui_action backup_menu_restore
+                # the menus go on in the language of the backup restored
+                language_reload
+                ;;
             "" | b) return 0 ;;
             q) ui_quit ;;
         esac

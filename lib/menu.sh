@@ -77,14 +77,18 @@ home_disk() {
     ui_status_add "$level" "$(t 'Disk')" "$(t '%s%%' "$used")" "$detail"
 }
 
-# Up to date: a backup (by hand or weekly) less than 8 days old. Failed: the
-# last weekly backup failed, or it has no passphrase (the next one will fail).
+# Up to date: a backup less than 8 days old, with the weekly backup on.
+# Manual: the same, the weekly backup off. Failed: the last weekly backup
+# failed, or it has no passphrase (the next one will fail).
 home_backup() {
-    local name latest age when=""
+    local name latest age when="" off=""
     name=$(t 'Backup')
     latest=$(backup_latest || true)
     age=$(file_age_days "$latest")
     if [[ -n $age ]]; then when=$(days_ago "$age"); fi
+    # without the weekly backup, a backup made by hand is said « manual », in
+    # yellow (the word says it too, without colors)
+    if ! backup_auto_enabled && { vpn_installed || seedbox_installed; }; then off=" · $(t 'weekly backup off')"; fi
     if backup_auto_enabled && systemctl is-failed --quiet seedtunnel-backup.service 2>/dev/null; then
         ui_status_add bad "$name" "$(t 'failed')" "$(t 'the weekly backup failed')"
     elif backup_auto_enabled && [[ ! -s $BACKUP_PASSPHRASE_FILE ]]; then
@@ -95,10 +99,12 @@ home_backup() {
         else
             ui_status_add off "$name" "$(t 'none yet')"
         fi
-    elif ((age < 8)); then
-        ui_status_add ok "$name" "$(t 'recent')" "$(t 'last backup %s' "$when")" "$when"
+    elif ((age >= 8)); then
+        ui_status_add warn "$name" "$(t 'old')" "$(t 'last backup %s' "$when")$off" "$when"
+    elif [[ -n $off ]]; then
+        ui_status_add warn "$name" "$(t 'manual')" "$(t 'last backup %s' "$when")$off" "$when"
     else
-        ui_status_add warn "$name" "$(t 'old')" "$(t 'last backup %s' "$when")" "$when"
+        ui_status_add ok "$name" "$(t 'recent')" "$(t 'last backup %s' "$when")" "$when"
     fi
 }
 
@@ -125,6 +131,8 @@ main_menu() {
     while true; do
         vpn_load
         seedbox_load
+        # a restore (in a subshell) may have brought another language back
+        language_reload
         UI_PLACE=()
         ui_screen
         ui_header

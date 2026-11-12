@@ -197,14 +197,6 @@ text_en_share_steps_backup() {
 EOF
 }
 
-text_en_backup_auto_help() {
-    cat <<EOF
-Every week, an encrypted backup is made by itself in $BACKUP_DIR; the
-last $BACKUP_KEEP are kept. Its passphrase is saved on the server (root only)
-so that it can run alone: also write it down somewhere else.
-EOF
-}
-
 text_en_restore_after() {
     cat <<EOF
   The downloaded files are not in the backup. Copy them back, for example:

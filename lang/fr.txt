@@ -1068,29 +1068,11 @@ fr: Le fichier ne contient pas de mot de passe.
 en: (SSH key only)
 fr: (clé SSH uniquement)
 
-en:   Protocol    : SFTP
-fr:   Protocole   : SFTP
-
-en:   Host        : %s
-fr:   Hôte        : %s
-
-en:   Port        : %s
-fr:   Port        : %s
-
 en:   User        : %s
 fr:   Utilisateur : %s
 
-en:   Fingerprint : %s
-fr:   Empreinte   : %s
-
-en: Also create a link to a file to import into FileZilla?
-fr: Créer aussi un lien vers un fichier à importer dans FileZilla ?
-
 en: FileZilla: file to import with  seedtunnel seedbox sftp-config filezilla
 fr: FileZilla : fichier à importer avec  seedtunnel seedbox sftp-config filezilla
-
-en: Create an SSH key for WinSCP / FileZilla (connection without a password)?
-fr: Créer une clé SSH pour WinSCP / FileZilla (connexion sans mot de passe) ?
 
 en: Connection without a password: key for WinSCP / FileZilla with  seedtunnel seedbox sftp-key new
 fr: Connexion sans mot de passe : clé pour WinSCP / FileZilla avec  seedtunnel seedbox sftp-key new
@@ -1516,9 +1498,6 @@ fr: Client « %s » créé : IP %s, port ouvert %s, fichier %s
 en: Client "%s" revoked: its key can no longer connect.
 fr: Client « %s » révoqué : sa clé ne peut plus se connecter.
 
-en: Show the content of the file (to copy and paste)?
-fr: Afficher le contenu du fichier (pour un copier-coller) ?
-
 en: Without a seedbox:  seedtunnel vpn show %s  (QR code, or content to copy and paste).
 fr: Sans seedbox :  seedtunnel vpn show %s  (QR code, ou contenu à copier-coller).
 
@@ -1579,21 +1558,6 @@ fr: il y a %s jours
 en: DNS servers used by the VPN clients:
 fr: DNS utilisés par les clients du VPN :
 
-en:   1) Quad9      — blocks malicious domains (Swiss foundation)
-fr:   1) Quad9      — bloque les domaines malveillants (fondation suisse)
-
-en:   2) Cloudflare — usually the fastest
-fr:   2) Cloudflare — généralement le plus rapide
-
-en:   3) DNS4EU     — European Union, blocks malicious domains
-fr:   3) DNS4EU     — Union européenne, bloque les domaines malveillants
-
-en:   4) AdGuard    — also blocks ads and trackers
-fr:   4) AdGuard    — bloque aussi les publicités et les traqueurs
-
-en:   5) Other      — type the addresses
-fr:   5) Autre      — saisie manuelle
-
 en: Your choice [1-5]
 fr: Votre choix [1-5]
 
@@ -1617,18 +1581,6 @@ fr: Port invalide (1 à 65535).
 
 en: UDP port %s is already used on this server.
 fr: Le port UDP %s est déjà utilisé sur ce serveur.
-
-en:   Address : %s
-fr:   Adresse : %s
-
-en:   Port    : %s/udp
-fr:   Port    : %s/udp
-
-en:   DNS     : %s
-fr:   DNS     : %s
-
-en:   Out     : interface %s
-fr:   Sortie  : interface %s
 
 en: Is that right?
 fr: C'est bon ?
@@ -1979,9 +1931,6 @@ fr: Modifier l'adresse ou le port
 en: Change the DNS of the clients
 fr: Changer le DNS des clients
 
-en: In use: %s
-fr: Actuellement : %s
-
 en: Nothing to change: the clients already use %s.
 fr: Rien à changer : les clients utilisent déjà %s.
 
@@ -2280,3 +2229,171 @@ fr: Fenêtre trop petite pour le QR code : il lui faut %s colonnes et %s lignes,
 
 en: Or a one-time download link, to open on the device:  seedtunnel vpn share %s
 fr: Ou un lien de téléchargement à usage unique, à ouvrir sur l'appareil :  seedtunnel vpn share %s
+
+
+# --- Screens redone for 1.0.0 (client, summaries, SFTP, backups) -----------------
+
+en: Client "%s" created
+fr: Client « %s » créé
+
+en: Address in the VPN
+fr: Adresse dans le VPN
+
+en: Open port
+fr: Port ouvert
+
+en: %s (TCP and UDP)
+fr: %s (TCP et UDP)
+
+en: File
+fr: Fichier
+
+en: Window too small for the QR code: it needs %s columns and %s lines, this one has %s and %s. Make it bigger (or the font smaller), then R to show it again.
+fr: Fenêtre trop petite pour le QR code : il lui faut %s colonnes et %s lignes, celle-ci en a %s et %s. Agrandissez-la (ou réduisez la police), puis R pour le réafficher.
+
+en: Or Enter, then L: a one-time download link, to open on the device.
+fr: Ou Entrée, puis L : un lien de téléchargement à usage unique, à ouvrir sur l'appareil.
+
+en: Show it again
+fr: Réafficher
+
+en: Show the file (to copy and paste)
+fr: Afficher le fichier (pour un copier-coller)
+
+en: One-time download link for the file
+fr: Lien de téléchargement du fichier (usage unique)
+
+en: File of the client "%s"
+fr: Fichier du client « %s »
+
+en: Other
+fr: Autre
+
+en: blocks malicious domains (Swiss foundation)
+fr: bloque les domaines malveillants (fondation suisse)
+
+en: usually the fastest
+fr: généralement le plus rapide
+
+en: European Union, blocks malicious domains
+fr: Union européenne, bloque les domaines malveillants
+
+en: also blocks ads and trackers
+fr: bloque aussi les publicités et les traqueurs
+
+en: type the addresses
+fr: saisie manuelle
+
+en: Way out
+fr: Sortie
+
+en: interface %s
+fr: interface %s
+
+en: Summary
+fr: Récapitulatif
+
+en: In use
+fr: Actuel
+
+en: New login saved
+fr: Nouveaux identifiants enregistrés
+
+en: %s, port %s
+fr: %s, port %s
+
+en: User
+fr: Utilisateur
+
+en: Password
+fr: Mot de passe
+
+en: Write this down: the password is not saved anywhere in clear.
+fr: Notez-le : le mot de passe n'est enregistré nulle part en clair.
+
+en: Protocol
+fr: Protocole
+
+en: Host
+fr: Hôte
+
+en: Fingerprint
+fr: Empreinte
+
+en: Settings of the connection
+fr: Réglages de la connexion
+
+en: File to import into FileZilla (one-time link)
+fr: Fichier à importer dans FileZilla (lien à usage unique)
+
+en: SSH key for WinSCP / FileZilla (connection without a password)
+fr: Clé SSH pour WinSCP / FileZilla (connexion sans mot de passe)
+
+en: Weekly
+fr: Hebdomadaire
+
+en: turned on
+fr: activée
+
+en: turned off
+fr: désactivée
+
+en: the last %s are kept
+fr: les %s dernières sont gardées
+
+en: Latest
+fr: Dernière
+
+en: On the server
+fr: Sur le serveur
+
+en: %s in %s
+fr: %s dans %s
+
+en: Downloaded
+fr: Téléchargée
+
+en: not yet
+fr: pas encore
+
+en: DATE
+fr: DATE
+
+en: SIZE
+fr: TAILLE
+
+en: KIND
+fr: TYPE
+
+en: FOLDER
+fr: DOSSIER
+
+en: weekly
+fr: hebdomadaire
+
+en: by hand
+fr: manuelle
+
+en: copied
+fr: copiée
+
+en: manual
+fr: manuelle
+
+en: weekly backup off
+fr: sauvegarde hebdomadaire désactivée
+
+en: When
+fr: Quand
+
+en: every week, by itself (encrypted)
+fr: chaque semaine, toute seule (chiffrée)
+
+en: Kept
+fr: Gardées
+
+en: the last %s, in %s
+fr: les %s dernières, dans %s
+
+en: saved on the server (root only), so that it runs alone: write it down somewhere else too
+fr: enregistrée sur le serveur (root uniquement), pour qu'elle tourne seule : notez-la aussi ailleurs

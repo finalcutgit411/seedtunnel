@@ -119,11 +119,12 @@ ui_pad() {
     UI_PAD=$1$UI_REPEAT
 }
 
-# ui_wrap TEXT N → UI_LINES: the text in lines of N characters at most, cut
-# between words (a word longer than a line, a path for example, is split:
-# never shortened)
+# ui_wrap TEXT N [whole] → UI_LINES: the text in lines of N characters at
+# most, cut between words (a word longer than a line, a path for example, is
+# split: never shortened). whole: such a word goes on a line of its own,
+# whole (an address to copy).
 ui_wrap() {
-    local text=$1 max=$2 word line="" length=0 size
+    local text=$1 max=$2 whole=${3-} word line="" length=0 size
     local -a words=()
     UI_LINES=()
     if ((max < 1)); then max=1; fi
@@ -136,6 +137,13 @@ ui_wrap() {
     for word in "${words[@]}"; do
         ui_len "$word"
         size=$UI_LEN
+        if [[ -n $whole ]] && ((size > max)); then
+            if ((length > 0)); then UI_LINES+=("$line"); fi
+            UI_LINES+=("$word")
+            line=""
+            length=0
+            continue
+        fi
         while ((size > max)); do
             if ((length > 0)); then UI_LINES+=("$line"); fi
             ui_take "$word" "$max"
@@ -167,6 +175,50 @@ ui_wrap() {
 ui_print() {
     ui_cut "$1" "$UI_WIDTH"
     printf '%s\n' "$UI_CUT"
+}
+
+# ui_text — the lines read on the standard input (a long text of lang/), each
+# one wrapped to the width of the screen: its beginning as it is (aligned
+# columns kept), the rest on the next lines, under the value of a « Name :
+# value » line, indented 2 more otherwise. A word longer than a line (an
+# address to copy, a path) is never cut: a terminal copies it whole when it
+# only wraps it on the screen. Nor a command after two spaces (« … :
+# seedtunnel vpn share NAME »). « and » stay with their word (joined by
+# a no-break space).
+ui_text() {
+    local line indent head part name next nbsp=$'\xc2\xa0' glue=$'\x01' command="(seedtunnel|sudo|rsync|systemctl|journalctl) "
+    while IFS= read -r line || [[ -n $line ]]; do
+        line=${line//« /«$nbsp}
+        line=${line// »/$nbsp»}
+        indent=${line%%[! ]*}
+        # a command after two spaces stays on one line (glued for the time of
+        # the wrapping)
+        if [[ ${line#"$indent"} =~ ^(.*[^ ])"  "($command.*)$ ]]; then
+            line="$indent${BASH_REMATCH[1]}  ${BASH_REMATCH[2]// /$glue}"
+        fi
+        ui_len "$line"
+        if ((UI_LEN <= UI_WIDTH)) || [[ ${line#"$indent"} != *" "* ]]; then
+            printf '%s\n' "${line//$glue/ }"
+            continue
+        fi
+        # the beginning: up to the last space that fits
+        ui_take "$UI_STRIP" $((UI_WIDTH + 1))
+        head=${UI_TAKE% *}
+        head=${head%"${head##*[! ]}"}
+        printf '%s\n' "${head//$glue/ }"
+        part=${UI_STRIP:${#head}}
+        part=${part#"${part%%[! ]*}"}
+        # « Name : value »: the next lines under the value
+        name=${line#"$indent"}
+        name=${name%%" : "*}
+        if [[ $line == *" : "* ]] && ((${#name} <= 16)); then
+            printf -v next '%*s' $((${#indent} + ${#name} + 3)) ''
+        else
+            next="$indent  "
+        fi
+        ui_wrap "$part" $((UI_WIDTH - ${#next})) whole
+        for part in "${UI_LINES[@]}"; do printf '%s%s\n' "$next" "${part//$glue/ }"; done
+    done
 }
 
 # ui_line LEFT RIGHT — LEFT, and RIGHT against the right edge if there is room
@@ -525,14 +577,16 @@ ui_menu_ask() {
     ui_ask_choice "$1" "${UI_KEYS[@]}"
 }
 
-# ui_pause [next] — after an action: « Enter ↵ back · Q quit » (next: « Enter
-# ↵ continue », more screens follow). Status 1 for Q.
+# ui_pause [next [tight]] — after an action: « Enter ↵ back · Q quit » (next:
+# « Enter ↵ continue », more screens follow). tight: right under the last
+# line, without an empty line first (under a QR code that fills the window).
+# Status 1 for Q.
 # shellcheck disable=SC2120 # « next » comes from pause_next (lib/common.sh)
 ui_pause() {
     local answer text
     ((INTERACTIVE)) || return 0
     if [[ ${1-} == next ]]; then text=$(t 'Enter ↵ continue · Q quit'); else text=$(t 'Enter ↵ back · Q quit'); fi
-    echo
+    if [[ ${2-} != tight ]]; then echo; fi
     IFS= read -r -p "  $C_GREY$text$C_RESET " answer || {
         echo
         exit 130
@@ -623,6 +677,42 @@ ui_box() {
     done
     ui_repeat ─ $((width - 2))
     printf '  %s└%s┘%s\n' "$UI_COLOR" "$UI_REPEAT" "$C_RESET"
+}
+
+# ui_box_fields LEVEL TITLE — the fields added with ui_field_add, in a frame
+# (a summary, the card of a client): names in grey, values aligned. A value
+# too long for the frame goes on to the next lines, under itself; in a frame
+# too narrow for both, each value goes under its name.
+ui_box_fields() {
+    local level=$1 title=$2 i width=0 room part name indent
+    local -a lines=()
+    for i in "${!UI_FIELD_LABELS[@]}"; do
+        ui_len "${UI_FIELD_LABELS[i]}"
+        if ((UI_LEN > width)); then width=$UI_LEN; fi
+    done
+    # the frame takes the width of the screen at most: 2 + « │ » + space on
+    # each side
+    room=$((UI_WIDTH - 2 - 4 - width - 2))
+    for i in "${!UI_FIELD_LABELS[@]}"; do
+        ui_pad "${UI_FIELD_LABELS[i]}" "$width"
+        name="$C_GREY$UI_PAD$C_RESET  "
+        if ((room >= 12)); then
+            printf -v indent '%*s' $((width + 2)) ''
+            ui_wrap "${UI_FIELD_VALUES[i]}" "$room"
+        else
+            lines+=("$C_GREY${UI_FIELD_LABELS[i]}$C_RESET")
+            name="  "
+            indent="  "
+            ui_wrap "${UI_FIELD_VALUES[i]}" $((UI_WIDTH - 2 - 4 - 2))
+        fi
+        for part in "${UI_LINES[@]}"; do
+            lines+=("$name$part")
+            name=$indent
+        done
+    done
+    UI_FIELD_LABELS=()
+    UI_FIELD_VALUES=()
+    ui_box "$level" "$title" "${lines[@]}"
 }
 
 # --- Navigation ------------------------------------------------------------------

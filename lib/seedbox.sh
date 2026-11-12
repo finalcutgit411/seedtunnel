@@ -1310,29 +1310,73 @@ seedbox_sftp_config() {
     fingerprint=$(host_key_fingerprint)
     url=$(winscp_url "$port")
     if [[ $SEEDBOX_SFTP_PASSWORD == no ]]; then keys_only=" $(t '(SSH key only)')"; fi
+    if [[ ${1-} != filezilla ]] && ((INTERACTIVE)); then
+        seedbox_sftp_screen "$port" "$fingerprint" "$url" "$keys_only"
+        return 0
+    fi
     banner
     section 'SFTP connection: settings for WinSCP and FileZilla'
-    say '  Protocol    : SFTP'
-    say '  Host        : %s' "$SEEDBOX_DOMAIN"
-    say '  Port        : %s' "$port"
-    say '  User        : %s' "$SEEDBOX_USER$keys_only"
-    if [[ -n $fingerprint ]]; then say '  Fingerprint : %s' "$fingerprint"; fi
+    seedbox_sftp_card "$port" "$fingerprint" "$keys_only"
     echo
     text sftp_config_help
     echo
     if [[ ${1-} == filezilla ]]; then
         filezilla_share "$port"
-    elif ((INTERACTIVE)); then
-        if confirm 'Also create a link to a file to import into FileZilla?' n; then
-            filezilla_share "$port"
-        fi
-        if confirm 'Create an SSH key for WinSCP / FileZilla (connection without a password)?' n; then
-            sftp_key_generate
-        fi
     else
         say 'FileZilla: file to import with  seedtunnel seedbox sftp-config filezilla'
         say 'Connection without a password: key for WinSCP / FileZilla with  seedtunnel seedbox sftp-key new'
     fi
+}
+
+# seedbox_sftp_card PORT FINGERPRINT NOTE — what to type in WinSCP or
+# FileZilla, in a frame
+seedbox_sftp_card() {
+    ui_width
+    ui_field_add "$(t 'Protocol')" SFTP
+    ui_field_add "$(t 'Host')" "$C_CYAN$SEEDBOX_DOMAIN$C_RESET"
+    ui_field_add Port "$C_CYAN$1$C_RESET"
+    ui_field_add "$(t 'User')" "$C_CYAN$SEEDBOX_USER$C_RESET$3"
+    if [[ -n $2 ]]; then ui_field_add "$(t 'Fingerprint')" "$2"; fi
+    ui_box_fields info "$(t 'Settings of the connection')"
+}
+
+# In the menus: the settings, the address for WinSCP, and the keys for the
+# file to import into FileZilla and for an SSH key (instead of two questions)
+seedbox_sftp_screen() {
+    local port=$1 fingerprint=$2 url=$3 keys_only=$4 choice
+    while true; do
+        banner
+        section 'SFTP connection: settings for WinSCP and FileZilla'
+        seedbox_sftp_card "$port" "$fingerprint" "$keys_only"
+        echo
+        text sftp_config_help | ui_text
+        echo
+        ui_menu_add f "$(t 'File to import into FileZilla (one-time link)')"
+        ui_menu_add k "$(t 'SSH key for WinSCP / FileZilla (connection without a password)')"
+        ui_menu_show
+        echo
+        ui_ask_choice choice b "$(t 'Back')" q "$(t 'Quit')"
+        case ${choice,,} in
+            f) ui_action seedbox_sftp_filezilla "$port" ;;
+            k) ui_action seedbox_sftp_new_key ;;
+            "" | b) return 0 ;;
+            q) ui_quit ;;
+        esac
+    done
+}
+
+seedbox_sftp_filezilla() {
+    banner
+    section 'File to import into FileZilla (one-time link)'
+    filezilla_share "$1"
+    pause
+}
+
+seedbox_sftp_new_key() {
+    banner
+    section 'SSH key for WinSCP / FileZilla (connection without a password)'
+    sftp_key_generate
+    pause
 }
 
 # --- SSH keys for SFTP ---------------------------------------------------------------
@@ -1754,8 +1798,23 @@ seedbox_change_credentials() {
     seedbox_set_credentials "$OPT_NEW_USER"
     echo
     seedbox_selftest
-    seedbox_summary
+    echo
+    seedbox_login_card
     SEEDBOX_NEW_PASSWORD=""
+}
+
+# After a change of the user or the password: how to log in now, in a frame
+seedbox_login_card() {
+    local port
+    port=$(ssh_first_port)
+    port=${port:-22}
+    ui_width
+    ui_field_add "$(t 'Web interface')" "${C_CYAN}https://$SEEDBOX_DOMAIN/$C_RESET"
+    ui_field_add SFTP "$(t '%s, port %s' "$C_CYAN$SEEDBOX_DOMAIN$C_RESET" "$port")"
+    ui_field_add "$(t 'User')" "$C_CYAN$SEEDBOX_USER$C_RESET"
+    if [[ -n $SEEDBOX_NEW_PASSWORD ]]; then ui_field_add "$(t 'Password')" "$C_BOLD$SEEDBOX_NEW_PASSWORD$C_RESET"; fi
+    ui_box_fields ok "$(t 'New login saved')"
+    if [[ -n $SEEDBOX_NEW_PASSWORD ]]; then warn 'Write this down: the password is not saved anywhere in clear.'; fi
 }
 
 # seedtunnel seedbox password [--user NAME]: typed, or read from standard input
@@ -2058,10 +2117,7 @@ seedbox_menu_domain() {
     if ((!WENT_BACK)); then pause; fi
 }
 
-seedbox_menu_sftp() {
-    seedbox_sftp_config
-    pause
-}
+seedbox_menu_sftp() { seedbox_sftp_config; }
 
 seedbox_menu_restart() {
     seedbox_restart

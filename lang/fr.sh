@@ -196,14 +196,6 @@ text_fr_share_steps_backup() {
 EOF
 }
 
-text_fr_backup_auto_help() {
-    cat <<EOF
-Chaque semaine, une sauvegarde chiffrée se fait toute seule dans $BACKUP_DIR ;
-les $BACKUP_KEEP dernières sont gardées. Sa passphrase est enregistrée sur le
-serveur (root uniquement) pour qu'elle puisse tourner seule : notez-la aussi ailleurs.
-EOF
-}
-
 text_fr_restore_after() {
     cat <<EOF
   Les fichiers téléchargés ne sont pas dans la sauvegarde. Recopiez-les, par exemple :

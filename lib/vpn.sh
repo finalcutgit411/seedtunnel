@@ -408,8 +408,27 @@ vpn_add_client() {
     CLIENT_PRESHARED_KEY=$(wg genpsk)
     (umask 077 && state_write "$VPN_CLIENTS_DIR/$name.env" CLIENT_NUMBER CLIENT_PUBLIC_KEY CLIENT_PRESHARED_KEY CLIENT_PRIVATE_KEY)
     vpn_apply
+    if ((INTERACTIVE)); then
+        echo
+        vpn_client_card "$name" ok "$(t 'Client "%s" created' "$name")"
+        return 0
+    fi
     ok 'Client "%s" created: IP %s, open port %s, file %s' "$name" "$VPN_SUBNET.$((CLIENT_NUMBER + 1))" \
         "$((VPN_FORWARDED_PORT_BASE + CLIENT_NUMBER))" "$VPN_CLIENTS_DIR/$name.conf"
+}
+
+# vpn_client_card NAME LEVEL TITLE — the card of a client, in a frame: its
+# address in the VPN, its open port, its DNS and its file
+vpn_client_card() {
+    local name=$1 CLIENT_NUMBER CLIENT_PUBLIC_KEY CLIENT_PRESHARED_KEY CLIENT_PRIVATE_KEY
+    # shellcheck source=/dev/null
+    . "$VPN_CLIENTS_DIR/$name.env"
+    ui_width
+    ui_field_add "$(t 'Address in the VPN')" "$VPN_SUBNET.$((CLIENT_NUMBER + 1))"
+    ui_field_add "$(t 'Open port')" "$(t '%s (TCP and UDP)' "$((VPN_FORWARDED_PORT_BASE + CLIENT_NUMBER))")"
+    ui_field_add DNS "$(vpn_dns_label "$VPN_DNS")"
+    ui_field_add "$(t 'File')" "$C_CYAN$VPN_CLIENTS_DIR/$name.conf$C_RESET"
+    ui_box_fields "$2" "$3"
 }
 
 vpn_remove_client() {
@@ -428,48 +447,123 @@ vpn_qr_text() {
     sed -E -e '/^[[:space:]]*(#|$)/d' -e 's/^([A-Za-z]+) = /\1=/' -e 's/, /,/g' -- "$1"
 }
 
-# vpn_print_qr FILE NAME — the QR code of the file of client NAME. In a window
-# too small to show it whole, its lines would wrap and no phone could read it:
-# what to do is said instead. Not in a terminal (a file, a pipe): printed.
+# vpn_print_qr FILE NAME [menu] — the QR code of the file of client NAME. In a
+# window too small to show it whole, its lines would wrap and no phone could
+# read it: what to do is said instead. Not in a terminal (a file, a pipe):
+# printed. « menu »: alone on its screen, with one more line under it (the
+# key to go on). VPN_QR_SHOWN: 1 if it was printed.
 vpn_print_qr() {
-    local file=$1 name=$2 qr width height rows="" columns=""
+    local file=$1 name=$2 menu=${3-} qr width height rows="" columns=""
     local -a lines
+    VPN_QR_SHOWN=0
     qr=$(vpn_qr_text "$file" | qrencode -t ansiutf8 -m "$VPN_QR_MARGIN")
     mapfile -t lines <<<"$qr"
     height=${#lines[@]}
+    if [[ -n $menu ]]; then height=$((height + 1)); fi
     ui_len "${lines[0]}"
     width=$UI_LEN
     if stdout_is_terminal; then read -r rows columns < <(ui_terminal_size) || true; fi
     if [[ $rows =~ ^[1-9][0-9]*$ && $columns =~ ^[1-9][0-9]*$ ]] && ((columns < width || rows < height)); then
+        if [[ -n $menu ]]; then
+            warn 'Window too small for the QR code: it needs %s columns and %s lines, this one has %s and %s. Make it bigger (or the font smaller), then R to show it again.' \
+                "$width" "$height" "$columns" "$rows"
+            if seedbox_installed; then say 'Or Enter, then L: a one-time download link, to open on the device.'; fi
+            return 0
+        fi
         warn 'Window too small for the QR code: it needs %s columns and %s lines, this one has %s and %s. Make it bigger (or the font smaller), then:  seedtunnel vpn show %s' \
             "$width" "$height" "$columns" "$rows" "$name"
         if seedbox_installed; then say 'Or a one-time download link, to open on the device:  seedtunnel vpn share %s' "$name"; fi
         return 0
     fi
     printf '%s\n' "$qr"
+    VPN_QR_SHOWN=1
 }
 
+# vpn_show_client NAME [created] — for the commands: the QR code, what to do
+# with it, and the file. In the menus, three screens: the card of the client
+# (not after « Add a client », which has just shown it), its QR code alone on
+# the screen (so that it fits without scrolling), then what to do with it,
+# with the file and the one-time link at hand.
 vpn_show_client() {
     local name=$1 CLIENT_NUMBER CLIENT_PUBLIC_KEY CLIENT_PRESHARED_KEY CLIENT_PRIVATE_KEY port
     vpn_require_client "$name"
     # shellcheck source=/dev/null
     . "$VPN_CLIENTS_DIR/$name.env"
     port=$((VPN_FORWARDED_PORT_BASE + CLIENT_NUMBER))
-    banner
-    section 'Client "%s"' "$name"
-    vpn_print_qr "$VPN_CLIENTS_DIR/$name.conf" "$name"
-    echo
-    text vpn_client_help
-    echo
-    if ((INTERACTIVE)); then
-        if confirm 'Show the content of the file (to copy and paste)?' n; then
-            echo
-            cat "$VPN_CLIENTS_DIR/$name.conf"
-            echo
-        fi
-    else
+    if ((!INTERACTIVE)); then
+        section 'Client "%s"' "$name"
+        vpn_print_qr "$VPN_CLIENTS_DIR/$name.conf" "$name"
+        echo
+        text vpn_client_help
+        echo
         cat "$VPN_CLIENTS_DIR/$name.conf"
+        return 0
     fi
+    if [[ ${2-} != created ]]; then
+        echo
+        vpn_client_card "$name" info "$(t 'Client "%s"' "$name")"
+        pause_next
+    fi
+    vpn_qr_screen "$name"
+    vpn_client_screen "$name" "$port"
+}
+
+# The QR code alone on the screen. Too big for the window: R shows it again
+# once the window is bigger, Enter goes on without it.
+vpn_qr_screen() {
+    local name=$1 choice
+    while true; do
+        ui_screen
+        vpn_print_qr "$VPN_CLIENTS_DIR/$name.conf" "$name" menu
+        if ((VPN_QR_SHOWN)); then
+            if ! ui_pause next tight; then ui_quit; fi
+            return 0
+        fi
+        echo
+        ui_ask_choice choice r "$(t 'Show it again')" q "$(t 'Quit')"
+        case ${choice,,} in
+            r) ;;
+            q) ui_quit ;;
+            *) return 0 ;;
+        esac
+    done
+}
+
+# vpn_client_screen NAME PORT — what to do with the file of a client, and the
+# keys to show it or to send it by a one-time link (with the seedbox)
+vpn_client_screen() {
+    local name=$1 port=$2 choice
+    while true; do
+        banner
+        section 'Client "%s"' "$name"
+        text vpn_client_help | ui_text
+        echo
+        ui_menu_add f "$(t 'Show the file (to copy and paste)')"
+        if seedbox_installed; then ui_menu_add l "$(t 'One-time download link for the file')"; fi
+        ui_menu_show
+        echo
+        ui_ask_choice choice b "$(t 'Back')" q "$(t 'Quit')"
+        case ${choice,,} in
+            f) ui_action vpn_client_file "$name" ;;
+            l) if seedbox_installed; then ui_action vpn_client_link "$name"; fi ;;
+            "" | b) return 0 ;;
+            q) ui_quit ;;
+        esac
+    done
+}
+
+vpn_client_file() {
+    banner
+    section 'File of the client "%s"' "$1"
+    cat "$VPN_CLIENTS_DIR/$1.conf"
+    pause
+}
+
+vpn_client_link() {
+    banner
+    section 'Download link for a client (one time only)'
+    vpn_share_client "$1"
+    pause
 }
 
 # One-time download link for the file of a client (see share.sh)
@@ -590,6 +684,33 @@ vpn_status_table() {
 
 # --- Settings, installation, removal ---------------------------------------------
 
+# vpn_dns_choices CURRENT — the DNS services to choose from, like the entries
+# of a menu, a ● next to the one in use (CURRENT: its number). Without room
+# for its note on the same line, the note goes under it.
+vpn_dns_choices() {
+    local current=$1 i line mark part
+    local -a names=(Quad9 Cloudflare DNS4EU AdGuard "$(t 'Other')")
+    local -a notes=()
+    notes+=("$(t 'blocks malicious domains (Swiss foundation)')" "$(t 'usually the fastest')")
+    notes+=("$(t 'European Union, blocks malicious domains')" "$(t 'also blocks ads and trackers')" "$(t 'type the addresses')")
+    ui_width
+    for i in "${!names[@]}"; do
+        ui_key $((i + 1))
+        mark=""
+        if ((i + 1 == current)); then mark=" $C_GREEN●$C_RESET"; fi
+        ui_pad "${names[i]}$mark" 13
+        line="  $UI_KEY $UI_PAD $C_GREY${notes[i]}$C_RESET"
+        ui_len "$line"
+        if ((UI_LEN <= UI_WIDTH)); then
+            printf '%s\n' "$line"
+            continue
+        fi
+        ui_print "  $UI_KEY ${names[i]}$mark"
+        ui_wrap "${notes[i]}" $((UI_WIDTH - 6))
+        for part in "${UI_LINES[@]}"; do ui_print "      $C_GREY$part$C_RESET"; done
+    done
+}
+
 # Sets VPN_DNS. The choice suggested is the one in use (Quad9 at the
 # installation). Status 1: back, VPN_DNS left alone.
 vpn_ask_dns() {
@@ -600,11 +721,8 @@ vpn_ask_dns() {
     done
     echo
     say 'DNS servers used by the VPN clients:'
-    say '  1) Quad9      — blocks malicious domains (Swiss foundation)'
-    say '  2) Cloudflare — usually the fastest'
-    say '  3) DNS4EU     — European Union, blocks malicious domains'
-    say '  4) AdGuard    — also blocks ads and trackers'
-    say '  5) Other      — type the addresses'
+    vpn_dns_choices "$current"
+    echo
     while true; do
         ask_back choice 'Your choice [1-5]' "$current" || return 1
         case $choice in
@@ -629,7 +747,7 @@ vpn_ask_dns() {
 # change of the address or the port (the DNS has its own screen then). Status
 # 1: the user went back (empty answer, or « no » at the end), nothing to change.
 vpn_ask_settings() {
-    local mode=$1 port_in_use=$VPN_PORT
+    local mode=$1 port_in_use=$VPN_PORT address_in_use=$VPN_PUBLIC_ADDRESS address port
     while true; do
         ask_back VPN_PUBLIC_ADDRESS 'Public address of the server (IP or domain name)' "$VPN_PUBLIC_ADDRESS" || return 1
         if vpn_is_valid_address "$VPN_PUBLIC_ADDRESS"; then break; fi
@@ -646,12 +764,20 @@ vpn_ask_settings() {
         fi
     done
     if [[ $mode == install ]]; then vpn_ask_dns || return 1; fi
+    # what changes: « before → after »
+    address=$VPN_PUBLIC_ADDRESS
+    port="$VPN_PORT/udp"
+    if [[ $mode == change ]]; then
+        if [[ $VPN_PUBLIC_ADDRESS != "$address_in_use" ]]; then address="$address_in_use → $C_BOLD$VPN_PUBLIC_ADDRESS$C_RESET"; fi
+        if [[ $VPN_PORT != "$port_in_use" ]]; then port="$port_in_use → $C_BOLD$VPN_PORT/udp$C_RESET"; fi
+    fi
     echo
-    say 'Summary:'
-    say '  Address : %s' "$VPN_PUBLIC_ADDRESS"
-    say '  Port    : %s/udp' "$VPN_PORT"
-    say '  DNS     : %s' "$(vpn_dns_label "$VPN_DNS")"
-    say '  Out     : interface %s' "${VPN_OUT_INTERFACE:-?}"
+    ui_width
+    ui_field_add "$(t 'Address')" "$address"
+    ui_field_add Port "$port"
+    ui_field_add DNS "$(vpn_dns_label "$VPN_DNS")"
+    ui_field_add "$(t 'Way out')" "$(t 'interface %s' "${VPN_OUT_INTERFACE:-?}")"
+    ui_box_fields info "$(t 'Summary')"
     echo
     # a new port restarts the VPN: every tunnel is cut, this session too if it
     # goes through the VPN (« no » by default then)
@@ -694,8 +820,7 @@ vpn_install_interactive() {
     echo
     ok 'VPN installed — no restart needed.'
     pause_next
-    vpn_show_client "$first"
-    pause
+    vpn_show_client "$first" created
 }
 
 # Installation (or putting back in order) from a --config file. Run again with
@@ -765,7 +890,9 @@ vpn_change_dns() {
     WENT_BACK=0
     banner
     section 'Change the DNS of the clients'
-    say 'In use: %s' "$(vpn_dns_label "$VPN_DNS")"
+    ui_width
+    ui_field_add "$(t 'In use')" "$(vpn_dns_label "$VPN_DNS")"
+    ui_fields_show
     if ! vpn_ask_dns; then
         WENT_BACK=1
         return 0
@@ -820,8 +947,7 @@ vpn_menu_add() {
     elif vpn_ask_client_name name ""; then
         vpn_add_client "$name"
         pause_next
-        vpn_show_client "$name"
-        pause
+        vpn_show_client "$name" created
     fi
 }
 
@@ -829,10 +955,7 @@ vpn_menu_show() {
     local name
     banner
     section 'Show a client (QR code, file)'
-    if vpn_pick_client name "$(t 'Client to show')"; then
-        vpn_show_client "$name"
-        pause
-    fi
+    if vpn_pick_client name "$(t 'Client to show')"; then vpn_show_client "$name"; fi
 }
 
 vpn_menu_link() {

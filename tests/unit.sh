@@ -3565,11 +3565,19 @@ home_states() (
     home_backup
     touch -d '9 days ago' "$WORK/home-backup.enc"
     home_backup
-    [[ ${UI_STATUS_LEVELS[*]} == "bad bad warn ok warn" && ${UI_STATUS_STATES[*]} == "failed failed none yet recent old" ]] || {
+    # the weekly backup on (with its passphrase): a recent backup is up to date
+    echo x >"$BACKUP_PASSPHRASE_FILE"
+    backup_auto_enabled() { return 0; }
+    touch -d '2 days ago' "$WORK/home-backup.enc"
+    home_backup
+    # without the weekly backup, a recent one made by hand is « manual », in
+    # yellow, and the details say why
+    [[ ${UI_STATUS_LEVELS[*]} == "bad bad warn warn warn ok" && ${UI_STATUS_STATES[*]} == "failed failed none yet manual old recent" ]] || {
         echo "${UI_STATUS_LEVELS[*]} / ${UI_STATUS_STATES[*]}"
         return 1
     }
-    [[ ${UI_STATUS_DETAILS[3]} == "last backup 2 days ago" && ${UI_STATUS_SHORT[3]} == "2 days ago" ]]
+    [[ ${UI_STATUS_DETAILS[3]} == "last backup 2 days ago · weekly backup off" && ${UI_STATUS_SHORT[3]} == "2 days ago" ]] || return 1
+    [[ ${UI_STATUS_DETAILS[4]} == "last backup 9 days ago · weekly backup off" && ${UI_STATUS_DETAILS[5]} == "last backup 2 days ago" ]]
 )
 
 # The words of the blocks fit in them (9 characters), in English and in French
@@ -3578,7 +3586,7 @@ home_state_words_fit_blocks() (
     local language word
     for language in en fr; do
         i18n_load "$language"
-        for word in missing running stopped absent halted problem on off failed 'none yet' recent old; do
+        for word in missing running stopped absent halted problem on off failed 'none yet' recent old manual; do
             ui_len "$(t "$word")"
             if ((UI_LEN > 9)); then
                 echo "$language: « $(t "$word") » is $UI_LEN characters long"
@@ -4719,8 +4727,11 @@ restore_picks_a_backup_by_number() (
     answers "9" "2"
     backup_pick_file file >"$WORK/pick.out" 2>&1 || return 1
     cat "$WORK/pick.out"
+    # a table: number, date, size, kind (copied, by hand, weekly), folder
     [[ $file == "$BACKUP_DIR/seedtunnel-old.tar.gz.enc" ]] && grep -q "No backup number 9" "$WORK/pick.out" \
-        && grep -qx " *1) seedtunnel-copied.tar.gz.enc" "$WORK/pick.out" && grep -q "· $WORK/pick/home/ubuntu$" "$WORK/pick.out" || return 1
+        && grep -q "^ *# *DATE *SIZE *KIND *FOLDER$" "$WORK/pick.out" \
+        && grep -q "^ *1 .* copied *$WORK/pick/home/ubuntu$" "$WORK/pick.out" \
+        && grep -q "^ *2 .* by hand *$BACKUP_DIR$" "$WORK/pick.out" || return 1
     # the same list for « seedtunnel backup list »
     (($(backup_list | grep -c 'tar.gz.enc$') == 2)) || return 1
     # a path between quotes, with a space in it
@@ -5950,6 +5961,267 @@ Creating a self-signed certificate (fallback)" ]] || return 1
     rm -rf "$SEEDBOX_SSL_DIR" "$WORK/ssl-titles"
 )
 
+# --- Screens redone for 1.0.0 ---------------------------------------------------------
+
+# Fields in a frame: the values in one column; at 40 columns, a value too long
+# goes on under itself, never past the frame
+ui_box_fields_aligned_and_wrapped() (
+    load
+    local out line
+    UI_COLUMNS=80
+    ui_width
+    ui_field_add Address 203.0.113.10
+    ui_field_add "Open port" "60004 (TCP and UDP)"
+    # (not in a subshell: the fields are emptied once shown)
+    ui_box_fields info Summary >"$WORK/box.out"
+    out=$(<"$WORK/box.out")
+    printf '%s\n' "$out"
+    grep -q "^  ┌─ ● Summary ─" <<<"$out" && grep -q "│ Address    203.0.113.10 *│$" <<<"$out" \
+        && grep -q "│ Open port  60004 (TCP and UDP) *│$" <<<"$out" || return 1
+    UI_COLUMNS=40
+    ui_width
+    ui_field_add File /etc/seedtunnel/vpn/clients/a-rather-long-name.conf
+    ui_box_fields ok Card >"$WORK/box.out"
+    out=$(<"$WORK/box.out")
+    printf '%s\n' "$out"
+    while IFS= read -r line; do
+        ui_len "$line"
+        ((UI_LEN <= 39)) || return 1
+    done <<<"$out"
+    grep -q "│ File  /etc/seedtunnel/" <<<"$out" && grep -q "│       /a-rather-long-name.conf" <<<"$out" \
+        && (($(grep -c '│' <<<"$out") == 2))
+)
+
+# A long text of lang/ on a screen: each line wrapped to its width, its
+# beginning as it is, the rest under the value of « Name : value »; an address
+# alone on its line is never cut (copied whole)
+ui_text_wraps_but_never_cuts_an_address() (
+    load
+    local out line
+    UI_COLUMNS=40
+    ui_width
+    out=$(printf '%s\n' "  Android     : Settings → VPN → WireGuard (gear) → « Always-on VPN »" \
+        "sftp://lancelot;fingerprint=ssh-ed25519-gAp02kYYmtWjmhPTLe83f2mfoeAcy@seed.example.net:22/" | ui_text)
+    printf '%s\n' "$out"
+    # (« and » keep their word: no-break spaces)
+    out=${out//$'\xc2\xa0'/ }
+    [[ $(sed -n 1p <<<"$out") == "  Android     : Settings → VPN →" ]] || return 1
+    # the next lines under the value of « Name : value »
+    [[ $(sed -n 2p <<<"$out") == "                WireGuard (gear) →" && $(sed -n 3p <<<"$out") == "                « Always-on VPN »" ]] || return 1
+    [[ $(tail -n 1 <<<"$out") == "sftp://lancelot;fingerprint=ssh-ed25519-gAp02kYYmtWjmhPTLe83f2mfoeAcy@seed.example.net:22/" ]] || return 1
+    # a path in a sentence: on a line of its own, whole
+    out=$(printf '%s\n' "             with the file /etc/seedtunnel/vpn/clients/telephone-salon.conf" | ui_text)
+    printf '%s\n' "$out"
+    [[ $(sed -n 1p <<<"$out") == "             with the file" && $(sed -n 2p <<<"$out") == "               /etc/seedtunnel/vpn/clients/telephone-salon.conf" ]] || return 1
+    # a command after two spaces: on one line
+    out=$(printf '%s\n' "  To get it onto the computer:  seedtunnel vpn share telephone-salon" | ui_text)
+    printf '%s\n' "$out"
+    [[ $(sed -n 1p <<<"$out") == "  To get it onto the computer:" && $(sed -n 2p <<<"$out") == "    seedtunnel vpn share telephone-salon" ]]
+)
+
+# Add or show a client, in the menus: the card, then the QR code alone (the
+# key to go on right under it), then what to do, with [F] for the file and
+# [L] for a one-time link (with the seedbox only)
+vpn_client_screens() (
+    qr_client_load || return 1
+    local out
+    INTERACTIVE=1
+    clear() { echo "--- clear"; }
+    stdout_is_terminal() { return 1; }
+    seedbox_installed() { return 1; }
+    out=$(printf '\n\nf\n\nb\n' | vpn_show_client telephone-salon 2>&1) || {
+        printf '%s\n' "$out"
+        return 1
+    }
+    printf '%s\n' "$out"
+    # the card, before the QR code
+    [[ $out == *'● Client "telephone-salon"'*"Address in the VPN  10.8.0.253"*"Open port"*"60252 (TCP and UDP)"*"--- clear"*█* ]] || return 1
+    # the QR code alone on its screen: nothing between the clearing and it,
+    # the key to go on right under its last line
+    [[ $(grep -A1 -- "--- clear" <<<"$out" | sed -n 2p) == *█* ]] || return 1
+    # (the key line is the prompt of « read »: shown only on a terminal)
+    [[ $(grep -A1 '█' <<<"$out" | tail -n 1) == "--- clear" ]] && declare -f vpn_qr_screen | grep -q "ui_pause next tight" || return 1
+    # then what to do, the keys, the file shown by F
+    [[ $out == *"Phone    : WireGuard app"*"[F] Show the file (to copy and paste)"*"[Interface]"* ]] || return 1
+    [[ $out != *"[L]"* && $out != *"[y/N]"* ]] || return 1
+    # with the seedbox: L too
+    seedbox_installed() { return 0; }
+    out=$(printf '\n\nb\n' | vpn_show_client telephone-salon 2>&1)
+    [[ $out == *"[L] One-time download link for the file"* ]] || return 1
+    # after « Add a client »: no card again (it was just shown)
+    out=$(printf '\nb\n' | vpn_show_client telephone-salon created 2>&1)
+    [[ $out != *"Address in the VPN"* && $out == *█* ]] || return 1
+    # for the commands: unchanged (the QR code, what to do, the file)
+    INTERACTIVE=0
+    out=$(vpn_show_client telephone-salon 2>&1)
+    [[ $out == *█*"Phone    : WireGuard app"*"[Interface]"* && $out != *"[F]"* ]]
+)
+
+# The QR code too big for the window, in the menus: said with R to show it
+# again (no command to type), and Enter goes on
+vpn_qr_screen_too_small() (
+    qr_client_load || return 1
+    local out
+    INTERACTIVE=1
+    clear() { :; }
+    stdout_is_terminal() { return 0; }
+    ui_terminal_size() { echo "24 80"; }
+    seedbox_installed() { return 0; }
+    out=$(printf 'r\n\n' | vpn_qr_screen telephone-salon 2>&1) || {
+        printf '%s\n' "$out"
+        return 1
+    }
+    printf '%s\n' "$out"
+    (($(grep -c "Window too small for the QR code" <<<"$out") == 2)) || return 1
+    [[ $out == *"then R to show it again"*"Or Enter, then L"* && $out != *"seedtunnel vpn show"* && $out != *█* ]] || return 1
+    # 37 lines for the QR code of this client (the longest file), and one
+    # more for the key: 38
+    ui_terminal_size() { echo "37 80"; }
+    out=$(printf '\n' | vpn_qr_screen telephone-salon 2>&1)
+    [[ $out == *"it needs 73 columns and 38 lines"* ]] || return 1
+    ui_terminal_size() { echo "38 80"; }
+    out=$(printf '\n' | vpn_qr_screen telephone-salon 2>&1)
+    [[ $out == *█* ]]
+)
+
+# The DNS to choose from: like the entries of a menu, a ● on the one in use;
+# at 40 columns, the note under the name
+vpn_dns_choices_mark_the_one_in_use() (
+    load
+    local out line
+    UI_COLUMNS=80
+    out=$(vpn_dns_choices 3)
+    printf '%s\n' "$out"
+    grep -qx "  \[3\] DNS4EU ●      European Union, blocks malicious domains" <<<"$out" \
+        && grep -qx "  \[1\] Quad9         blocks malicious domains (Swiss foundation)" <<<"$out" \
+        && (($(grep -c '●' <<<"$out") == 1)) || return 1
+    UI_COLUMNS=40
+    out=$(vpn_dns_choices 1)
+    printf '%s\n' "$out"
+    while IFS= read -r line; do
+        ui_len "$line"
+        ((UI_LEN <= 39)) || return 1
+    done <<<"$out"
+    grep -qx "  \[1\] Quad9 ●" <<<"$out" && grep -qx "      blocks malicious domains (Swiss" <<<"$out"
+)
+
+# Change of the address or the port: a summary in a frame, « before → after »
+# for what changes
+vpn_settings_summary_shows_the_change() (
+    back_load
+    local out
+    VPN_OUT_INTERFACE=eth0
+    VPN_DNS="9.9.9.9, 149.112.112.112"
+    vpn_port_is_free() { return 0; }
+    ssh_session_source() { echo 198.51.100.7; }
+    confirm() { return 0; }
+    answers 203.0.113.10 51821
+    out=$(vpn_ask_settings change 2>&1) || {
+        printf '%s\n' "$out"
+        return 1
+    }
+    printf '%s\n' "$out"
+    [[ $out == *"● Summary"*"│ Address  203.0.113.10 "*"│ Port     51820 → 51821/udp"*"│ DNS      Quad9 · 9.9.9.9, 149.112.112.112"*"│ Way out  interface eth0"* ]] || return 1
+    [[ $out == *"New port: the VPN restarts"* ]] || return 1
+    # the installation: no arrow
+    VPN_PORT=51820
+    answers 203.0.113.10 51821 1
+    out=$(vpn_ask_settings install 2>&1)
+    [[ $out == *"│ Port     51821/udp"* && $out != *"→"* ]]
+)
+
+# The backups in their menu: aligned fields, the weekly backup on (green),
+# off (yellow) or failed (red), the latest one, how many, the last download
+backup_status_fields_states() (
+    load
+    local out
+    UI_COLUMNS=80
+    ui_width
+    BACKUP_DIR="$WORK/status-backups"
+    mkdir -p "$BACKUP_DIR"
+    touch "$BACKUP_DIR/a.tar.gz.enc" "$BACKUP_DIR/b-auto.tar.gz.enc"
+    BACKUP_PASSPHRASE_FILE="$WORK/status-passphrase"
+    echo x >"$BACKUP_PASSPHRASE_FILE"
+    BACKUP_DOWNLOADED_MARK="$WORK/status-mark"
+    rm -f "$BACKUP_DOWNLOADED_MARK"
+    backup_auto_enabled() { return 0; }
+    systemctl() { return 1; }
+    out=$(backup_status_fields)
+    printf '%s\n' "$out"
+    [[ $out == *"Weekly         ● turned on · the last 4 are kept"*"Latest         "*"(today)"*"On the server  2 in $BACKUP_DIR"*"Downloaded     ● not yet"* ]] || return 1
+    systemctl() { [[ $1 == is-failed ]]; }
+    [[ $(backup_status_fields) == *"Weekly         ● failed"* ]] || return 1
+    backup_auto_enabled() { return 1; }
+    touch "$BACKUP_DOWNLOADED_MARK"
+    out=$(backup_status_fields)
+    [[ $out == *"Weekly         ● turned off"* && $out == *"Downloaded     today"* ]] || return 1
+    rm -f "$BACKUP_DIR"/*.enc
+    [[ $(backup_status_fields) == *"Latest         ● none yet"*"On the server  0 in"* ]]
+)
+
+# Seen on a real server: after a restore from the menu, the menus stayed in
+# the language of the start of the session. They now go on in the language
+# saved by the backup; SEEDTUNNEL_LANG still wins, and with nothing saved the
+# language of the run stays.
+language_back_after_restore() (
+    load
+    unset SEEDTUNNEL_LANG
+    rm -f "$APP_LANG_FILE"
+    i18n_load en
+    language_reload
+    [[ $APP_LANG == en ]] || return 1
+    clear() { :; }
+    backup_status_fields() { :; }
+    ui_action() { [[ $1 != backup_menu_restore ]] || echo fr >"$APP_LANG_FILE"; }
+    INTERACTIVE=1
+    backup_menu <<<$'4\nb' >/dev/null 2>&1 || return 1
+    [[ $APP_LANG == fr && $(t 'Back') == Retour ]] || return 1
+    # the home screen reloads it too (a restore run from there)
+    echo en >"$APP_LANG_FILE"
+    declare -f main_menu | grep -q language_reload || return 1
+    language_reload
+    [[ $APP_LANG == en ]] || return 1
+    SEEDTUNNEL_LANG=fr
+    echo en >"$APP_LANG_FILE"
+    i18n_load fr
+    language_reload
+    [[ $APP_LANG == fr ]]
+)
+
+# The seedbox: the new login in a frame after a change; the SFTP settings in a
+# frame, with keys for the FileZilla file and the SSH key (no questions)
+seedbox_login_and_sftp_screens() (
+    load
+    local out
+    UI_COLUMNS=80
+    SEEDBOX_DOMAIN=seed.example.net
+    SEEDBOX_USER=lancelot
+    ssh_first_port() { echo 2222; }
+    SEEDBOX_NEW_PASSWORD=dGgNV5GVohRrW1ClQuk4
+    out=$(seedbox_login_card 2>&1)
+    printf '%s\n' "$out"
+    [[ $out == *"✔ New login saved"*"│ Web interface  https://seed.example.net/"*"│ SFTP           seed.example.net, port 2222"*"│ User           lancelot"*"│ Password       dGgNV5GVohRrW1ClQuk4"*"Write this down"* ]] || return 1
+    SEEDBOX_NEW_PASSWORD=""
+    out=$(seedbox_login_card 2>&1)
+    [[ $out != *Password* && $out != *"Write this down"* ]] || return 1
+    INTERACTIVE=1
+    clear() { :; }
+    host_key_fingerprint() { echo "SHA256:gAp02kYYmtWjmhPTLe83f2mfoeAcy+//GMfI045u0U0 ED25519"; }
+    winscp_url() { echo "sftp://lancelot;fingerprint=x@seed.example.net:2222/"; }
+    SEEDBOX_SFTP_PASSWORD=no
+    out=$(seedbox_sftp_config <<<b 2>&1) || {
+        printf '%s\n' "$out"
+        return 1
+    }
+    printf '%s\n' "$out"
+    [[ $out == *"● Settings of the connection"*"│ Host         seed.example.net"*"│ Port         2222"*"│ User         lancelot (SSH key only)"*"│ Fingerprint  SHA256:"* ]] || return 1
+    [[ $out == *"sftp://lancelot;fingerprint=x@seed.example.net:2222/"*"[F] File to import into FileZilla (one-time link)"*"[K] SSH key for WinSCP"* && $out != *"[y/N]"* ]] || return 1
+    # for the commands: the same frame, and the commands to use
+    INTERACTIVE=0
+    out=$(seedbox_sftp_config 2>&1)
+    [[ $out == *"│ Host         seed.example.net"*"seedtunnel seedbox sftp-config filezilla"* && $out != *"[F]"* ]]
+)
+
 check "vpn_sync: WireGuard refusing the configuration shows « failed »" vpn_sync_reports_wg_failure
 check "vpn_sync: a failure of « wg-quick strip » is seen" vpn_sync_reports_strip_failure
 check "vpn_sync: « ok » when every step works" vpn_sync_ok_when_all_steps_work
@@ -6213,5 +6485,14 @@ check "VPN: window too small for the QR code: what to do is said instead" vpn_qr
 check "doctor: installed with an IP, one warning that asks for a domain name" doctor_ip_one_clear_warning
 check "seedbox removal: certbot only asked when there is a certificate" seedbox_removal_without_letsencrypt
 check "self-signed certificate: « (fallback) » only for a domain name" selfsigned_title_with_an_ip
+check "screens: fields in a frame, aligned, long values under themselves" ui_box_fields_aligned_and_wrapped
+check "screens: long texts wrapped to the width, an address never cut" ui_text_wraps_but_never_cuts_an_address
+check "VPN client in the menus: card, QR code alone, then what to do with F (file) and L (link)" vpn_client_screens
+check "VPN client in the menus: QR code too big for the window, R shows it again" vpn_qr_screen_too_small
+check "DNS of the clients: the choices like a menu, a ● on the one in use" vpn_dns_choices_mark_the_one_in_use
+check "VPN address or port: summary in a frame, « before → after »" vpn_settings_summary_shows_the_change
+check "backups menu: weekly on/off/failed, latest, on the server, downloaded" backup_status_fields_states
+check "restore from the menu: the menus go on in the language of the backup" language_back_after_restore
+check "seedbox: new login in a frame, SFTP settings in a frame with keys F and K" seedbox_login_and_sftp_screens
 printf '\n\033[1m%s passed, %s failed\033[0m\n' "$PASS" "$FAIL"
 ((FAIL == 0))

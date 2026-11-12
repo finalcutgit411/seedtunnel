@@ -102,6 +102,17 @@ language_save() {
     i18n_load "$1"
 }
 
+# language_reload — after something that may have changed the language saved
+# (a restore, run in a subshell): the menus go on in it. Nothing saved (it
+# could not be written): the language of this run stays. SEEDTUNNEL_LANG still
+# wins.
+language_reload() {
+    local language
+    is_language "${SEEDTUNNEL_LANG-}" && return 0
+    language=$(language_saved)
+    if [[ -n $language && $language != "$APP_LANG" ]]; then i18n_load "$language"; fi
+}
+
 # Language saved for this server, if it is one (empty otherwise)
 language_saved() {
     local saved=""
