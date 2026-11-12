@@ -758,9 +758,10 @@ report_anonymize() {
     # SSH public keys with their comment, and fingerprints
     REPORT_SCRIPT+='s/(ssh-(ed25519|rsa|dss)|ecdsa-sha2-nistp[0-9]+|sk-[a-z0-9@.-]+) [A-Za-z0-9+\/=]+( [^ ]+)?/'"$(t '<ssh-key>')"'/g;'
     REPORT_SCRIPT+='s/SHA256:[A-Za-z0-9+\/]{43}/'"$(t '<fingerprint>')"'/g;'
-    # the accounts named by needrestart (« jean @ session #1: sshd… »), and
-    # the names of the backups made by another server
-    REPORT_SCRIPT+='s/^( *)[a-z_][a-z0-9_.-]* @ (session #|user manager service)/\1'"$(t '<admin>')"' @ \2/;'
+    # the accounts named by needrestart (« jean @ session #1: sshd… », « jean @
+    # user manager service: systemd… », « jean @ user manager: (sd-pam)… » on
+    # Ubuntu 26.04), and the names of the backups made by another server
+    REPORT_SCRIPT+='s/^( *)[a-z_][a-z0-9_.-]* @ (session #|user manager)/\1'"$(t '<admin>')"' @ \2/;'
     REPORT_SCRIPT+='s/seedtunnel-[A-Za-z0-9._-]+-([0-9]{8}-[0-9]{6})/seedtunnel-'"$(t '<server>')"'-\1/g;'
     sed -E -i "$REPORT_SCRIPT" "$file"
     # the other public addresses, as found in what is left; not those of the

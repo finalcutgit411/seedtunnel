@@ -5557,6 +5557,7 @@ $ useradd --no-create-home --home-dir / --shell /usr/sbin/nologin --user-group -
 $ openssl req -x509 -newkey ec -subj /CN=ancien.famille-dupont.fr -addext subjectAltName=DNS:ancien.famille-dupont.fr
  jean.martin @ session #1: bash[1951], sshd-session[1821,1946], sudo[2403,2405]
  jean.martin @ user manager service: systemd[1273]
+ gauvain @ user manager: (sd-pam)[1831]
 /root/seedtunnel-old-box-20261101-101010.tar.gz.enc
 Hit:2 http://nova.clouds.archive.ubuntu.com/ubuntu noble InRelease
 perceval ran it
@@ -5565,9 +5566,10 @@ EOF
     who() { :; }
     report_anonymize "$WORK/report.txt"
     cat "$WORK/report.txt"
-    ! grep -q 'famille-dupont\|arthur-dupont\|jean.martin\|perceval\|old-box' "$WORK/report.txt" || return 1
+    ! grep -q 'famille-dupont\|arthur-dupont\|jean.martin\|gauvain\|perceval\|old-box' "$WORK/report.txt" || return 1
     grep -q "<former-domain>" "$WORK/report.txt" && grep -q "<former-sftp-user>" "$WORK/report.txt" \
-        && grep -q "^ <admin> @ session #1" "$WORK/report.txt" && grep -q "seedtunnel-<server>-20261101-101010" "$WORK/report.txt" \
+        && grep -q "^ <admin> @ session #1" "$WORK/report.txt" && grep -qF " <admin> @ user manager: (sd-pam)[1831]" "$WORK/report.txt" \
+        && grep -qF " <admin> @ user manager service: systemd[1273]" "$WORK/report.txt" && grep -q "seedtunnel-<server>-20261101-101010" "$WORK/report.txt" \
         && grep -q "nova.clouds.archive.ubuntu.com/ubuntu noble" "$WORK/report.txt" && grep -q "debian-transmission" "$WORK/report.txt"
 )
 
@@ -6793,7 +6795,7 @@ check "backup: refused when it is made if it could not be restored" backup_refus
 check "backup: a file changed while it is read (progress of Transmission) is no failure" backup_file_changed_meanwhile_is_no_failure
 check "firewall: rules loaded older than their file are loaded again (restore on the same ports)" firewall_refresh_reloads_stale_rules
 check "restore: the last download of a backup and the start of the weekly backup are those of this server" restore_leaves_the_marks_of_the_other_server
-check "report: domains and SFTP accounts used before, administrators, backups of another server replaced" report_replaces_former_names
+check "report: domains and SFTP accounts used before, administrators (also needrestart of Ubuntu 26.04), backups of another server replaced" report_replaces_former_names
 check "report: the SFTP account logged in is not an administrator, the DNS of the menu kept" report_sftp_account_and_dns
 check "restore cut short: the way back puts back settings, SSH keys, certificate and torrents" restore_undo_puts_everything_back
 check "restore: the settings replaced kept aside only if there is something to go back to, how to delete them said" restore_keeps_aside_only_settings
