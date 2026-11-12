@@ -230,12 +230,17 @@ seedbox_check_data_dir() {
     return 0
 }
 
+# seedbox_check_web_ports [links] — no other program on 80 or 443 (links:
+# for the site of the links)
+# shellcheck disable=SC2120 # « links » comes from lib/share.sh and lib/backup.sh
 seedbox_check_web_ports() {
     local out
     out=$(ss -Hltnp '( sport = :80 or sport = :443 )' 2>/dev/null || true)
     # each listening line: nginx on one port does not cover another program on the other
     out=$(grep -v nginx <<<"$out" || true)
-    if [[ -n $out ]]; then
+    if [[ -n $out && ${1-} == links ]]; then
+        die 'Ports 80/443 are already used by another program:\n%s\n  Stop it (apache2 for example) before installing the site of the links.' "$out"
+    elif [[ -n $out ]]; then
         die 'Ports 80/443 are already used by another program:\n%s\n  Stop it (apache2 for example) before installing the seedbox.' "$out"
     fi
 }
@@ -627,6 +632,16 @@ seedbox_certificate_mode() {
     if [[ $SEEDBOX_LETSENCRYPT_SERVER == staging ]]; then printf staging; else printf letsencrypt; fi
 }
 
+# The command that asks for the certificate again: for the seedbox, or for
+# the site of the links of the VPN (see links_run in share.sh)
+letsencrypt_retry_command() {
+    if seedbox_installed; then
+        printf 'seedtunnel seedbox domain %s' "$SEEDBOX_DOMAIN"
+    else
+        printf 'seedtunnel vpn links on'
+    fi
+}
+
 # Requests the Let's Encrypt certificate. Status 1 if it fails.
 letsencrypt_request() {
     local label=""
@@ -715,8 +730,10 @@ EOF
     fi
 }
 
-nginx_generate_site() {
-    local crt key hsts="" ipv6_80="" ipv6_443=""
+# TLS lines of the HTTPS server (seedbox, or site of the links): the
+# certificate chosen (SEEDBOX_CERTIFICATE) and the settings
+nginx_generate_tls() {
+    local crt key
     if [[ $SEEDBOX_CERTIFICATE == selfsigned ]]; then
         crt="$SEEDBOX_SSL_DIR/selfsigned.crt"
         key="$SEEDBOX_SSL_DIR/selfsigned.key"
@@ -724,11 +741,30 @@ nginx_generate_site() {
         crt="$LETSENCRYPT_DIR/fullchain.pem"
         key="$LETSENCRYPT_DIR/privkey.pem"
     fi
-    # HSTS only with a real certificate: otherwise the browser would then refuse
-    # to let the user accept the security warning.
+    cat <<EOF
+    ssl_certificate     $crt;
+    ssl_certificate_key $key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:seedtunnel:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+EOF
+}
+
+# HSTS header, starting with a new line: only with a real certificate,
+# otherwise the browser would then refuse to let the user accept the security
+# warning
+nginx_generate_hsts() {
     if [[ $SEEDBOX_CERTIFICATE == letsencrypt ]]; then
-        hsts=$'\n    add_header Strict-Transport-Security "max-age=31536000" always;'
+        printf '\n    add_header Strict-Transport-Security "max-age=31536000" always;'
     fi
+}
+
+nginx_generate_site() {
+    local hsts ipv6_80="" ipv6_443=""
+    hsts=$(nginx_generate_hsts)
     if [[ -e /proc/net/if_inet6 ]]; then
         ipv6_80=$'\n    listen [::]:80;'
         ipv6_443=$'\n    listen [::]:443 ssl;'
@@ -758,14 +794,7 @@ server {
     listen 443 ssl;$ipv6_443
     server_name $SEEDBOX_DOMAIN;
 
-    ssl_certificate     $crt;
-    ssl_certificate_key $key;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
-    ssl_prefer_server_ciphers off;
-    ssl_session_cache shared:seedtunnel:10m;
-    ssl_session_timeout 1d;
-    ssl_session_tickets off;
+$(nginx_generate_tls)
 
     server_tokens off;
     add_header X-Frame-Options SAMEORIGIN always;
@@ -851,8 +880,10 @@ nginx_default_site_off() {
     fi
 }
 
+# The site of the seedbox; or, through links_run (share.sh), the site of the
+# links of the VPN: same file, same certificates
 seedbox_apply_nginx() {
-    if write_if_changed "$NGINX_SITE" 644 root:root nginx_generate_site; then pending_set nginx; fi
+    if write_if_changed "$NGINX_SITE" 644 root:root "${NGINX_SITE_GENERATOR:-nginx_generate_site}"; then pending_set nginx; fi
     if [[ ! -L $NGINX_SITE_LINK ]]; then
         ln -sf "$NGINX_SITE" "$NGINX_SITE_LINK"
         pending_set nginx
@@ -1151,6 +1182,9 @@ seedbox_apply() {
     net_hardening_apply
     seedbox_apply_user
     seedbox_save
+    # the site of the seedbox serves the links: it takes the place of the
+    # site of the links of the VPN (same file, same certificates)
+    rm -f "$LINKS_CONF_FILE"
     # ports 80/443 open before the Let's Encrypt request
     firewall_refresh
     seedbox_apply_dirs

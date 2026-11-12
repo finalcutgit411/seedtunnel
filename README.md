@@ -47,7 +47,7 @@ The menu opens at the end and asks only what it needs. Later, type `seedtunnel` 
 
 | | |
 |---|---|
-| **WireGuard VPN** | A QR code for each phone, a one-time download link for each computer (with the seedbox), an open port for each client for your torrents, no IPv6 leak. |
+| **WireGuard VPN** | A QR code for each phone, a one-time download link for each computer, an open port for each client for your torrents, no IPv6 leak. |
 | **Seedbox** | Transmission in your browser, in HTTPS, with a Let's Encrypt certificate that renews itself. Your files over SFTP, with profiles ready to import into WinSCP and FileZilla, and an SSH key made for you if you have none. |
 | **Protection** | nftables firewall, fail2ban, passwords kept only as hashes, automatic security updates, Transmission stopped cleanly before the disk is full. |
 | **Upkeep** | A full diagnostic, encrypted backups every week, verified updates with a way back, and an anonymized report to share when you ask for help. |
@@ -88,7 +88,7 @@ Everything is in the menu (`seedtunnel`). The same things also exist as commands
 | Command | What it does |
 |---|---|
 | `seedtunnel vpn add phone --qr` | Adds a VPN client and shows its QR code |
-| `seedtunnel vpn share laptop` | One-time download link for the file of a client (with the seedbox) |
+| `seedtunnel vpn share laptop` | One-time download link for the file of a client |
 | `seedtunnel seedbox sftp-config winscp` | One-time link to a WinSCP profile (or `filezilla`) |
 | `seedtunnel doctor` | Checks everything, with the fix for each problem |
 | `seedtunnel doctor --link` | The same, with an anonymized report to share |

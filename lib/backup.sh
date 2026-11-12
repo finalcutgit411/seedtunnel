@@ -92,7 +92,12 @@ restore_check_server() {
     if seedbox_installed && [[ ! -f $settings/seedbox.conf ]]; then
         die 'This server has a seedbox, the backup has none: it would keep running without seedtunnel knowing it. Remove it first (seedtunnel seedbox uninstall, the downloads are kept), or restore on a new server.'
     fi
-    [[ -f $settings/seedbox.conf ]] || return 0
+    if [[ ! -f $settings/seedbox.conf ]]; then
+        # the site of the links of the backup: nginx on 80 and 443, as for a
+        # seedbox
+        if [[ -f $settings/links.conf ]] && ! links_site_on; then seedbox_check_web_ports links; fi
+        return 0
+    fi
     user=$(restore_backup_setting "$settings/seedbox.conf" SEEDBOX_USER)
     if seedbox_installed; then
         # the account renamed since the backup takes back the name of the
@@ -544,9 +549,9 @@ backup_share_file() {
     local file=$1 size
     # shown on the download page, to check that the file arrived whole
     size=$(human_size "$(stat -c %s "$file")")
-    share_require "$(t 'Without a seedbox, copy it with WinSCP or scp: %s' "$file")"
     banner
     section "$2"
+    share_require "$(t 'Without a link, copy it with WinSCP or scp: %s' "$file")" || return 0
     say 'Backup of %s.' "$(date -r "$file" '+%F %R')"
     share_create "$file" "${file##*/}" "$(t 'seedtunnel backup')" "$(text share_steps_backup)" \
         "$(t 'The backup is encrypted: it cannot be read without its passphrase.')" "$BACKUP_DOWNLOADED_MARK"
@@ -1075,6 +1080,7 @@ backup_state_names() {
             printf 'SEEDBOX_(USER|DOMAIN|DATA_DIR|CERTIFICATE|LETSENCRYPT|LETSENCRYPT_SERVER|SFTP_PASSWORD|HASH_SYSTEM|HASH_WEB|HASH_TRANSMISSION)'
             ;;
         firewall.conf) printf 'FIREWALL_ENABLED' ;;
+        links.conf) printf 'LINKS_CERTIFICATE' ;;
         *.env) printf 'CLIENT_(NUMBER|PUBLIC_KEY|PRESHARED_KEY|PRIVATE_KEY)' ;;
     esac
 }
@@ -1085,7 +1091,7 @@ backup_state_names() {
 backup_unsafe_state_file() {
     local file names
     # only the files read by « . »: vpn.conf, seedbox.conf, seedbox.secrets,
-    # firewall.conf, vpn/clients/*.env (vpn/clients/*.conf are WireGuard files,
+    # firewall.conf, links.conf, vpn/clients/*.env (vpn/clients/*.conf are WireGuard files,
     # never read by bash)
     for file in "$1"/*.conf "$1"/*.secrets "$1"/vpn/clients/*.env; do
         [[ -e $file || -L $file ]] || continue
@@ -1118,6 +1124,7 @@ restore_setting_ok() {
         SEEDBOX_SFTP_PASSWORD) [[ $value =~ ^(yes|no)$ ]] ;;
         SEEDBOX_HASH_*) [[ $value =~ ^[A-Za-z0-9./\$!*{}=+-]*$ ]] ;;
         FIREWALL_ENABLED) [[ $value =~ ^[01]$ ]] ;;
+        LINKS_CERTIFICATE) [[ $value =~ ^(selfsigned|letsencrypt)$ ]] ;;
         CLIENT_NUMBER) [[ $value =~ ^[1-9][0-9]{0,2}$ ]] && ((value <= 253)) ;;
         CLIENT_PUBLIC_KEY | CLIENT_PRESHARED_KEY | CLIENT_PRIVATE_KEY) is_wg_key "$value" ;;
         *) return 1 ;;
@@ -1133,7 +1140,7 @@ restore_setting_ok() {
 # nothing, and in a subshell, the settings of this server stay as they are.
 restore_bad_setting() (
     local dir=$1 file name bad key
-    for file in "$dir"/vpn.conf "$dir"/seedbox.conf "$dir"/seedbox.secrets "$dir"/firewall.conf "$dir"/vpn/clients/*.env; do
+    for file in "$dir"/vpn.conf "$dir"/seedbox.conf "$dir"/seedbox.secrets "$dir"/firewall.conf "$dir"/links.conf "$dir"/vpn/clients/*.env; do
         [[ -f $file ]] || continue
         bad=$(
             # shellcheck source=/dev/null
@@ -1279,7 +1286,7 @@ restore_cli() {
 }
 
 restore_main() {
-    local file=${1-} list bad stamp was=$INTERACTIVE kept_passphrase=0 kept_firewall=0 kept previous="" tries=0
+    local file=${1-} list bad stamp was=$INTERACTIVE kept_passphrase=0 kept_firewall=0 kept_links=0 kept previous="" tries=0
     WENT_BACK=0
     [[ -n $file ]] || die 'Usage: seedtunnel restore FILE'
     [[ -r $file ]] || die 'File not found: %s' "$file"
@@ -1410,6 +1417,14 @@ restore_main() {
         if [[ -f $FIREWALL_RULES ]]; then cp -p "$FIREWALL_RULES" "$BACKUP_TMP_DIR/x/etc/seedtunnel/"; fi
         kept_firewall=1
     fi
+    # The site of the links of this server stays too when the backup has
+    # neither one nor a seedbox (whose site would take its place): nginx keeps
+    # serving it, and without its settings seedtunnel would no longer see it
+    if [[ ! -e $BACKUP_TMP_DIR/x/etc/seedtunnel/links.conf && ! -e $BACKUP_TMP_DIR/x/etc/seedtunnel/seedbox.conf ]] \
+        && links_site_on && [[ -f $BACKUP_TMP_DIR/x/etc/seedtunnel/vpn.conf ]]; then
+        cp -p "$LINKS_CONF_FILE" "$BACKUP_TMP_DIR/x/etc/seedtunnel/"
+        kept_links=1
+    fi
     # from here on, a restore cut short is said by « doctor » and the menu
     if restore_has_settings "$APP_STATE_DIR"; then
         printf '%s\n' "$APP_STATE_DIR.before-restore-$stamp" >"$RESTORE_MARKER"
@@ -1442,6 +1457,7 @@ restore_main() {
     i18n_init
     vpn_load
     seedbox_load
+    links_load
     INTERACTIVE=0
     if vpn_installed; then
         vpn_check_kernel
@@ -1456,6 +1472,7 @@ restore_main() {
         seedbox_apply
         TRANSMISSION_RESTORE_FROM=""
     fi
+    if links_site_on; then links_apply; fi
     if firewall_enabled; then firewall_enable; fi
     if [[ -r $BACKUP_PASSPHRASE_FILE ]]; then
         backup_auto_install_units
@@ -1483,6 +1500,9 @@ restore_main() {
     fi
     if ((kept_firewall)); then
         ok 'The firewall of this server stays on (the backup restored has none): its rules were made again for the settings restored.'
+    fi
+    if ((kept_links)); then
+        ok 'The site of the links of this server stays (the backup restored has none).'
     fi
     ok 'Restore finished.'
     if [[ -n $previous ]]; then

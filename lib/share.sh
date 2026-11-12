@@ -6,7 +6,9 @@
 #  To get a file (VPN configuration, FileZilla site, backup) onto a computer
 #  without scp: the HTTPS site of the seedbox serves
 #  https://<domain>/share/<token>/, a page with a download button. The token
-#  is random (128 bits): impossible to guess.
+#  is random (128 bits): impossible to guess. With the VPN alone, a small
+#  HTTPS site that serves the links and nothing else (see « Site of the links »
+#  below).
 #
 #  nginx serves the file of a link once: any other request on it is refused on
 #  the spot (even right after, on the same connection, or with another form of
@@ -142,11 +144,209 @@ share_generate_nginx() {
 EOF
 }
 
-# Links go through the seedbox site: it must be installed and running.
-# $1: what to do instead, without a seedbox.
+# Links go through an HTTPS site, which must be running: the one of the
+# seedbox or, with the VPN alone, the site of the links (offered the first
+# time). Status 1 if it is declined: $1 (translated), what to do instead, is
+# said.
 share_require() {
-    seedbox_installed || die 'Download links go through the HTTPS site of the seedbox, which is not installed.\n  %s' "$1"
-    systemctl is-active --quiet nginx || die 'nginx is stopped:  seedtunnel seedbox restart'
+    if seedbox_installed; then
+        systemctl is-active --quiet nginx || die 'nginx is stopped:  seedtunnel seedbox restart'
+        return 0
+    fi
+    vpn_installed || die 'Download links go through an HTTPS site: the one of the seedbox, or the site of the links of the VPN. Neither is installed.\n  %s' "$1"
+    links_load
+    if links_site_on; then
+        systemctl is-active --quiet nginx || die 'nginx is stopped:  seedtunnel vpn links on'
+        return 0
+    fi
+    links_offer "$1"
+}
+
+# --- Site of the links (VPN without a seedbox) ---------------------------------------
+# A small HTTPS site that serves the links and nothing else: any other address
+# answers 404, and it asks for no password (the token of a link plays that
+# role). Its name is the address of the VPN; it uses the nginx, the paths and
+# the certificates of the seedbox (Let's Encrypt for a domain name pointing to
+# this server, self-signed otherwise), through links_run.
+# Offered at the first link; removed with « seedtunnel vpn links off » or with
+# the VPN. A seedbox installed afterwards takes its place (its own site serves
+# the links), and removing that seedbox removes it: offered again at the next
+# link.
+LINKS_CONF_FILE="$APP_STATE_DIR/links.conf"
+# selfsigned | letsencrypt: certificate served right now
+LINKS_CERTIFICATE="selfsigned"
+
+links_load() {
+    LINKS_CERTIFICATE="selfsigned"
+    state_read "$LINKS_CONF_FILE"
+}
+
+links_save() { state_write "$LINKS_CONF_FILE" LINKS_CERTIFICATE; }
+
+# Is the site of the links there? (a seedbox takes its place)
+links_site_on() { [[ -f $LINKS_CONF_FILE ]] && ! seedbox_installed; }
+
+# Name of the site that serves the links: the one of the seedbox, or the
+# address of the VPN
+share_site_domain() {
+    if seedbox_installed; then printf '%s' "$SEEDBOX_DOMAIN"; else printf '%s' "${VPN_PUBLIC_ADDRESS,,}"; fi
+}
+
+# Certificate of that site (selfsigned | letsencrypt | staging)
+share_site_certificate() {
+    if seedbox_installed; then printf '%s' "$SEEDBOX_CERTIFICATE"; else printf '%s' "$LINKS_CERTIFICATE"; fi
+}
+
+# links_run COMMAND… — a function of the seedbox (certificate, nginx) for the
+# site of the links: with its name, its certificate and its own nginx site,
+# in the variables of the seedbox for this call only. The certificate chosen
+# comes back in LINKS_CERTIFICATE. Never a test server of Let's Encrypt here.
+links_run() {
+    local SEEDBOX_DOMAIN=${VPN_PUBLIC_ADDRESS,,} SEEDBOX_CERTIFICATE=$LINKS_CERTIFICATE \
+        SEEDBOX_LETSENCRYPT=auto SEEDBOX_LETSENCRYPT_SERVER=production NGINX_SITE_GENERATOR=links_generate_site
+    "$@"
+    LINKS_CERTIFICATE=$SEEDBOX_CERTIFICATE
+}
+
+# nginx site of the links (through links_run: SEEDBOX_DOMAIN is the address
+# of the VPN): HTTP for Let's Encrypt then to HTTPS, and in HTTPS the links
+# only
+links_generate_site() {
+    local hsts ipv6_80="" ipv6_443=""
+    hsts=$(nginx_generate_hsts)
+    if [[ -e /proc/net/if_inet6 ]]; then
+        ipv6_80=$'\n    listen [::]:80;'
+        ipv6_443=$'\n    listen [::]:443 ssl;'
+    fi
+    cat <<EOF
+# Written by seedtunnel — site of the one-time links of the VPN (no seedbox).
+# Use the menu rather than editing this file.
+
+$(share_generate_nginx_http)
+
+server {
+    listen 80;$ipv6_80
+    server_name $SEEDBOX_DOMAIN;
+    # a link typed with http:// must not leave its token in the log either
+    access_log /var/log/nginx/access.log seedtunnel_share;
+
+    # Let's Encrypt validation and renewal
+    location ^~ /.well-known/acme-challenge/ {
+        root $LETSENCRYPT_WEBROOT;
+        default_type text/plain;
+    }
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;$ipv6_443
+    server_name $SEEDBOX_DOMAIN;
+
+$(nginx_generate_tls)
+
+    server_tokens off;
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy no-referrer always;$hsts
+$(share_generate_nginx "${hsts//$'\n    '/$'\n        '}")
+
+    # nothing else here
+    location / {
+        return 404;
+    }
+}
+EOF
+}
+
+# The address of the VPN as the name of a site: an IPv4 address or a domain
+# name (an IPv6 address would need links and a certificate of its own)
+links_check_address() {
+    if is_ipv6 "$VPN_PUBLIC_ADDRESS"; then
+        die 'The address of the VPN is an IPv6 address (%s): the site of the links needs an IPv4 address or a domain name   → VPN, « Change the address or the port »' "$VPN_PUBLIC_ADDRESS"
+    fi
+}
+
+# Puts the site of the links in the state of its settings (idempotent): at its
+# installation, and again with « seedtunnel apply », a new address of the VPN
+# or a restore
+links_apply() {
+    local -a packages=(nginx bind9-dnsutils inotify-tools)
+    links_check_address
+    links_load
+    # certbot for a domain name only: an IP address gets a self-signed certificate
+    if ! is_ipv4 "$VPN_PUBLIC_ADDRESS"; then packages+=(certbot); fi
+    apt_install "${packages[@]}"
+    # its settings first: the firewall opens 80 and 443 for it, before the
+    # request to Let's Encrypt
+    links_save
+    firewall_refresh
+    links_run seedbox_apply_https
+    links_save
+}
+
+# links_install — the site of the links, the first time
+links_install() {
+    links_check_address
+    seedbox_check_web_ports links
+    echo
+    log_title 'Site of the links'
+    links_apply
+    ok 'Site of the links installed.'
+}
+
+# What the site of the links is, before it is installed
+links_site_help() {
+    local address=${VPN_PUBLIC_ADDRESS,,} certificate
+    if is_ipv4 "$address"; then
+        certificate=$(t 'self-signed (IP address): the browser shows a warning, and each link gives the fingerprint to check before accepting it')
+    else
+        certificate=$(t "Let's Encrypt if %s points to this server, otherwise self-signed (browser warning, and each link gives the fingerprint to check)" "$address")
+    fi
+    ui_paragraph "$(t 'Download links go through an HTTPS site. Without a seedbox, seedtunnel can put a small one on this server: nginx on ports 80 and 443, for the links only, and nothing else.')"
+    echo
+    ui_field_add "$(t 'Address')" "${C_CYAN}https://$address$SHARE_URL_PATH/…$C_RESET"
+    ui_field_add "$(t 'Certificate')" "$certificate"
+    ui_field_add "$(t 'Removal')" "$(t 'VPN menu → « Site of the links », or  seedtunnel vpn links off')"
+    ui_fields_show
+}
+
+# links_offer HINT — VPN alone, no site for the links yet: what it is, then
+# the question. Status 1 if the answer is no: HINT (translated) says what to
+# do instead.
+links_offer() {
+    links_site_help
+    echo
+    if ! confirm 'Install the site of the links? (opens ports 80 and 443)' y; then
+        echo
+        printf '  %s\n' "$1"
+        return 1
+    fi
+    links_install
+}
+
+# links_remove — the site of the links goes, with the links in progress and
+# what it alone installed (nginx, certbot…: only if seedtunnel installed
+# them). With a seedbox, its settings only: the site is the seedbox's.
+links_remove() {
+    [[ -f $LINKS_CONF_FILE ]] || return 0
+    if seedbox_installed; then
+        rm -f "$LINKS_CONF_FILE"
+        return 0
+    fi
+    log_title 'Removing the site of the links'
+    log_run 'Stopping the download links in progress' systemctl stop 'seedtunnel-share-*'
+    rm -rf "$SHARE_DIR" "$SHARE_DIR.jobs"
+    seedbox_letsencrypt_delete
+    rm -f "$NGINX_SITE_LINK" "$NGINX_SITE" "$LINKS_CONF_FILE"
+    rm -rf "$SEEDBOX_SSL_DIR" "$LETSENCRYPT_WEBROOT"
+    pending_clear nginx
+    apt_purge nginx nginx-common certbot inotify-tools
+    # an nginx installed before seedtunnel stays: without this site
+    if systemctl is-active --quiet nginx 2>/dev/null; then
+        log_run 'Reloading nginx' systemctl reload nginx
+    fi
+    firewall_refresh
 }
 
 # Safety net: link folders whose watcher has disappeared
@@ -253,7 +453,7 @@ share_create() {
     local source=$1 name=$2 title=$3 steps=$4 note=$5 mark=${6-} token dir id job unit i pid ready=0
     apt_install inotify-tools
     # the site must know /share/ (if it was installed by an older version)
-    seedbox_apply_nginx
+    if seedbox_installed; then seedbox_apply_nginx; else links_run seedbox_apply_nginx; fi
     share_purge
     # links live in memory (/run): a big backup may not fit
     if ! share_room_for "$source"; then
@@ -324,12 +524,23 @@ share_create() {
 
     echo
     say 'Download link (%sone time only, for %s minutes%s):' "$C_BOLD" "$((SHARE_LIFETIME / 60))" "$C_RESET"
-    printf '  %shttps://%s%s/%s/%s\n\n' "$C_BOLD" "$SEEDBOX_DOMAIN" "$SHARE_URL_PATH" "$token" "$C_RESET"
-    if [[ $SEEDBOX_CERTIFICATE == selfsigned ]]; then
+    printf '  %shttps://%s%s/%s/%s\n\n' "$C_BOLD" "$(share_site_domain)" "$SHARE_URL_PATH" "$token" "$C_RESET"
+    if [[ $(share_site_certificate) == selfsigned ]]; then
         # a link may carry a private key: the warning is only accepted for
         # the right certificate, not blindly
-        say 'Self-signed certificate: the browser shows a warning. Before accepting it, check that the certificate it shows has this SHA-256 fingerprint:'
-        printf '  %s\n' "$(seedbox_selfsigned_fingerprint)"
+        t 'Self-signed certificate: the browser shows a warning. Before accepting it, check that the certificate it shows has this SHA-256 fingerprint:' | ui_text
+        share_print_fingerprint "$(seedbox_selfsigned_fingerprint)"
         echo
+    fi
+}
+
+# share_print_fingerprint FINGERPRINT — indented; on two lines of 16 bytes
+# when one line does not fit on the screen (95 characters: a terminal would
+# cut it anywhere)
+share_print_fingerprint() {
+    if ((${#1} + 2 <= UI_WIDTH || ${#1} <= 48)); then
+        printf '  %s\n' "$1"
+    else
+        printf '  %s\n  %s\n' "${1:0:48}" "${1:48}"
     fi
 }

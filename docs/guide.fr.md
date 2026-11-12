@@ -64,7 +64,7 @@ seedtunnel vpn list                         seedtunnel seedbox sftp-config [wins
 seedtunnel vpn show telephone               seedtunnel seedbox sftp-key add ma-cle.pub
 seedtunnel vpn share pc-bureau              seedtunnel seedbox sftp-key new
 seedtunnel vpn dns adguard                  seedtunnel seedbox sftp-password off
-                                            seedtunnel seedbox bans | unban IP
+seedtunnel vpn links on|off                 seedtunnel seedbox bans | unban IP
 seedtunnel firewall enable|disable|status   seedtunnel doctor [--link]
 seedtunnel firewall rules
 seedtunnel backup [--passphrase-file F]     seedtunnel backup list | share [N] | delete N
@@ -145,7 +145,9 @@ Plus besoin de `scp` pour récupérer un fichier sur son ordinateur :
 - `seedtunnel seedbox sftp-config` donne une adresse à coller dans WinSCP, qui contient l'empreinte du serveur : WinSCP vérifie tout seul que c'est le bon serveur, sans question à la première connexion. Avec `winscp` ou `filezilla`, elle crée en plus un lien vers un profil à importer dans ce logiciel (le site, sans le mot de passe) ;
 - `seedtunnel seedbox sftp-key new` crée une clé SSH et donne un lien vers elle au format .ppk, prête pour WinSCP et FileZilla : SFTP sans mot de passe. Aucune copie de la clé privée ne reste sur le serveur.
 
-Le lien passe par le site HTTPS de la seedbox. Il contient un jeton aléatoire impossible à deviner, ne fonctionne **qu'une fois** et expire au bout de **10 minutes**. nginx ne sert le fichier qu'une fois : toute autre requête est refusée, même juste après sur la même connexion ou avec une autre forme de l'adresse, jamais de téléchargement partiel, et le fichier est aussitôt supprimé. Une requête HEAD est refusée sans consommer le lien. Ouvrir la page ne compte pas, seul le téléchargement du fichier compte : l'aperçu automatique d'une messagerie ne gâche donc pas le lien. Un lien déjà utilisé ou expiré affiche une page qui le dit.
+Le lien passe par le site HTTPS de la seedbox. Avec le VPN seul, le premier lien propose un petit site HTTPS qui sert les liens et rien d'autre : nginx sur les ports 80 et 443, un certificat Let's Encrypt si l'adresse du VPN est un nom de domaine qui pointe vers le serveur, auto-signé sinon (chaque lien donne alors l'empreinte à vérifier). Il se retire avec « Site des liens » dans le menu VPN, `seedtunnel vpn links off`, ou avec le VPN ; une seedbox installée ensuite prend sa place.
+
+Un lien contient un jeton aléatoire impossible à deviner, ne fonctionne **qu'une fois** et expire au bout de **10 minutes**. nginx ne sert le fichier qu'une fois : toute autre requête est refusée, même juste après sur la même connexion ou avec une autre forme de l'adresse, jamais de téléchargement partiel, et le fichier est aussitôt supprimé. Une requête HEAD est refusée sans consommer le lien. Ouvrir la page ne compte pas, seul le téléchargement du fichier compte : l'aperçu automatique d'une messagerie ne gâche donc pas le lien. Un lien déjà utilisé ou expiré affiche une page qui le dit.
 
 Le jeton est masqué dans le journal de nginx (`/share/<jeton>/…`) : le journal dit toujours qui a téléchargé, quand, et si cela a marché.
 
@@ -153,7 +155,7 @@ Le jeton est masqué dans le journal de nginx (`/share/<jeton>/…`) : le journa
 
 `seedtunnel firewall enable` refuse tout ce qui arrive sur le serveur, sauf :
 - SSH, sur le port réellement utilisé ;
-- le VPN et la seedbox s'ils sont installés ;
+- le VPN et la seedbox s'ils sont installés, ou le site des liens (80 et 443) ;
 - l'ICMP indispensable à IPv6.
 
 Cela concerne ce qui arrive sur le serveur lui-même. Les clients du VPN sont considérés comme de confiance : ce qui vient d'eux par le tunnel est accepté.

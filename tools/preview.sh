@@ -36,6 +36,9 @@ APP_DIR=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
 # the rules of the firewall, in words
 # shellcheck source=lib/firewall.sh
 . "$APP_DIR/lib/firewall.sh"
+# what the site of the links is (links_site_help)
+# shellcheck source=lib/share.sh
+. "$APP_DIR/lib/share.sh"
 
 trap 'on_error $? $LINENO "$BASH_COMMAND" "${BASH_SOURCE[0]:-}"' ERR
 
@@ -206,18 +209,107 @@ screen_vpn() {
     ui_field_add "$(t 'Address')" "${C_CYAN}203.0.113.10:51820$C_RESET (UDP)"
     ui_field_add Clients "$(t '%s (%s connected right now)' 3 2)"
     ui_field_add DNS "Quad9 · 9.9.9.9, 149.112.112.112"
+    ui_field_add "$(t 'Links')" "$(t 'through the site of the seedbox')"
     ui_fields_show
     echo
+    vpn_menu_entries
+    end_menu back
+}
+
+vpn_menu_entries() {
     ui_menu_add 1 "$(t 'Add a client')"
     ui_menu_add 2 "$(t 'Show a client (QR code, file)')"
     ui_menu_add 3 "$(t 'Download link for a client (one time only)')"
     ui_menu_add 4 "$(t 'Revoke a client')"
     ui_menu_add 5 "$(t 'Clients and connections')"
     ui_menu_gap
-    ui_menu_add 6 "$(t 'Change the address or the port')"
-    ui_menu_add 7 "$(t 'Change the DNS of the clients')"
-    ui_menu_add 8 "$(t 'Restart the VPN')"
-    ui_menu_add 9 "$(t 'Remove the VPN')"
+    ui_menu_add 6 "$(t 'Site of the links')"
+    ui_menu_add 7 "$(t 'Change the address or the port')"
+    ui_menu_add 8 "$(t 'Change the DNS of the clients')"
+    ui_menu_add 9 "$(t 'Restart the VPN')"
+    ui_menu_add 10 "$(t 'Remove the VPN')"
+    ui_menu_show
+    echo
+}
+
+# The VPN alone (no seedbox), its site of the links on (links_state_text)
+screen_vpn_alone() {
+    top vpn-alone
+    ui_crumbs VPN
+    echo
+    ui_field_add "$(t 'State')" "$C_GREEN$(t 'running')$C_RESET"
+    ui_field_add "$(t 'Address')" "${C_CYAN}203.0.113.10:51820$C_RESET (UDP)"
+    ui_field_add Clients "$(t '%s (%s connected right now)' 3 2)"
+    ui_field_add DNS "Quad9 · 9.9.9.9, 149.112.112.112"
+    ui_field_add "$(t 'Links')" "$C_GREEN●$C_RESET $(t 'HTTPS site on (%s)' "$(t 'self-signed')")"
+    ui_fields_show
+    echo
+    vpn_menu_entries
+    end_menu back
+}
+
+# Fingerprint of the self-signed certificate of the examples
+EXAMPLE_CERT_FINGERPRINT="5A:1F:C3:08:9E:47:B2:6D:E1:93:0C:7A:F4:28:5B:D6:3E:A9:71:0F:C8:62:4D:B5:9A:E7:13:2C:86:F0:5D:B4"
+
+# VPN › Download link for a client, the VPN alone: the first link offers the
+# site of the links (links_offer), then gives the link (share_create)
+screen_link_offer() {
+    top link-offer
+    ui_crumbs VPN "$(t 'Download link for a client (one time only)')"
+    echo
+    ui_print "   1) laptop"
+    ui_print "   2) phone"
+    echo
+    ui_print "$(t '%s (empty = back)' "$(t '%s (number or name)' "$(t 'Client to send')")"): 1"
+    echo
+    links_site_help
+    echo
+    ui_print "$(t 'Install the site of the links? (opens ports 80 and 443)') $(t '[Y/n]')"
+    echo
+    step 'Updating the package list'
+    step "$(t 'Installing %s' 'nginx bind9-dnsutils inotify-tools')"
+    step 'Updating the firewall'
+    step 'Creating a self-signed certificate'
+    step 'Checking the nginx configuration'
+    step 'Reloading nginx'
+    said_ok 'Site of the links installed.'
+    echo
+    ui_print "$(t 'Download link (%sone time only, for %s minutes%s):' "$C_BOLD" 10 "$C_RESET")"
+    ui_print "  ${C_BOLD}https://203.0.113.10/share/3f9c2a7e1b5d48c6a0e7f1d2b3c4a5e6/$C_RESET"
+    echo
+    ui_text <<<"$(t 'Self-signed certificate: the browser shows a warning. Before accepting it, check that the certificate it shows has this SHA-256 fingerprint:')"
+    share_print_fingerprint "$EXAMPLE_CERT_FINGERPRINT" | print_lines
+    end_action
+}
+
+# VPN › Site of the links, on (vpn_menu_links, links_fields)
+screen_links() {
+    top links
+    ui_crumbs VPN "$(t 'Site of the links')"
+    echo
+    ui_field_add "$(t 'State')" "$C_GREEN$(t 'running')$C_RESET"
+    ui_field_add "$(t 'Links')" "${C_CYAN}https://203.0.113.10/share/…$C_RESET"
+    ui_field_add "$(t 'Certificate')" "$C_YELLOW$(t 'self-signed')$C_RESET $(t '(browser warning: check the fingerprint given with each link)')"
+    ui_field_add Ports "$(t '80 and 443 (TCP)')"
+    ui_fields_show
+    echo
+    ui_menu_add 1 "$(t 'Remove the site of the links')"
+    ui_menu_show
+    echo
+    end_menu back
+}
+
+# The same, before the first link: what it is, and the key to install it
+screen_links_none() {
+    top links-none
+    ui_crumbs VPN "$(t 'Site of the links')"
+    echo
+    ui_field_add "$(t 'State')" "$C_GREY$(t 'not installed (offered at the first link)')$C_RESET"
+    ui_fields_show
+    echo
+    links_site_help
+    echo
+    ui_menu_add 1 "$(t 'Install the site of the links')"
     ui_menu_show
     echo
     end_menu back
@@ -702,6 +794,10 @@ if ((ALL)); then
     if [[ -z ${UI_COLUMNS-} ]]; then screen_home_narrow; fi
     screen_home_manual
     screen_vpn
+    screen_vpn_alone
+    screen_link_offer
+    screen_links
+    screen_links_none
     screen_clients
     screen_dns
     screen_vpn_address
@@ -734,7 +830,7 @@ ui_print "  $(pv 'Example screens, with example data: nothing is changed on this
 ui_print "  $(pv 'Enter: next screen · Q: quit' 'Entrée : écran suivant · Q : quitter')"
 echo
 IFS= read -r -p "  $(pv 'Press Enter to start…' 'Appuyez sur Entrée pour commencer…') " CHOICE || exit 130
-for screen in screen_home screen_home_narrow screen_home_manual screen_vpn screen_clients screen_dns screen_vpn_address screen_add \
+for screen in screen_home screen_home_narrow screen_home_manual screen_vpn screen_vpn_alone screen_link_offer screen_links screen_links_none screen_clients screen_dns screen_vpn_address screen_add \
     screen_client_card screen_client_qr screen_client screen_danger screen_seedbox screen_credentials screen_sftp screen_keys screen_key_add screen_bans screen_rules screen_backup screen_weekly screen_restore screen_backups screen_backup_delete screen_terminal; do
     if [[ $screen == screen_home_narrow && -n ${UI_COLUMNS-} ]]; then continue; fi
     "$screen" || break

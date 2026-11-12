@@ -468,12 +468,12 @@ vpn_print_qr() {
         if [[ -n $menu ]]; then
             warn 'Window too small for the QR code: it needs %s columns and %s lines, this one has %s and %s. Make it bigger (or the font smaller), then R to show it again.' \
                 "$width" "$height" "$columns" "$rows"
-            if seedbox_installed; then say 'Or Enter, then 2: a one-time download link, to open on the device.'; fi
+            say 'Or Enter, then 2: a one-time download link, to open on the device.'
             return 0
         fi
         warn 'Window too small for the QR code: it needs %s columns and %s lines, this one has %s and %s. Make it bigger (or the font smaller), then:  seedtunnel vpn show %s' \
             "$width" "$height" "$columns" "$rows" "$name"
-        if seedbox_installed; then say 'Or a one-time download link, to open on the device:  seedtunnel vpn share %s' "$name"; fi
+        say 'Or a one-time download link, to open on the device:  seedtunnel vpn share %s' "$name"
         return 0
     fi
     printf '%s\n' "$qr"
@@ -531,22 +531,22 @@ vpn_qr_screen() {
 }
 
 # vpn_client_screen NAME PORT — what to do with the file of a client, and the
-# keys to show it or to send it by a one-time link (with the seedbox)
+# keys to show it or to send it by a one-time link
 vpn_client_screen() {
     local name=$1 port=$2 choice
     while true; do
         banner
         section 'Client "%s"' "$name"
-        if seedbox_installed; then vpn_client_guide "$port" 1; else vpn_client_guide "$port" 0; fi
+        vpn_client_guide "$port" 1
         echo
         ui_menu_add 1 "$(t 'Show the file (to copy and paste)')"
-        if seedbox_installed; then ui_menu_add 2 "$(t 'One-time download link for the file')"; fi
+        ui_menu_add 2 "$(t 'One-time download link for the file')"
         ui_menu_show
         echo
         ui_ask_choice choice b "$(t 'Back')" q "$(t 'Quit')"
         case ${choice,,} in
             1) ui_action vpn_client_file "$name" ;;
-            2) if seedbox_installed; then ui_action vpn_client_link "$name"; fi ;;
+            2) ui_action vpn_client_link "$name" ;;
             "" | b) return 0 ;;
             q) ui_quit ;;
         esac
@@ -598,7 +598,7 @@ vpn_client_link() {
 vpn_share_client() {
     local name=$1
     vpn_require_client "$name"
-    share_require "$(t 'Without a seedbox:  seedtunnel vpn show %s  (QR code, or content to copy and paste).' "$name")"
+    share_require "$(t 'Without a link:  seedtunnel vpn show %s  (QR code, or content to copy and paste).' "$name")" || return 0
     share_create "$VPN_CLIENTS_DIR/$name.conf" "$name.conf" "$(t 'VPN configuration "%s"' "$name")" \
         "$(text share_steps_vpn)" "$(t 'This file holds the secret key of "%s": delete it once imported.' "$name")"
 }
@@ -893,6 +893,8 @@ vpn_change_settings() {
         return 0
     fi
     vpn_apply
+    # the site of the links takes the new address as its name
+    if links_site_on; then links_apply; fi
     ok 'Settings saved. Show the clients again to get their new QR codes.'
 }
 
@@ -937,6 +939,7 @@ vpn_uninstall() {
     banner
     section 'Remove the VPN'
     lines=("$(t 'All the clients (%s) will be deleted for good.' "$(vpn_count_clients)")" "$(t 'Their files and QR codes will no longer work.')")
+    if links_site_on; then lines+=("$(t 'The site of the links goes too (nginx, ports 80 and 443).')"); fi
     # the last part removed: the weekly backup and its passphrase go too
     note=$(backup_removal_note seedbox)
     if [[ -n $note ]]; then lines+=("$note"); fi
@@ -955,6 +958,7 @@ vpn_uninstall() {
     rmdir "${VPN_SYSTEMD_DROPIN%/*}" 2>/dev/null || true
     systemctl daemon-reload 2>/dev/null || true
     net_hardening_cleanup
+    links_remove
     apt_purge wireguard-tools qrencode
     firewall_refresh
     backup_auto_stop_if_unused
@@ -990,11 +994,8 @@ vpn_menu_link() {
     local name
     banner
     section 'Download link for a client (one time only)'
-    if ! seedbox_installed; then
-        warn 'Links go through the HTTPS site of the seedbox, which is not installed:'
-        warn 'use "Show a client" instead (QR code, or content to copy and paste).'
-        pause
-    elif vpn_pick_client name "$(t 'Client to send')"; then
+    if vpn_pick_client name "$(t 'Client to send')"; then
+        echo
         vpn_share_client "$name"
         pause
     fi
@@ -1037,10 +1038,107 @@ vpn_menu_restart() {
     pause
 }
 
+# State of the site of the links, in a few words (menu of the VPN)
+links_state_text() {
+    local certificate
+    if seedbox_installed; then
+        printf '%s' "$(t 'through the site of the seedbox')"
+    elif ! links_site_on; then
+        printf '%s○ %s%s' "$C_GREY" "$(t 'no site yet (offered at the first link)')" "$C_RESET"
+    elif ! systemctl is-active --quiet nginx; then
+        printf '%s● %s%s' "$C_RED" "$(t 'nginx stopped')" "$C_RESET"
+    else
+        if [[ $LINKS_CERTIFICATE == selfsigned ]]; then certificate=$(t 'self-signed'); else certificate="Let's Encrypt"; fi
+        printf '%s●%s %s' "$C_GREEN" "$C_RESET" "$(t 'HTTPS site on (%s)' "$certificate")"
+    fi
+}
+
+# VPN › Site of the links: what serves the links, and on / off
+vpn_menu_links() {
+    local choice
+    while true; do
+        vpn_load
+        seedbox_load
+        links_load
+        UI_PLACE=(VPN "$(t 'Site of the links')")
+        ui_top "${UI_PLACE[@]}"
+        if seedbox_installed; then
+            ui_field_add Site "${C_CYAN}https://$SEEDBOX_DOMAIN/$C_RESET"
+            ui_fields_show
+            echo
+            say 'The links go through the HTTPS site of the seedbox: nothing to install for them.'
+            pause
+            return 0
+        fi
+        if links_site_on; then
+            links_fields
+            echo
+            ui_menu_add 1 "$(t 'Remove the site of the links')"
+        else
+            ui_field_add "$(t 'State')" "$C_GREY$(t 'not installed (offered at the first link)')$C_RESET"
+            ui_fields_show
+            echo
+            links_site_help
+            echo
+            ui_menu_add 1 "$(t 'Install the site of the links')"
+        fi
+        ui_menu_show
+        echo
+        ui_menu_ask choice back
+        case ${choice,,} in
+            1)
+                if links_site_on; then ui_action vpn_menu_links_off; else ui_action vpn_menu_links_on; fi
+                ;;
+            "" | b) return 0 ;;
+            q) ui_quit ;;
+        esac
+    done
+}
+
+# What the site of the links is, as fields
+links_fields() {
+    local certificate days
+    if [[ $LINKS_CERTIFICATE == selfsigned ]]; then
+        certificate="$C_YELLOW$(t 'self-signed')$C_RESET $(t '(browser warning: check the fingerprint given with each link)')"
+    else
+        days=$(certificate_days_left "$LETSENCRYPT_DIR/cert.pem")
+        certificate="Let's Encrypt $(t '(renewed automatically)')"
+        if [[ -n $days ]]; then certificate+=" · $(t '%s days left' "$days")"; fi
+    fi
+    ui_field_add "$(t 'State')" "$(service_state nginx)"
+    ui_field_add "$(t 'Links')" "${C_CYAN}https://${VPN_PUBLIC_ADDRESS,,}$SHARE_URL_PATH/…$C_RESET"
+    ui_field_add "$(t 'Certificate')" "$certificate"
+    ui_field_add Ports "$(t '80 and 443 (TCP)')"
+    ui_fields_show
+}
+
+vpn_menu_links_on() {
+    banner
+    section 'Install the site of the links'
+    if confirm 'Install the site of the links? (opens ports 80 and 443)' y; then
+        links_install
+        pause
+    fi
+}
+
+vpn_menu_links_off() {
+    banner
+    section 'Remove the site of the links'
+    say 'The links in progress stop working. The site will be offered again at the next link.'
+    echo
+    if confirm 'Remove the site of the links?' n; then
+        echo
+        links_remove
+        ok 'Site of the links removed.'
+        pause
+    fi
+}
+
 vpn_menu() {
     local choice
     while true; do
         vpn_load
+        links_load
         vpn_installed || return 0
         UI_PLACE=(VPN)
         ui_top VPN
@@ -1048,6 +1146,7 @@ vpn_menu() {
         ui_field_add "$(t 'Address')" "$C_CYAN$VPN_PUBLIC_ADDRESS:$VPN_PORT$C_RESET (UDP)"
         ui_field_add Clients "$(t '%s (%s connected right now)' "$(vpn_count_clients)" "$(vpn_connected_count)")"
         ui_field_add DNS "$(vpn_dns_label "$VPN_DNS")"
+        ui_field_add "$(t 'Links')" "$(links_state_text)"
         ui_fields_show
         echo
         ui_menu_add 1 "$(t 'Add a client')"
@@ -1056,10 +1155,11 @@ vpn_menu() {
         ui_menu_add 4 "$(t 'Revoke a client')"
         ui_menu_add 5 "$(t 'Clients and connections')"
         ui_menu_gap
-        ui_menu_add 6 "$(t 'Change the address or the port')"
-        ui_menu_add 7 "$(t 'Change the DNS of the clients')"
-        ui_menu_add 8 "$(t 'Restart the VPN')"
-        ui_menu_add 9 "$(t 'Remove the VPN')"
+        ui_menu_add 6 "$(t 'Site of the links')"
+        ui_menu_add 7 "$(t 'Change the address or the port')"
+        ui_menu_add 8 "$(t 'Change the DNS of the clients')"
+        ui_menu_add 9 "$(t 'Restart the VPN')"
+        ui_menu_add 10 "$(t 'Remove the VPN')"
         ui_menu_show
         echo
         ui_menu_ask choice back
@@ -1069,10 +1169,11 @@ vpn_menu() {
             3) ui_action vpn_menu_link ;;
             4) ui_action vpn_menu_revoke ;;
             5) ui_action vpn_menu_clients ;;
-            6) ui_action vpn_menu_settings ;;
-            7) ui_action vpn_menu_dns ;;
-            8) ui_action vpn_menu_restart ;;
-            9) ui_action vpn_uninstall ;;
+            6) vpn_menu_links ;;
+            7) ui_action vpn_menu_settings ;;
+            8) ui_action vpn_menu_dns ;;
+            9) ui_action vpn_menu_restart ;;
+            10) ui_action vpn_uninstall ;;
             "" | b) return 0 ;;
             q) ui_quit ;;
         esac
@@ -1091,6 +1192,42 @@ vpn_main() {
     else
         vpn_install_interactive
     fi
+}
+
+# seedtunnel vpn links [on|off] — the site of the links (VPN without a
+# seedbox): its state, put in place (again), or removed
+vpn_cli_links() {
+    links_load
+    case $1 in
+        "")
+            if seedbox_installed; then
+                say 'The links go through the HTTPS site of the seedbox: nothing to install for them.'
+            elif links_site_on; then
+                say 'Site of the links: %s' "$(links_state_text)"
+            else
+                say 'No site for the links yet: it is offered at the first link (or:  seedtunnel vpn links on).'
+            fi
+            ;;
+        on)
+            if seedbox_installed; then
+                say 'The links go through the HTTPS site of the seedbox: nothing to install for them.'
+            elif links_site_on; then
+                links_apply
+                ok 'Site of the links up to date.'
+            else
+                links_install
+            fi
+            ;;
+        off)
+            if seedbox_installed || ! links_site_on; then
+                say 'No site of the links to remove.'
+            elif confirm 'Remove the site of the links?' n; then
+                links_remove
+                ok 'Site of the links removed.'
+            fi
+            ;;
+        *) die 'Usage: seedtunnel vpn links [on|off]' ;;
+    esac
 }
 
 # seedtunnel vpn <command> …
@@ -1153,6 +1290,10 @@ vpn_cli() {
         restart)
             vpn_require_installed
             run 'Restarting the VPN' systemctl restart "wg-quick@$VPN_INTERFACE"
+            ;;
+        links)
+            vpn_require_installed
+            vpn_cli_links "${1-}"
             ;;
         uninstall)
             vpn_require_installed

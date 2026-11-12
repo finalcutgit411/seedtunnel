@@ -467,6 +467,61 @@ doctor_seedbox() {
     fi
 }
 
+# doctor_links IP — the site of the links of the VPN (without a seedbox)
+doctor_links() {
+    local ip=$1 domain=${VPN_PUBLIC_ADDRESS,,} crt days code rc=0 test
+    doctor_title 'Site of the links'
+    doctor_service nginx 'nginx' boot
+    if [[ $LINKS_CERTIFICATE == selfsigned ]]; then crt="$SEEDBOX_SSL_DIR/selfsigned.crt"; else crt="$LETSENCRYPT_DIR/cert.pem"; fi
+    days=$(certificate_days_left "$crt")
+    if [[ -z $days ]]; then
+        doctor_error 'Certificate unreadable: %s   → seedtunnel vpn links on' "$crt"
+    elif [[ $LINKS_CERTIFICATE == selfsigned ]]; then
+        if is_ipv4 "$domain"; then
+            doctor_ok 'Self-signed certificate (IP address): each link comes with its fingerprint'
+        else
+            doctor_warn "Self-signed certificate (browser warning): Let's Encrypt did not issue one for %s   → seedtunnel vpn links on" "$domain"
+        fi
+    elif ((days < 7)); then
+        doctor_error "Let's Encrypt certificate: expires in %s day(s), the renewal fails   → certbot renew" "$days"
+    elif ((days < 21)); then
+        doctor_warn "Let's Encrypt certificate: expires in %s days (it should have been renewed)" "$days"
+    else
+        doctor_ok "Let's Encrypt certificate: %s days left" "$days"
+    fi
+    if [[ $LINKS_CERTIFICATE != selfsigned ]]; then
+        if systemctl is-active --quiet certbot.timer; then
+            doctor_ok 'Automatic renewal scheduled (certbot.timer)'
+        else
+            doctor_error 'certbot.timer inactive: the certificate will not be renewed   → systemctl enable --now certbot.timer'
+        fi
+    fi
+    # a link that does not exist: the site answers 404 (the page « link
+    # already used or expired »)
+    test="https://$domain$SHARE_URL_PATH/00000000000000000000000000000000/"
+    code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 8 --resolve "$domain:443:127.0.0.1" "$test" 2>/dev/null || true)
+    if [[ $code == 404 ]]; then
+        doctor_ok 'Site of the links online (https://%s/share/…)' "$domain"
+    else
+        doctor_error 'Site of the links: unexpected answer (code %s)   → seedtunnel vpn links on' "${code:-$(t 'none')}"
+    fi
+    [[ -n $ip ]] || return 0
+    code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 8 --resolve "$domain:443:$ip" "$test" 2>/dev/null || true)
+    if [[ $code == 404 ]]; then
+        doctor_ok 'HTTPS reachable through the public IP (tested from the server itself)'
+    else
+        doctor_warn 'HTTPS unreachable through the public IP %s (code %s): firewall?' "$ip" "${code:-$(t 'none')}"
+    fi
+    # the certificate really served, for Let's Encrypt
+    [[ $LINKS_CERTIFICATE == letsencrypt ]] || return 0
+    curl -s -o /dev/null --max-time 8 --resolve "$domain:443:$ip" "$test" 2>/dev/null || rc=$?
+    case $rc in
+        0 | 22) doctor_ok 'Certificate accepted by browsers for %s' "$domain" ;;
+        35 | 51 | 58 | 60) doctor_error 'The certificate served for %s is refused by browsers (curl code %s)   → seedtunnel vpn links on' "$domain" "$rc" ;;
+        *) doctor_warn 'Certificate served for %s not checked: HTTPS unreachable through the public IP (curl code %s)' "$domain" "$rc" ;;
+    esac
+}
+
 # The password of SFTP, allowed by default (needed before the first SSH key):
 # a warning only once there is a key, the password then being of no use
 doctor_sftp_password() {
@@ -584,6 +639,8 @@ doctor_main() {
     doctor_system
     if vpn_installed; then doctor_vpn "$ip"; fi
     if seedbox_installed; then doctor_seedbox "$ip"; fi
+    links_load
+    if links_site_on; then doctor_links "$ip"; fi
     doctor_firewall
     if vpn_installed || seedbox_installed; then doctor_backup; fi
     echo
@@ -630,8 +687,12 @@ report_known() {
     if [[ -n $1 ]]; then printf '%s\t%s\t%s\n' "${#1}" "$1" "$2"; fi
 }
 
-# A link needs the site of the seedbox; otherwise the report is saved
-report_by_link() { seedbox_installed && systemctl is-active --quiet nginx; }
+# A link needs an HTTPS site (of the seedbox, or of the links of the VPN);
+# otherwise the report is saved
+report_by_link() {
+    links_load
+    { seedbox_installed || links_site_on; } && systemctl is-active --quiet nginx
+}
 
 # Adds to the sed script: the whole VALUE (not inside a longer word) →
 # REPLACEMENT. Twice: two values next to each other share the character
@@ -825,5 +886,8 @@ report_send() {
     install -m 600 -o "$owner" "$tmp" "$home/$name"
     rm -f "$tmp"
     ok 'Report saved: %s' "$home/$name"
-    say 'Without a seedbox there is no download link: fetch it with WinSCP, FileZilla or scp, logged in as %s.' "$owner"
+    say 'No download link without an HTTPS site: fetch it with WinSCP, FileZilla or scp, logged in as %s.' "$owner"
+    if vpn_installed && ! seedbox_installed && ! links_site_on; then
+        say 'For a link instead:  seedtunnel vpn links on  then  seedtunnel doctor --link'
+    fi
 }

@@ -47,7 +47,7 @@ Le menu s'ouvre à la fin et ne demande que le nécessaire. Ensuite, tapez `seed
 
 | | |
 |---|---|
-| **VPN WireGuard** | Un QR code par téléphone, un lien de téléchargement à usage unique par ordinateur (avec la seedbox), un port ouvert par client pour vos torrents, pas de fuite IPv6. |
+| **VPN WireGuard** | Un QR code par téléphone, un lien de téléchargement à usage unique par ordinateur, un port ouvert par client pour vos torrents, pas de fuite IPv6. |
 | **Seedbox** | Transmission dans votre navigateur, en HTTPS, avec un certificat Let's Encrypt qui se renouvelle tout seul. Vos fichiers en SFTP, avec des profils prêts à importer dans WinSCP et FileZilla, et une clé SSH créée pour vous si vous n'en avez pas. |
 | **Protection** | Pare-feu nftables, fail2ban, mots de passe gardés seulement sous forme de hachages, mises à jour de sécurité automatiques, arrêt propre de Transmission avant que le disque soit plein. |
 | **Entretien** | Un diagnostic complet, des sauvegardes chiffrées chaque semaine, des mises à jour vérifiées avec retour arrière, et un rapport anonymisé à partager quand vous demandez de l'aide. |
@@ -88,7 +88,7 @@ Tout est dans le menu (`seedtunnel`). Les mêmes actions existent aussi en comma
 | Commande | Ce qu'elle fait |
 |---|---|
 | `seedtunnel vpn add telephone --qr` | Ajoute un client VPN et affiche son QR code |
-| `seedtunnel vpn share pc-bureau` | Lien de téléchargement à usage unique pour le fichier d'un client (avec la seedbox) |
+| `seedtunnel vpn share pc-bureau` | Lien de téléchargement à usage unique pour le fichier d'un client |
 | `seedtunnel seedbox sftp-config winscp` | Lien à usage unique vers un profil WinSCP (ou `filezilla`) |
 | `seedtunnel doctor` | Vérifie tout, avec la correction de chaque problème |
 | `seedtunnel doctor --link` | La même chose, avec un rapport anonymisé à partager |

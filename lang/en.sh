@@ -22,6 +22,7 @@ VPN
   vpn share NAME                     one-time download link for the file
   vpn dns [quad9|cloudflare|dns4eu|adguard|IP,IP]
                                      DNS of the clients: shown, or changed
+  vpn links [on|off] [--yes]         HTTPS site of the links without a seedbox: state, on, off
   vpn restart | uninstall [--yes]
 
 Seedbox
@@ -102,7 +103,7 @@ text_en_letsencrypt_failed_help() {
   Common causes: port 80 blocked by the firewall of the provider, DNS not
   propagated yet, or more than 5 certificates requested this week for this
   name (for your tests, use --staging). Details in $APP_LOG.
-  To try again:  seedtunnel seedbox domain $SEEDBOX_DOMAIN
+  To try again:  $(letsencrypt_retry_command)
 EOF
 }
 

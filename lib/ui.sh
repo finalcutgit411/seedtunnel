@@ -604,7 +604,9 @@ ui_keycap() {
 
 # ui_menu_add KEY TEXT / ui_menu_gap / ui_menu_show — entries of a menu. Two
 # columns when the screen is wide enough (70) for every text, and there are
-# at least 6 entries; one column otherwise, with the gaps.
+# at least 6 entries; one column otherwise, with the gaps. With a key of two
+# characters ([10]), the shorter ones get a space before them: the texts stay
+# aligned.
 ui_menu_add() {
     UI_MENU_KEYS+=("$1")
     UI_MENU_LABELS+=("$2")
@@ -616,28 +618,29 @@ ui_menu_gap() {
 }
 
 ui_menu_show() {
-    local i half column=$(((UI_WIDTH - 2) / 2)) two=0 line
+    local i half column=$(((UI_WIDTH - 2) / 2)) two=0 line wide=1
     local -a keys=() labels=()
     for i in "${!UI_MENU_KEYS[@]}"; do
         [[ -n ${UI_MENU_KEYS[i]} ]] || continue
         keys+=("${UI_MENU_KEYS[i]}")
         labels+=("${UI_MENU_LABELS[i]}")
+        if ((${#UI_MENU_KEYS[i]} > wide)); then wide=${#UI_MENU_KEYS[i]}; fi
     done
     half=$(((${#keys[@]} + 1) / 2))
     if ((UI_WIDTH >= 70 && ${#keys[@]} >= 6)); then
         two=1
         for i in "${!labels[@]}"; do
             ui_len "${labels[i]}"
-            if ((i < half && UI_LEN > column - 6 || i >= half && UI_LEN > UI_WIDTH - 2 - column - 4)); then two=0; fi
+            if ((i < half && UI_LEN > column - 5 - wide || i >= half && UI_LEN > UI_WIDTH - 2 - column - 3 - wide)); then two=0; fi
         done
     fi
     if ((two)); then
         for ((i = 0; i < half; i++)); do
-            ui_key "${keys[i]}"
+            ui_menu_key "${keys[i]}" "$wide"
             ui_pad "$UI_KEY ${labels[i]}" "$column"
             line="  $UI_PAD"
             if ((i + half < ${#keys[@]})); then
-                ui_key "${keys[i + half]}"
+                ui_menu_key "${keys[i + half]}" "$wide"
                 line+="$UI_KEY ${labels[i + half]}"
             fi
             ui_print "$line"
@@ -648,12 +651,21 @@ ui_menu_show() {
                 echo
                 continue
             fi
-            ui_key "${UI_MENU_KEYS[i]}"
+            ui_menu_key "${UI_MENU_KEYS[i]}" "$wide"
             ui_print "  $UI_KEY ${UI_MENU_LABELS[i]}"
         done
     fi
     UI_MENU_KEYS=()
     UI_MENU_LABELS=()
+}
+
+# ui_menu_key KEY WIDTH → UI_KEY: the key of an entry, with spaces before it
+# up to WIDTH characters (the longest key of the menu)
+ui_menu_key() {
+    local spaces
+    ui_key "$1"
+    printf -v spaces '%*s' "$(($2 - ${#1}))" ''
+    UI_KEY="$spaces$UI_KEY"
 }
 
 # ui_choices KEY LABEL NOTE [KEY LABEL NOTE…] — entries of a menu, each with

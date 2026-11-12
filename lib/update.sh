@@ -296,6 +296,8 @@ apply_main() {
         seedbox_apply
         count=$((count + 1))
     fi
+    links_load
+    if links_site_on; then links_apply; fi
     if firewall_enabled; then
         firewall_refresh
         count=$((count + 1))

@@ -96,8 +96,8 @@ fr: Aucune sauvegarde trouvée dans %s, ni dans /root et /home.
 en: No backup yet:  seedtunnel backup
 fr: Aucune sauvegarde pour l'instant :  seedtunnel backup
 
-en: Without a seedbox, copy it with WinSCP or scp: %s
-fr: Sans seedbox, copiez-la avec WinSCP ou scp : %s
+en: Without a link, copy it with WinSCP or scp: %s
+fr: Sans lien, copiez-la avec WinSCP ou scp : %s
 
 en: Backup of %s.
 fr: Sauvegarde du %s.
@@ -486,8 +486,8 @@ fr: Le domaine, le nom du serveur, les adresses IP publiques, le compte SFTP, le
 en: Report saved: %s
 fr: Rapport enregistré : %s
 
-en: Without a seedbox there is no download link: fetch it with WinSCP, FileZilla or scp, logged in as %s.
-fr: Sans seedbox, pas de lien de téléchargement : récupérez-le avec WinSCP, FileZilla ou scp, connecté en tant que %s.
+en: No download link without an HTTPS site: fetch it with WinSCP, FileZilla or scp, logged in as %s.
+fr: Pas de lien de téléchargement sans site HTTPS : récupérez-le avec WinSCP, FileZilla ou scp, connecté en tant que %s.
 
 en: An update did not finish: %s is still there. If seedtunnel works, delete it:  rm -rf %s
 fr: Une mise à jour ne s'est pas terminée : %s est toujours là. Si seedtunnel fonctionne, supprimez-le :  rm -rf %s
@@ -1338,8 +1338,8 @@ fr: Le compte %s n'a pas pu être réactivé (détails dans %s) : il reste suspe
 
 # --- Liens de téléchargement ----------------------------------------------------------------
 
-en: Download links go through the HTTPS site of the seedbox, which is not installed.\n  %s
-fr: Les liens de téléchargement passent par le site HTTPS de la seedbox, qui n'est pas installée.\n  %s
+en: Download links go through an HTTPS site: the one of the seedbox, or the site of the links of the VPN. Neither is installed.\n  %s
+fr: Les liens de téléchargement passent par un site HTTPS : celui de la seedbox, ou le site des liens du VPN. Aucun des deux n'est installé.\n  %s
 
 en: Download %s
 fr: Télécharger %s
@@ -1498,8 +1498,8 @@ fr: Client « %s » créé : IP %s, port ouvert %s, fichier %s
 en: Client "%s" revoked: its key can no longer connect.
 fr: Client « %s » révoqué : sa clé ne peut plus se connecter.
 
-en: Without a seedbox:  seedtunnel vpn show %s  (QR code, or content to copy and paste).
-fr: Sans seedbox :  seedtunnel vpn show %s  (QR code, ou contenu à copier-coller).
+en: Without a link:  seedtunnel vpn show %s  (QR code, or content to copy and paste).
+fr: Sans lien :  seedtunnel vpn show %s  (QR code, ou contenu à copier-coller).
 
 en: VPN configuration "%s"
 fr: Configuration VPN « %s »
@@ -1629,12 +1629,6 @@ fr: VPN désinstallé (le routage IPv4 sera désactivé au prochain redémarrage
 
 en: Client to show
 fr: Client à afficher
-
-en: Links go through the HTTPS site of the seedbox, which is not installed:
-fr: Les liens passent par le site HTTPS de la seedbox, qui n'est pas installée :
-
-en: use "Show a client" instead (QR code, or content to copy and paste).
-fr: utilisez « Afficher un client » (QR code, ou contenu à copier-coller).
 
 en: Client to send
 fr: Client à envoyer
@@ -2636,3 +2630,134 @@ fr: Pas de sauvegarde numéro %s (seedtunnel backup list).
 
 en: Cannot decrypt after %s tries: wrong passphrase or damaged file. Nothing was changed.
 fr: Déchiffrement impossible après %s essais : passphrase fausse ou fichier abîmé. Rien n'a été changé.
+
+# --- Site des liens (VPN sans seedbox) -------------------------------------------
+
+en: nginx is stopped:  seedtunnel vpn links on
+fr: nginx est arrêté :  seedtunnel vpn links on
+
+en: The address of the VPN is an IPv6 address (%s): the site of the links needs an IPv4 address or a domain name   → VPN, « Change the address or the port »
+fr: L'adresse du VPN est une adresse IPv6 (%s) : le site des liens a besoin d'une adresse IPv4 ou d'un nom de domaine   → VPN, « Modifier l'adresse ou le port »
+
+en: Site of the links installed.
+fr: Site des liens installé.
+
+en: Download links go through an HTTPS site. Without a seedbox, seedtunnel can put a small one on this server: nginx on ports 80 and 443, for the links only, and nothing else.
+fr: Les liens de téléchargement passent par un site HTTPS. Sans seedbox, seedtunnel peut en installer un petit sur ce serveur : nginx sur les ports 80 et 443, pour les liens seulement, et rien d'autre.
+
+en: self-signed (IP address): the browser shows a warning, and each link gives the fingerprint to check before accepting it
+fr: auto-signé (adresse IP) : le navigateur affiche un avertissement, et chaque lien donne l'empreinte à vérifier avant de l'accepter
+
+en: Let's Encrypt if %s points to this server, otherwise self-signed (browser warning, and each link gives the fingerprint to check)
+fr: Let's Encrypt si %s pointe vers ce serveur, sinon auto-signé (avertissement du navigateur, et chaque lien donne l'empreinte à vérifier)
+
+en: Removal
+fr: Retrait
+
+en: VPN menu → « Site of the links », or  seedtunnel vpn links off
+fr: menu VPN → « Site des liens », ou  seedtunnel vpn links off
+
+en: Install the site of the links? (opens ports 80 and 443)
+fr: Installer le site des liens ? (ouvre les ports 80 et 443)
+
+en: Removing the site of the links
+fr: Retrait du site des liens
+
+en: Ports 80/443 are already used by another program:\n%s\n  Stop it (apache2 for example) before installing the site of the links.
+fr: Les ports 80/443 sont déjà utilisés par un autre programme :\n%s\n  Arrêtez-le (apache2 par exemple) avant d'installer le site des liens.
+
+en: The site of the links goes too (nginx, ports 80 and 443).
+fr: Le site des liens est retiré aussi (nginx, ports 80 et 443).
+
+en: through the site of the seedbox
+fr: par le site de la seedbox
+
+en: no site yet (offered at the first link)
+fr: pas encore de site (proposé au premier lien)
+
+en: HTTPS site on (%s)
+fr: site HTTPS actif (%s)
+
+en: Site of the links
+fr: Site des liens
+
+en: The links go through the HTTPS site of the seedbox: nothing to install for them.
+fr: Les liens passent par le site HTTPS de la seedbox : rien à installer pour eux.
+
+en: Remove the site of the links
+fr: Retirer le site des liens
+
+en: not installed (offered at the first link)
+fr: pas installé (proposé au premier lien)
+
+en: Install the site of the links
+fr: Installer le site des liens
+
+en: (browser warning: check the fingerprint given with each link)
+fr: (avertissement du navigateur : vérifiez l'empreinte donnée avec chaque lien)
+
+en: (renewed automatically)
+fr: (renouvelé automatiquement)
+
+en: %s days left
+fr: encore %s jours
+
+en: Links
+fr: Liens
+
+en: 80 and 443 (TCP)
+fr: 80 et 443 (TCP)
+
+en: The links in progress stop working. The site will be offered again at the next link.
+fr: Les liens en cours ne marcheront plus. Le site sera proposé de nouveau au prochain lien.
+
+en: Remove the site of the links?
+fr: Retirer le site des liens ?
+
+en: Site of the links removed.
+fr: Site des liens retiré.
+
+en: Site of the links: %s
+fr: Site des liens : %s
+
+en: No site for the links yet: it is offered at the first link (or:  seedtunnel vpn links on).
+fr: Pas encore de site pour les liens : il est proposé au premier lien (ou :  seedtunnel vpn links on).
+
+en: Site of the links up to date.
+fr: Site des liens à jour.
+
+en: No site of the links to remove.
+fr: Pas de site des liens à retirer.
+
+en: Usage: seedtunnel vpn links [on|off]
+fr: Utilisation : seedtunnel vpn links [on|off]
+
+en: The site of the links of this server stays (the backup restored has none).
+fr: Le site des liens de ce serveur reste en place (la sauvegarde restaurée n'en a pas).
+
+en: Certificate unreadable: %s   → seedtunnel vpn links on
+fr: Certificat illisible : %s   → seedtunnel vpn links on
+
+en: Self-signed certificate (IP address): each link comes with its fingerprint
+fr: Certificat auto-signé (adresse IP) : chaque lien est donné avec son empreinte
+
+en: Self-signed certificate (browser warning): Let's Encrypt did not issue one for %s   → seedtunnel vpn links on
+fr: Certificat auto-signé (alerte du navigateur) : Let's Encrypt n'en a pas délivré pour %s   → seedtunnel vpn links on
+
+en: Let's Encrypt certificate: %s days left
+fr: Certificat Let's Encrypt : encore %s jours
+
+en: Site of the links online (https://%s/share/…)
+fr: Site des liens en ligne (https://%s/share/…)
+
+en: Site of the links: unexpected answer (code %s)   → seedtunnel vpn links on
+fr: Site des liens : réponse inattendue (code %s)   → seedtunnel vpn links on
+
+en: The certificate served for %s is refused by browsers (curl code %s)   → seedtunnel vpn links on
+fr: Le certificat servi pour %s est refusé par les navigateurs (code curl %s)   → seedtunnel vpn links on
+
+en: For a link instead:  seedtunnel vpn links on  then  seedtunnel doctor --link
+fr: Pour un lien à la place :  seedtunnel vpn links on  puis  seedtunnel doctor --link
+
+en: site of the links (80, 443/tcp)
+fr: site des liens (80, 443/tcp)

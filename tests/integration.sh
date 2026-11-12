@@ -520,6 +520,38 @@ share_test() {
     }
 }
 
+# VPN alone: the first link puts the site of the links in place (--yes); it
+# serves the links and nothing else (no password, no Transmission)
+links_site_test() {
+    local out path
+    out=$(app vpn share phone --yes 2>&1) || {
+        printf '%s\n' "$out"
+        return 1
+    }
+    [[ $out == *"Site of the links installed."* && $out == *"https://192.168.250.1/share/"* && $out == *"SHA-256 fingerprint"* ]] || {
+        printf 'unexpected:\n%s\n' "$out"
+        return 1
+    }
+    path=$(share_path "$out") || return 1
+    test -f /etc/seedtunnel/links.conf || return 1
+    # the page as often as needed, the file once
+    [[ $(curl -sk --max-time 10 "https://127.0.0.1$path") == *"Download phone.conf"* ]] || return 1
+    curl -skf --max-time 10 -o "$W/links-shared.conf" "https://127.0.0.1${path}phone.conf" || return 1
+    cmp "$W/links-shared.conf" /etc/seedtunnel/vpn/clients/phone.conf || return 1
+    link_gone "${path}phone.conf" || return 1
+    [[ $(curl -sk --max-time 10 "https://127.0.0.1${path}phone.conf") == *"Link already used or expired"* ]] || return 1
+    # nothing else: 404, no password asked; http goes to https
+    [[ $(http_code /) == 404 && $(http_code /transmission/web/) == 404 && $(http_code /share/) == 403 ]] || return 1
+    [[ $(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "http://127.0.0.1/share/x") == 301 ]] || return 1
+    ! grep -qE 'proxy_pass|auth_basic "' /etc/nginx/sites-available/seedtunnel
+}
+
+# Removed: its settings, nginx (installed by seedtunnel for it), its site
+links_site_removed() {
+    ! test -e /etc/seedtunnel/links.conf && ! test -e /etc/nginx/sites-enabled/seedtunnel \
+        && ! dpkg-query -W -f='${Status}\n' nginx 2>/dev/null | grep -q ' installed$'
+}
+
 # The tokens of the links never reach the access log of nginx: /share/<token>/
 # instead, with the address, the time and the result
 share_log_test() {
@@ -1042,7 +1074,6 @@ EOF
     check "vpn show phone" output_has "[Interface]" app vpn show phone
     check "vpn show phone: the QR code fits in 80 columns" vpn_qr_test
     check_fails "invalid client name refused" app vpn add "invalid name!"
-    check "vpn share without a seedbox: refused, says what to do" output_has "seedtunnel vpn show phone" app vpn share phone
     check "vpn dns: Quad9 in use" output_has "DNS of the clients: Quad9 · 9.9.9.9, 149.112.112.112." app vpn dns
     check "vpn dns cloudflare: in the file of the clients" vpn_dns_test
 
@@ -1052,6 +1083,22 @@ EOF
     printf 'a test passphrase\n' >"$W/vpn-only.pass"
     chmod 600 "$W/vpn-only.pass"
     check "backup of the VPN alone (used in phase 2)" app backup --output "$W/vpn-only.enc" --passphrase-file "$W/vpn-only.pass"
+
+    step "VPN alone: site of the links"
+    check "vpn share without a seedbox: the site of the links offered, --yes without a terminal" \
+        output_has "Install the site of the links? (opens ports 80 and 443) → run again with --yes to confirm." app vpn share phone
+    check_fails "nothing installed without --yes" test -e /etc/seedtunnel/links.conf
+    check "vpn share --yes: the site of the links, then a link used once" links_site_test
+    check "vpn links on again: nothing changed" nothing_changed app vpn links on
+    check "vpn links: its state" output_has "HTTPS site on (self-signed)" app vpn links
+    check "diagnostics: the site of the links checked" output_has "Site of the links online" app doctor
+    check "report by link through the site of the links" output_has "/share/" app doctor --link
+    check_fails "vpn links off without --yes nor terminal: refused" app vpn links off
+    check "vpn links off --yes" app vpn links off --yes
+    check "removed with nginx, its site and its settings" links_site_removed
+    check "the next link offers it again" output_has "run again with --yes to confirm." app vpn share phone
+    # on again: the seedbox installed next takes its place
+    check "vpn links on --yes" app vpn links on --yes
 
     step "Seedbox: installation from a configuration file"
     check "installation" app seedbox install --config "$W/ci.conf"
@@ -1071,6 +1118,8 @@ EOF
     check "no password in clear in the configuration" bash -c "! grep -rqF -- '$PW1' /etc/seedtunnel /etc/nginx /etc/transmission-daemon"
     # fresh system: the site « default » is the one of the package, recognised
     check "site « default » of nginx (as installed) turned off" bash -c "[[ ! -e /etc/nginx/sites-enabled/default ]]"
+    check_fails "the site of the seedbox takes the place of the site of the links" test -e /etc/seedtunnel/links.conf
+    check "vpn links: through the site of the seedbox" output_has "through the HTTPS site of the seedbox" app vpn links
     check "Transmission locked down by systemd" output_has "ProtectSystem=strict" systemctl show transmission-daemon -p ProtectSystem
     check "Transmission waits for the disk of the data" output_has "$DATA" systemctl show transmission-daemon -p RequiresMountsFor
     # Ubuntu 26.04: its AppArmor profile confines Transmission; elsewhere, nothing

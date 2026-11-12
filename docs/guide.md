@@ -64,7 +64,7 @@ seedtunnel vpn list                         seedtunnel seedbox sftp-config [wins
 seedtunnel vpn show phone                   seedtunnel seedbox sftp-key add my-key.pub
 seedtunnel vpn share laptop                 seedtunnel seedbox sftp-key new
 seedtunnel vpn dns adguard                  seedtunnel seedbox sftp-password off
-                                            seedtunnel seedbox bans | unban IP
+seedtunnel vpn links on|off                 seedtunnel seedbox bans | unban IP
 seedtunnel firewall enable|disable|status   seedtunnel doctor [--link]
 seedtunnel firewall rules
 seedtunnel backup [--passphrase-file F]     seedtunnel backup list | share [N] | delete N
@@ -145,7 +145,9 @@ No need for `scp` to get a file onto your computer:
 - `seedtunnel seedbox sftp-config` gives an address to paste into WinSCP, with the fingerprint of the server inside: WinSCP checks by itself that it is the right server, without a question at the first connection. With `winscp` or `filezilla`, it also gives a link to a profile to import into that program (the site, without the password);
 - `seedtunnel seedbox sftp-key new` creates an SSH key and gives a link to it as a .ppk file, ready for WinSCP and FileZilla: SFTP without a password. No copy of the private key stays on the server.
 
-The link goes through the HTTPS site of the seedbox. It holds a random token that cannot be guessed, works **only once** and expires after **10 minutes**. nginx serves the file once: any other request on it is refused, even right after on the same connection or with another form of the address, never a partial download, and the file is deleted right away. A HEAD request is refused without using the link up. Opening the page does not count, only downloading the file does, so an automatic link preview in a messaging app does not waste it. A link already used or expired shows a page that says so.
+The link goes through the HTTPS site of the seedbox. With the VPN alone, the first link offers a small HTTPS site that serves the links and nothing else: nginx on ports 80 and 443, a Let's Encrypt certificate if the address of the VPN is a domain name pointing to the server, self-signed otherwise (each link then comes with the fingerprint to check). It goes away with « Site of the links » in the VPN menu, `seedtunnel vpn links off`, or with the VPN; a seedbox installed afterwards takes its place.
+
+A link holds a random token that cannot be guessed, works **only once** and expires after **10 minutes**. nginx serves the file once: any other request on it is refused, even right after on the same connection or with another form of the address, never a partial download, and the file is deleted right away. A HEAD request is refused without using the link up. Opening the page does not count, only downloading the file does, so an automatic link preview in a messaging app does not waste it. A link already used or expired shows a page that says so.
 
 The token is hidden in the log of nginx (`/share/<token>/…`): the log still says who downloaded, when, and whether it worked.
 
@@ -153,7 +155,7 @@ The token is hidden in the log of nginx (`/share/<token>/…`): the log still sa
 
 `seedtunnel firewall enable` refuses everything that reaches the server, except:
 - SSH, on the port actually used;
-- the VPN and the seedbox, if installed;
+- the VPN and the seedbox, if installed, or the site of the links (80 and 443);
 - the ICMP that IPv6 needs.
 
 This concerns what reaches the server itself. The VPN clients are trusted: what comes from them through the tunnel is accepted.

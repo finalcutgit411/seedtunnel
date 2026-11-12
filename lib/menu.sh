@@ -132,6 +132,7 @@ main_menu() {
     while true; do
         vpn_load
         seedbox_load
+        links_load
         # a restore (in a subshell) may have brought another language back
         language_reload
         UI_PLACE=()

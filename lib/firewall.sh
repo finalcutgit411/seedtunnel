@@ -189,11 +189,13 @@ firewall_rules_missing() {
         if [[ $open != *" $port "* ]]; then missing+="${missing:+, }SSH $port/tcp"; fi
     done
     if vpn_installed && ! grep -qE "udp dport $VPN_PORT accept" <<<"$rules"; then missing+="${missing:+, }VPN $VPN_PORT/udp"; fi
-    if seedbox_installed; then
+    if seedbox_installed || links_site_on; then
         for port in 80 443; do
             if [[ $open != *" $port "* ]]; then missing+="${missing:+, }web $port/tcp"; fi
         done
-        if ! grep -qE "th dport $TORRENT_PORT accept" <<<"$rules"; then missing+="${missing:+, }BitTorrent $TORRENT_PORT"; fi
+    fi
+    if seedbox_installed && ! grep -qE "th dport $TORRENT_PORT accept" <<<"$rules"; then
+        missing+="${missing:+, }BitTorrent $TORRENT_PORT"
     fi
     if [[ -n $missing ]]; then
         err 'Missing from the rules loaded, although the settings need it: %s   → seedtunnel apply' "$missing"
@@ -381,7 +383,11 @@ firewall_summary() {
     local summary
     summary="SSH ($(firewall_ssh_ports)/tcp)"
     if vpn_installed; then summary+=", VPN ($VPN_PORT/udp)"; fi
-    if seedbox_installed; then summary+=", $(t 'web (80, 443/tcp), BitTorrent (%s)' "$TORRENT_PORT")"; fi
+    if seedbox_installed; then
+        summary+=", $(t 'web (80, 443/tcp), BitTorrent (%s)' "$TORRENT_PORT")"
+    elif links_site_on; then
+        summary+=", $(t 'site of the links (80, 443/tcp)')"
+    fi
     printf '%s' "$summary"
 }
 
@@ -397,6 +403,10 @@ firewall_generate_rules() {
         extra+="        # seedbox: web site (HTTP for Let's Encrypt, then HTTPS) and BitTorrent peers
         tcp dport { 80, 443 } accept
         meta l4proto { tcp, udp } th dport $TORRENT_PORT accept
+"
+    elif links_site_on; then
+        extra+="        # site of the one-time links of the VPN (HTTP for Let's Encrypt, then HTTPS)
+        tcp dport { 80, 443 } accept
 "
     fi
     cat <<EOF

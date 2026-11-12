@@ -754,6 +754,9 @@ share_load() {
     load
     SHARE_DIR="$WORK/share-$1"
     rm -rf "$SHARE_DIR"
+    # through the site of the seedbox (the site of the links: see
+    # links_share_through_vpn_address)
+    seedbox_installed() { return 0; }
     SEEDBOX_DOMAIN=seedbox.example.org
     SEEDBOX_CERTIFICATE=letsencrypt
     echo secret >"$WORK/to-share"
@@ -1084,7 +1087,9 @@ share_shows_selfsigned_fingerprint() (
         return 1
     }
     cat "$WORK/share-fp.out"
-    grep -qF "$(openssl x509 -in "$SEEDBOX_SSL_DIR/selfsigned.crt" -noout -fingerprint -sha256 | cut -d= -f2)" "$WORK/share-fp.out"
+    # on two lines in 80 columns: the same once joined
+    [[ $(tr -d ' \n' <"$WORK/share-fp.out") == *"$(openssl x509 -in "$SEEDBOX_SSL_DIR/selfsigned.crt" -noout -fingerprint -sha256 | cut -d= -f2)"* ]] || return 1
+    (($(awk 'length > 79' "$WORK/share-fp.out" | wc -l) == 0))
 )
 
 # --- files holding a secret: readable by their owner only ---------------------------
@@ -2881,8 +2886,10 @@ restore_record_steps() {
     firewall_enable() { echo firewall >>"$RESTORE_STEPS"; }
     backup_auto_install_units() { :; }
     backup_auto_enabled() { return 1; }
+    links_apply() { echo links >>"$RESTORE_STEPS"; }
     i18n_init() { i18n_load en; }
     RESTORE_MARKER="$APP_STATE_DIR.restore-unfinished"
+    LINKS_CONF_FILE="$APP_STATE_DIR/links.conf"
     FIREWALL_CONF_FILE="$APP_STATE_DIR/firewall.conf"
     FIREWALL_RULES="$APP_STATE_DIR/firewall.nft"
     BACKUP_PASSPHRASE_FILE="$APP_STATE_DIR/backup.passphrase"
@@ -6199,11 +6206,9 @@ vpn_qr_window_too_small() (
     out=$(vpn_print_qr "$VPN_CLIENTS_DIR/telephone-salon.conf" telephone-salon 2>&1)
     printf '%s\n' "$out"
     [[ $out == *"Window too small for the QR code"*"this one has 80 and 24"*"seedtunnel vpn show telephone-salon"* ]] || return 1
-    [[ $out != *█* && $out != *"vpn share"* ]] || return 1
-    # with a seedbox, the one-time link is offered too
-    seedbox_installed() { return 0; }
-    out=$(vpn_print_qr "$VPN_CLIENTS_DIR/telephone-salon.conf" telephone-salon 2>&1)
-    [[ $out == *"seedtunnel vpn share telephone-salon"* ]] || return 1
+    # the one-time link is offered too, with or without a seedbox (the site
+    # of the links)
+    [[ $out != *█* && $out == *"seedtunnel vpn share telephone-salon"* ]] || return 1
     ui_terminal_size() { echo "50 100"; }
     out=$(vpn_print_qr "$VPN_CLIENTS_DIR/telephone-salon.conf" telephone-salon 2>&1)
     [[ $out == *█* && $out != *"Window too small"* ]] || return 1
@@ -6363,9 +6368,9 @@ vpn_client_screens() (
     # (the key line is the prompt of « read »: shown only on a terminal)
     [[ $(grep -A1 '█' <<<"$out" | tail -n 1) == "--- clear" ]] && declare -f vpn_qr_screen | grep -q "ui_pause next tight" || return 1
     # then what to do, in three parts, the keys, the file shown by 1
-    [[ $out == *"● Install the tunnel"*"Phone"*"« Scan from QR code »"*"through"*"[1]"*"● Port for torrents"*"● Kill switch"*"[1] Show the file (to copy and paste)"*"[Interface]"* ]] || return 1
-    [[ $out != *"[2]"* && $out != *"[y/N]"* ]] || return 1
-    # with the seedbox: 2 too
+    [[ $out == *"● Install the tunnel"*"Phone"*"« Scan from QR code »"*"through"*"[2] or [1]"*"● Port for torrents"*"● Kill switch"*"[1] Show the file (to copy and paste)"*"[2] One-time download link for the file"*"[Interface]"* ]] || return 1
+    [[ $out != *"[y/N]"* ]] || return 1
+    # with the seedbox: the same
     seedbox_installed() { return 0; }
     out=$(printf '\n\nb\n' | vpn_show_client telephone-salon 2>&1)
     [[ $out == *"[2] One-time download link for the file"* ]] || return 1
@@ -6735,6 +6740,331 @@ sftp_private_key_pasted() (
     [[ $(grep -c "Invalid SSH key" <<<"$out") == 0 ]]
 )
 
+# --- Site of the links (VPN without a seedbox) --------------------------------------
+
+# Its nginx site: the links (and Let's Encrypt in HTTP) and nothing else, no
+# password, no Transmission; with the variables of the seedbox for this call
+# only
+links_site_serves_only_links() (
+    load
+    local site
+    VPN_PUBLIC_ADDRESS=203.0.113.7
+    LINKS_CERTIFICATE=selfsigned
+    SEEDBOX_DOMAIN=seed.example.org
+    SEEDBOX_CERTIFICATE=letsencrypt
+    site=$(links_run links_generate_site)
+    printf '%s\n' "$site"
+    [[ $site == *"server_name 203.0.113.7;"* && $site == *"location ^~ /share/"* && $site == *"/.well-known/acme-challenge/"* ]] || return 1
+    [[ $site == *"$SEEDBOX_SSL_DIR/selfsigned.crt"* && $site != *Strict-Transport-Security* ]] || return 1
+    [[ $site != *"auth_basic \"Restricted\""* && $site != *proxy_pass* && $site != *transmission* && $site != *htpasswd* ]] || return 1
+    # any other address of the HTTPS site: 404
+    [[ $site == *$'    location / {\n        return 404;\n    }\n}'* ]] || return 1
+    # the variables of the seedbox untouched
+    [[ $SEEDBOX_DOMAIN == seed.example.org && $SEEDBOX_CERTIFICATE == letsencrypt && -z ${NGINX_SITE_GENERATOR-} ]] || return 1
+    # Let's Encrypt: its certificate, and HSTS (in the links too)
+    LINKS_CERTIFICATE=letsencrypt
+    site=$(links_run links_generate_site)
+    [[ $site == *"$LETSENCRYPT_DIR/fullchain.pem"* && $(grep -c Strict-Transport-Security <<<"$site") -ge 2 ]] || return 1
+    # a domain name in capitals: in small letters
+    VPN_PUBLIC_ADDRESS=VPN.Example.ORG
+    site=$(links_run links_generate_site)
+    [[ $site == *"server_name vpn.example.org;"* ]] || return 1
+    # the certificate chosen by the seedbox functions comes back for the
+    # site of the links, never for the seedbox
+    VPN_PUBLIC_ADDRESS=vpn.example.org
+    LINKS_CERTIFICATE=selfsigned
+    seedbox_apply_https() {
+        printf '%s %s %s %s\n' "$SEEDBOX_DOMAIN" "$NGINX_SITE_GENERATOR" "$SEEDBOX_LETSENCRYPT" "$SEEDBOX_LETSENCRYPT_SERVER" >"$WORK/links-run"
+        SEEDBOX_CERTIFICATE=letsencrypt
+    }
+    links_run seedbox_apply_https
+    [[ $(<"$WORK/links-run") == "vpn.example.org links_generate_site auto production" ]] || return 1
+    [[ $LINKS_CERTIFICATE == letsencrypt && $SEEDBOX_CERTIFICATE == letsencrypt && $SEEDBOX_DOMAIN == seed.example.org ]]
+)
+
+# The firewall opens 80 and 443 for it (not the port of BitTorrent), says it,
+# and says when the rules loaded do not have them. A seedbox takes its place.
+links_site_in_the_firewall() (
+    load
+    local rules
+    LINKS_CONF_FILE="$WORK/links-firewall.conf"
+    rm -f "$LINKS_CONF_FILE"
+    vpn_installed() { return 0; }
+    seedbox_installed() { return 1; }
+    firewall_ssh_ports() { echo 22; }
+    VPN_PORT=51820
+    rules=$(firewall_generate_rules)
+    [[ $rules != *"80, 443"* && $(firewall_summary) != *links* ]] || return 1
+    links_save
+    links_site_on || return 1
+    rules=$(firewall_generate_rules)
+    printf '%s\n' "$rules"
+    [[ $rules == *"tcp dport { 80, 443 } accept"* && $rules != *"th dport $TORRENT_PORT"* ]] || return 1
+    [[ $(firewall_summary) == "SSH (22/tcp), VPN (51820/udp), site of the links (80, 443/tcp)" ]] || return 1
+    firewall_rules_missing "$(sed '/80, 443/d' <<<"$rules")" 2>&1 | grep -q "web 80/tcp, web 443/tcp" || return 1
+    [[ -z $(firewall_rules_missing "$rules" 2>&1) ]] || return 1
+    # with a seedbox: its site serves the links
+    seedbox_installed() { return 0; }
+    ! links_site_on
+)
+
+# The first link without a seedbox: what the site is, then the question
+# (--yes without a terminal). No: what to do instead, nothing installed.
+# Already there: no question. Neither VPN nor seedbox: refused.
+share_require_offers_links_site() (
+    load
+    local out
+    LINKS_CONF_FILE="$WORK/links-require.conf"
+    rm -f "$LINKS_CONF_FILE" "$WORK/links-require-calls"
+    vpn_installed() { return 0; }
+    seedbox_installed() { return 1; }
+    VPN_PUBLIC_ADDRESS=203.0.113.7
+    links_install() { echo installed >>"$WORK/links-require-calls"; }
+    if out=$(share_require "HINT" 2>&1 </dev/null); then return 1; fi
+    printf '%s\n' "$out"
+    [[ $out == *"Download links go through an HTTPS site"*"https://203.0.113.7/share/…"*"self-signed (IP address)"*"seedtunnel vpn links off"* ]] || return 1
+    [[ $out == *"Install the site of the links? (opens ports 80 and 443) → run again with --yes to confirm."* ]] || return 1
+    # no: what to do instead, status 1, nothing installed
+    confirm() { return 1; }
+    if out=$(share_require "what to do instead" 2>&1); then return 1; fi
+    [[ $out == *"  what to do instead"* && ! -e $WORK/links-require-calls ]] || return 1
+    # a domain name: Let's Encrypt if it points to this server
+    VPN_PUBLIC_ADDRESS=vpn.example.org
+    out=$(share_require x 2>&1) || true
+    [[ $out == *"Let's Encrypt if vpn.example.org points to this server"* ]] || return 1
+    # yes: installed
+    confirm() { return 0; }
+    share_require x >/dev/null 2>&1 || return 1
+    [[ $(<"$WORK/links-require-calls") == installed ]] || return 1
+    # there: no question; nginx stopped: said
+    links_save
+    confirm() {
+        echo asked
+        return 1
+    }
+    systemctl() { [[ $1 != is-active ]]; }
+    if out=$(share_require x 2>&1); then return 1; fi
+    [[ $out == *"nginx is stopped:  seedtunnel vpn links on"* && $out != *asked* ]] || return 1
+    systemctl() { return 0; }
+    out=$(share_require x 2>&1) || return 1
+    [[ $out != *asked* ]] || return 1
+    # neither VPN nor seedbox (a firewall only): refused, with the hint
+    vpn_installed() { return 1; }
+    rm -f "$LINKS_CONF_FILE"
+    if out=$(share_require "the hint" 2>&1); then return 1; fi
+    [[ $out == *"Neither is installed."*"the hint"* ]]
+)
+
+# A link through the site of the links: the address of the VPN, its nginx
+# site (not the one of the seedbox), the fingerprint of its certificate
+links_share_through_vpn_address() (
+    share_load vpnsite
+    seedbox_installed() { return 1; }
+    VPN_PUBLIC_ADDRESS=203.0.113.7
+    LINKS_CERTIFICATE=selfsigned
+    SEEDBOX_SSL_DIR="$WORK/ssl-links"
+    mkdir -p "$SEEDBOX_SSL_DIR"
+    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 1 -subj /CN=203.0.113.7 \
+        -keyout "$SEEDBOX_SSL_DIR/selfsigned.key" -out "$SEEDBOX_SSL_DIR/selfsigned.crt" &>/dev/null || return 1
+    seedbox_apply_nginx() { printf '%s %s\n' "$SEEDBOX_DOMAIN" "${NGINX_SITE_GENERATOR-}" >"$WORK/links-nginx"; }
+    pgrep() { return 0; }
+    share_create "$WORK/to-share" phone.conf Title "" Note &>"$WORK/links-share.out" || {
+        cat "$WORK/links-share.out"
+        return 1
+    }
+    cat "$WORK/links-share.out"
+    [[ $(<"$WORK/links-nginx") == "203.0.113.7 links_generate_site" ]] || return 1
+    grep -qE "https://203\.0\.113\.7/share/[0-9a-f]{32}/" "$WORK/links-share.out" || return 1
+    [[ $(tr -d ' \n' <"$WORK/links-share.out") == *"$(openssl x509 -in "$SEEDBOX_SSL_DIR/selfsigned.crt" -noout -fingerprint -sha256 | cut -d= -f2)"* ]] || return 1
+    # Let's Encrypt: no fingerprint to check
+    LINKS_CERTIFICATE=letsencrypt
+    share_create "$WORK/to-share" phone.conf Title "" Note &>"$WORK/links-share.out" || return 1
+    ! grep -q "SHA-256" "$WORK/links-share.out"
+)
+
+# Removed: its links, its nginx site, its certificates, what it installed, its
+# ports. With a seedbox, only its settings (the site is the seedbox's).
+links_remove_cleans_up() (
+    load
+    LINKS_CONF_FILE="$WORK/links-remove.conf"
+    NGINX_SITE="$WORK/links-remove-site"
+    NGINX_SITE_LINK="$WORK/links-remove-link"
+    SEEDBOX_SSL_DIR="$WORK/links-remove-ssl"
+    LETSENCRYPT_WEBROOT="$WORK/links-remove-webroot"
+    SHARE_DIR="$WORK/links-remove-share"
+    links_save
+    touch "$NGINX_SITE"
+    ln -sf "$NGINX_SITE" "$NGINX_SITE_LINK"
+    mkdir -p "$SEEDBOX_SSL_DIR" "$LETSENCRYPT_WEBROOT" "$SHARE_DIR/0123" "$SHARE_DIR.jobs"
+    : >"$WORK/links-remove-calls"
+    seedbox_installed() { return 1; }
+    systemctl() {
+        echo "systemctl $*" >>"$WORK/links-remove-calls"
+        [[ $1 != is-active ]]
+    }
+    apt_purge() { echo "purge $*" >>"$WORK/links-remove-calls"; }
+    firewall_refresh() { echo firewall >>"$WORK/links-remove-calls"; }
+    seedbox_letsencrypt_delete() { echo "certbot delete" >>"$WORK/links-remove-calls"; }
+    links_remove || return 1
+    cat "$WORK/links-remove-calls"
+    [[ ! -e $LINKS_CONF_FILE && ! -e $NGINX_SITE && ! -L $NGINX_SITE_LINK && ! -e $SEEDBOX_SSL_DIR && ! -e $LETSENCRYPT_WEBROOT && ! -e $SHARE_DIR && ! -e $SHARE_DIR.jobs ]] || return 1
+    grep -qx "systemctl stop seedtunnel-share-\*" "$WORK/links-remove-calls" \
+        && grep -qx "certbot delete" "$WORK/links-remove-calls" \
+        && grep -qx "purge nginx nginx-common certbot inotify-tools" "$WORK/links-remove-calls" \
+        && [[ $(tail -n 1 "$WORK/links-remove-calls") == firewall ]] || return 1
+    # an nginx that stays (there before seedtunnel): reloaded without the site
+    systemctl() {
+        echo "systemctl $*" >>"$WORK/links-remove-calls"
+        return 0
+    }
+    links_save
+    : >"$WORK/links-remove-calls"
+    links_remove
+    grep -qx "systemctl reload nginx" "$WORK/links-remove-calls" || return 1
+    # with a seedbox: its settings only
+    seedbox_installed() { return 0; }
+    links_save
+    touch "$NGINX_SITE"
+    : >"$WORK/links-remove-calls"
+    links_remove
+    [[ ! -e $LINKS_CONF_FILE && -e $NGINX_SITE && ! -s $WORK/links-remove-calls ]]
+)
+
+# seedtunnel vpn links [on|off]
+vpn_links_command() (
+    load
+    local out
+    LINKS_CONF_FILE="$WORK/links-cli.conf"
+    rm -f "$LINKS_CONF_FILE"
+    : >"$WORK/links-cli-calls"
+    vpn_installed() { return 0; }
+    seedbox_installed() { return 1; }
+    VPN_PUBLIC_ADDRESS=203.0.113.7
+    links_install() {
+        echo install >>"$WORK/links-cli-calls"
+        links_save
+    }
+    links_apply() { echo apply >>"$WORK/links-cli-calls"; }
+    links_remove() {
+        echo remove >>"$WORK/links-cli-calls"
+        rm -f "$LINKS_CONF_FILE"
+    }
+    systemctl() { return 0; }
+    out=$(vpn_cli_links "" 2>&1)
+    [[ $out == *"No site for the links yet: it is offered at the first link (or:  seedtunnel vpn links on)."* ]] || return 1
+    vpn_cli_links on >/dev/null 2>&1 && vpn_cli_links on >/dev/null 2>&1 || return 1
+    [[ $(<"$WORK/links-cli-calls") == $'install\napply' ]] || return 1
+    out=$(vpn_cli_links "" 2>&1)
+    [[ $out == *"Site of the links: "*"HTTPS site on (self-signed)"* ]] || return 1
+    # removal: a question (--yes without a terminal)
+    if out=$(vpn_cli_links off 2>&1 </dev/null); then return 1; fi
+    [[ $out == *"Remove the site of the links? → run again with --yes to confirm."* ]] || return 1
+    OPT_YES=1
+    out=$(vpn_cli_links off 2>&1) || return 1
+    [[ $out == *"Site of the links removed."* && $(tail -n 1 "$WORK/links-cli-calls") == remove ]] || return 1
+    out=$(vpn_cli_links off 2>&1)
+    [[ $out == *"No site of the links to remove."* ]] || return 1
+    # with a seedbox: nothing to install
+    seedbox_installed() { return 0; }
+    out=$(vpn_cli_links on 2>&1)
+    [[ $out == *"The links go through the HTTPS site of the seedbox"* ]] || return 1
+    if out=$(vpn_cli_links whatever 2>&1); then return 1; fi
+    [[ $out == *"Usage: seedtunnel vpn links [on|off]"* ]]
+)
+
+# Backed up and restored as the other settings: only what seedtunnel writes
+restore_checks_links_settings() (
+    load
+    local dir="$WORK/links-restore/etc/seedtunnel"
+    mkdir -p "$dir"
+    printf 'LINKS_CERTIFICATE=selfsigned\n' >"$dir/links.conf"
+    [[ -z $(backup_unsafe_state_file "$dir") && -z $(restore_bad_setting "$dir") ]] || return 1
+    printf 'LINKS_CERTIFICATE=letsencrypt\n' >"$dir/links.conf"
+    [[ -z $(restore_bad_setting "$dir") ]] || return 1
+    printf 'LINKS_CERTIFICATE=staging\n' >"$dir/links.conf"
+    [[ $(restore_bad_setting "$dir") == $'LINKS_CERTIFICATE\tetc/seedtunnel/links.conf' ]] || return 1
+    printf 'LINKS_CERTIFICATE=selfsigned\nPATH=/tmp\n' >"$dir/links.conf"
+    [[ $(backup_unsafe_state_file "$dir") == "$dir/links.conf" ]]
+)
+
+# A restore puts the site of the links of the backup back; the site of this
+# server stays when the backup has none (nginx keeps serving it)
+restore_and_the_links_site() (
+    restore_archive_load linksback
+    printf 'LINKS_CERTIFICATE=selfsigned\n' >"$RESTORE_ROOT/etc/seedtunnel/links.conf"
+    restore_archive_make linksback
+    restore_record_steps linksback
+    vpn_installed() { return 0; }
+    seedbox_installed() { return 1; }
+    ss() { :; }
+    restore_main "$WORK/linksback.enc" >"$WORK/linksback.out" 2>&1 || {
+        cat "$WORK/linksback.out"
+        return 1
+    }
+    cat "$WORK/linksback.out" "$RESTORE_STEPS"
+    [[ $(grep -vx -e asked -e kernel -e base "$RESTORE_STEPS" | paste -sd' ') == "vpn links" ]] || return 1
+    # this server has one, the backup none: it stays, said
+    restore_archive_load linkskept
+    restore_archive_make linkskept
+    restore_record_steps linkskept
+    vpn_installed() { return 0; }
+    seedbox_installed() { return 1; }
+    links_save
+    restore_main "$WORK/linkskept.enc" >"$WORK/linkskept.out" 2>&1 || {
+        cat "$WORK/linkskept.out"
+        return 1
+    }
+    cat "$WORK/linkskept.out" "$RESTORE_STEPS"
+    [[ -f $LINKS_CONF_FILE ]] && grep -qx links "$RESTORE_STEPS" \
+        && grep -q "The site of the links of this server stays (the backup restored has none)." "$WORK/linkskept.out" || return 1
+    # the backup has one, ports 80/443 used by another program here: refused
+    # before anything is changed
+    restore_archive_load linksports
+    printf 'LINKS_CERTIFICATE=selfsigned\n' >"$RESTORE_ROOT/etc/seedtunnel/links.conf"
+    restore_archive_make linksports
+    restore_record_steps linksports
+    vpn_installed() { return 0; }
+    seedbox_installed() { return 1; }
+    ss() { printf '%s\n' 'LISTEN 0 511 0.0.0.0:80 0.0.0.0:* users:(("apache2",pid=1,fd=4))'; }
+    restore_refused_first linksports "before installing the site of the links"
+)
+
+# Wired in: apply, a new address of the VPN, removal of the VPN, a seedbox
+# installed afterwards
+links_site_wired_in() (
+    load
+    declare -f apply_main | grep -q links_apply || return 1
+    declare -f vpn_change_settings | grep -q links_apply || return 1
+    declare -f vpn_uninstall | grep -q links_remove || return 1
+    declare -f seedbox_apply | grep -qF 'rm -f "$LINKS_CONF_FILE"' || return 1
+    # its own words in the Let's Encrypt help
+    seedbox_installed() { return 1; }
+    [[ $(text letsencrypt_failed_help) == *"seedtunnel vpn links on"* ]] || return 1
+    seedbox_installed() { return 0; }
+    SEEDBOX_DOMAIN=seed.example.org
+    [[ $(text letsencrypt_failed_help) == *"seedtunnel seedbox domain seed.example.org"* ]]
+)
+
+# A menu of 10 entries: [10] takes one more character, the texts stay aligned
+ui_menu_two_digit_keys() (
+    load
+    local out i line nine ten
+    UI_COLUMNS=80
+    ui_width
+    for i in {1..10}; do ui_menu_add "$i" "Entry $i"; done
+    out=$(ui_menu_show | sed 's/\x1b\[[0-9;]*m//g')
+    printf '%s\n' "$out"
+    while IFS= read -r line; do
+        if [[ $line == *"[9] Entry 9"* ]]; then nine=${line%%Entry 9*}; fi
+        if [[ $line == *"[10] Entry 10"* ]]; then ten=${line%%Entry 10*}; fi
+    done <<<"$out"
+    [[ -n ${nine-} && ${#nine} -eq ${#ten} ]] || return 1
+    # one column
+    for i in {1..10}; do ui_menu_add "$i" "A rather long entry of the menu, number $i"; done
+    out=$(ui_menu_show | sed 's/\x1b\[[0-9;]*m//g')
+    [[ $out == *$'\n   [9] A rather long entry of the menu, number 9\n  [10] A rather long'* ]]
+)
+
 check "vpn_sync: WireGuard refusing the configuration shows « failed »" vpn_sync_reports_wg_failure
 check "vpn_sync: a failure of « wg-quick strip » is seen" vpn_sync_reports_strip_failure
 check "vpn_sync: « ok » when every step works" vpn_sync_ok_when_all_steps_work
@@ -7020,5 +7350,15 @@ check "VPN address or port: summary in a frame, « before → after »" vpn_sett
 check "backups menu: weekly on/off/failed, latest, on the server, downloaded" backup_status_fields_states
 check "restore from the menu: the menus go on in the language of the backup" language_back_after_restore
 check "seedbox: new login in a frame, SFTP settings with profiles and key choices" seedbox_login_and_sftp_screens
+check "site of the links: its nginx site serves the links and nothing else, the seedbox untouched" links_site_serves_only_links
+check "site of the links: 80 and 443 in the firewall, said, missing ones pointed out; a seedbox takes its place" links_site_in_the_firewall
+check "site of the links: offered at the first link without a seedbox (--yes without a terminal), no → what to do instead" share_require_offers_links_site
+check "site of the links: a link with the address of the VPN and the fingerprint of its certificate" links_share_through_vpn_address
+check "site of the links: removed with its links, certificates, packages and ports; with a seedbox, its settings only" links_remove_cleans_up
+check "seedtunnel vpn links [on|off]: state, installed then put back in place, removed after a question" vpn_links_command
+check "restore: the settings of the site of the links checked like the others" restore_checks_links_settings
+check "restore: the site of the links of the backup put back, the one of this server kept, ports used refused first" restore_and_the_links_site
+check "site of the links: applied again by apply and a new address, removed with the VPN, replaced by a seedbox" links_site_wired_in
+check "menus: with a key [10], the texts stay aligned (one or two columns)" ui_menu_two_digit_keys
 printf '\n\033[1m%s passed, %s failed\033[0m\n' "$PASS" "$FAIL"
 ((FAIL == 0))

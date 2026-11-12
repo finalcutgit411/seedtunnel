@@ -149,6 +149,7 @@ esac
 install_shortcut
 vpn_load
 seedbox_load
+links_load
 firewall_load
 
 case ${1-} in
