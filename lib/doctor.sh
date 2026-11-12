@@ -724,18 +724,31 @@ report_known_values() {
             report_known "$name" "$(t '<former-sftp-user>')"
         fi
     done < <(sed -nE "s/.*(Creating the user|Deleting the user|Création de l'utilisateur|Suppression de l'utilisateur) ([a-z_][a-z0-9_-]*).*/\2/p; s/^\\\$ useradd .* ([a-z_][a-z0-9_-]*)$/\1/p" "$file" | sort -u || true)
-    # the accounts of the administrators: the one that ran sudo, those logged in
+    # the accounts of the administrators: the one that ran sudo, those logged
+    # in. Not the SFTP account: « who » can list it too while WinSCP is
+    # connected (Debian 13 counts the SFTP sessions), and it has its own name
     while IFS= read -r name; do
-        if [[ $name =~ ^[a-z_][a-z0-9_.-]*$ ]] && ! report_common_word "$name"; then report_known "$name" "$(t '<admin>')"; fi
+        if [[ $name =~ ^[a-z_][a-z0-9_.-]*$ && $name != "${SEEDBOX_USER-}" ]] && ! report_common_word "$name"; then
+            report_known "$name" "$(t '<admin>')"
+        fi
     done < <({
         printf '%s\n' "${SUDO_USER-}"
         who 2>/dev/null | awk '{ print $1 }'
     } | sort -u || true)
 }
 
+# The addresses of the DNS services offered in the menu, one per line
+report_dns_addresses() {
+    local key
+    for key in "${VPN_DNS_SERVICES[@]}"; do
+        vpn_dns_value "$key" | tr -s ', ' '\n'
+        echo
+    done
+}
+
 # Replaces what is private in FILE
 report_anonymize() {
-    local file=$1 _length value replacement address
+    local file=$1 _length value replacement address dns
     # colors first, then the known values, longest first (the name of the
     # server is often part of a domain, an account part of a client name)
     REPORT_SCRIPT='s/\x1b\[[0-9;]*m//g;'
@@ -750,9 +763,13 @@ report_anonymize() {
     REPORT_SCRIPT+='s/^( *)[a-z_][a-z0-9_.-]* @ (session #|user manager service)/\1'"$(t '<admin>')"' @ \2/;'
     REPORT_SCRIPT+='s/seedtunnel-[A-Za-z0-9._-]+-([0-9]{8}-[0-9]{6})/seedtunnel-'"$(t '<server>')"'-\1/g;'
     sed -E -i "$REPORT_SCRIPT" "$file"
-    # the other public addresses, as found in what is left
+    # the other public addresses, as found in what is left; not those of the
+    # DNS services of the menu (Quad9…): the same for everyone, they say which
+    # one is used (one typed by hand is replaced)
     REPORT_SCRIPT=""
+    dns=$(report_dns_addresses)
     while IFS= read -r address; do
+        if grep -qxF -- "$address" <<<"$dns"; then continue; fi
         if is_ipv4 "$address" && report_ipv4_is_public "$address"; then report_replace "$address" "$(t '<ip>')"; fi
     done < <(grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' "$file" | sort -u || true)
     while IFS= read -r address; do

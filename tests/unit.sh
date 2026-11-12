@@ -5571,6 +5571,33 @@ EOF
         && grep -q "nova.clouds.archive.ubuntu.com/ubuntu noble" "$WORK/report.txt" && grep -q "debian-transmission" "$WORK/report.txt"
 )
 
+# Seen on Debian 13: while WinSCP is connected, « who » lists the SFTP account
+# too; it keeps its own name, not <admin>. The addresses of the DNS services
+# of the menu stay (the same for everyone), one typed by hand is replaced.
+report_sftp_account_and_dns() (
+    report_load
+    cat >>"$WORK/report.txt" <<'EOF'
+=== 2026-11-12 11:20:49 · Creating the user lancelot
+=== 2026-11-12 12:10:55 · Download link for seedbox-lancelot.ppk
+=== 2026-11-12 12:05:50 · Changing the DNS of the clients: Quad9 · 9.9.9.9, 149.112.112.112
+=== 2026-11-12 12:06:10 · Changing the DNS of the clients: AdGuard · 94.140.14.14, 94.140.15.15
+=== 2026-11-12 12:06:30 · Changing the DNS of the clients: 1.1.1.1, 86.54.11.201
+=== 2026-11-12 12:07:00 · Changing the DNS of the clients: 198.51.100.53
+EOF
+    SUDO_USER=perceval
+    who() { printf '%s\n' 'perceval pts/0        2026-11-12 12:00 (198.51.100.20)' 'lancelot sshd        2026-11-12 12:10'; }
+    report_anonymize "$WORK/report.txt"
+    cat "$WORK/report.txt"
+    ! grep -q 'lancelot\|perceval\|198\.51\.100\.53' "$WORK/report.txt" || return 1
+    ! grep -q 'seedbox-<admin>\|user <admin>' "$WORK/report.txt" || return 1
+    grep -qF "Creating the user <sftp-user>" "$WORK/report.txt" \
+        && grep -qF "seedbox-<sftp-user>.ppk" "$WORK/report.txt" \
+        && grep -qF "Quad9 · 9.9.9.9, 149.112.112.112" "$WORK/report.txt" \
+        && grep -qF "AdGuard · 94.140.14.14, 94.140.15.15" "$WORK/report.txt" \
+        && grep -qF "clients: 1.1.1.1, 86.54.11.201" "$WORK/report.txt" \
+        && grep -qF "clients: <ip>" "$WORK/report.txt"
+)
+
 # --- Restore cut short: the way back puts back what it replaced -------------------
 
 # Settings, SSH keys of SFTP, certificate of seedtunnel and list of torrents:
@@ -6767,6 +6794,7 @@ check "backup: a file changed while it is read (progress of Transmission) is no 
 check "firewall: rules loaded older than their file are loaded again (restore on the same ports)" firewall_refresh_reloads_stale_rules
 check "restore: the last download of a backup and the start of the weekly backup are those of this server" restore_leaves_the_marks_of_the_other_server
 check "report: domains and SFTP accounts used before, administrators, backups of another server replaced" report_replaces_former_names
+check "report: the SFTP account logged in is not an administrator, the DNS of the menu kept" report_sftp_account_and_dns
 check "restore cut short: the way back puts back settings, SSH keys, certificate and torrents" restore_undo_puts_everything_back
 check "restore: the settings replaced kept aside only if there is something to go back to, how to delete them said" restore_keeps_aside_only_settings
 check "diagnostics: settings replaced by a finished restore said, with the command to delete them" doctor_reports_restore_leftovers
