@@ -1,0 +1,110 @@
+# Automatic publication of a version
+#
+# To publish: change APP_VERSION in lib/common.sh, add the matching section to
+# CHANGELOG.md, then push to master. If this version is not published yet, the
+# full tests run, then GitHub creates the tag vX.Y.Z and publishes the archive
+# with its SHA256SUMS file (used by « seedtunnel update » to check what it
+# downloads) and its attestation (signed proof of where it was built).
+# Pushing a vX.Y.Z tag yourself works too.
+# Development versions (with a dash, e.g. 1.1.0-dev) are never published.
+name: Release
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - lib/common.sh
+      - CHANGELOG.md
+      - .github/workflows/release.yml
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Version to publish?
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      publish: ${{ steps.v.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=$(sed -n 's/^APP_VERSION="\(.*\)"$/\1/p' lib/common.sh)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$v" ]; then
+            echo "::error::The tag $GITHUB_REF_NAME does not match APP_VERSION=$v (lib/common.sh)"
+            exit 1
+          fi
+          case $v in
+            "")
+              echo "::error::APP_VERSION not found in lib/common.sh"
+              exit 1
+              ;;
+            *-*)
+              echo "Development version $v: nothing to publish."
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+          if gh release view "v$v" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Version $v is already published: nothing to do."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          elif ! grep -q "^## \[$v\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no [$v] section"
+            exit 1
+          else
+            echo "Version $v to publish."
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  tests:
+    needs: version
+    if: needs.version.outputs.publish == 'true'
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: Publish the version
+    needs: [version, tests]
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      # attestation of the archive: signed by GitHub (id-token), then kept
+      # with the repository (attestations)
+      id-token: write
+      attestations: write
+    env:
+      V: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Archive, checksum and release notes
+        run: |
+          git archive --format=tar.gz --prefix="seedtunnel-$V/" -o "seedtunnel-$V.tar.gz" "$GITHUB_SHA"
+          sha256sum "seedtunnel-$V.tar.gz" > SHA256SUMS
+          # section of this version in the CHANGELOG
+          awk -v v="[$V]" '/^## /{p = index($0, v) > 0; next} p' CHANGELOG.md > notes.md
+          cat SHA256SUMS
+
+      # Proof that the archive was built here, by this workflow, from this
+      # commit: gh attestation verify seedtunnel-X.Y.Z.tar.gz --repo OWNER/seedtunnel
+      - name: Attestation of the archive
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: seedtunnel-${{ needs.version.outputs.version }}.tar.gz
+
+      - name: Publish on GitHub
+        run: |
+          gh release create "v$V" "seedtunnel-$V.tar.gz" SHA256SUMS \
+            --target "$GITHUB_SHA" --title "seedtunnel $V" --notes-file notes.md

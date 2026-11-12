@@ -1,0 +1,129 @@
+/* =============================================================================
+   seedtunnel — style of the web interface of Transmission 4 (Debian 13)
+
+   The colors of seedtunnel on the page of Transmission: dark background, pink
+   for what downloads, green for what is shared, the name of seedtunnel in the
+   bar at the top. Only colors and a few details: the layout and the buttons
+   stay those of Transmission.
+
+   nginx adds this file to the page as it passes (see nginx_generate_site in
+   lib/seedbox.sh): Transmission itself is not changed. Transmission 4 gives
+   its colors in variables (--color-…): this file gives them other values. If a
+   later version renames them, its own colors simply come back.
+   ============================================================================= */
+
+html:root {
+  color-scheme: dark;
+  --st-pink: #ff5fff;
+  --st-magenta: #af00af;
+  --st-green: #5fe08a;
+  --st-bg: #0f0e16;
+  --st-bg-2: #15141d;
+  --st-line: #2b2838;
+
+  --color-bg-primary: var(--st-bg);
+  --color-bg-odd: var(--st-bg);
+  --color-bg-even: #13121b;
+  --color-bg-hover: #1f1a29;
+  --color-bg-popup: var(--st-bg-2);
+  --color-bg-tabs: var(--st-bg-2);
+  --color-bg-selected: rgba(255, 95, 255, 0.16);
+  --color-bg-warn: #cf6679;
+  --color-toolbar-background: #0b0a10;
+  --color-border-default: var(--st-line);
+  --color-border-stark: #4a4558;
+  --color-border-starkest: #3a3646;
+  --color-dialog-border: var(--st-line);
+  --color-fg-primary: #e8e6ef;
+  --color-fg-secondary: #b9b4c7;
+  --color-fg-tertiary: #8a8a8a;
+  --color-fg-disabled: #6c6878;
+  --color-fg-selected: #ffffff;
+  --color-fg-on-popup: #e8e6ef;
+  --color-fg-tabs: #e8e6ef;
+  --color-fg-warn: #0b0a10;
+  --color-fg-error: #ff6b81;
+  --color-fg-port-open: var(--st-green);
+  --color-fg-port-closed: #ff6b81;
+  --color-progressbar-leech: linear-gradient(90deg, #c21fc2, var(--st-pink));
+  --color-progressbar-queued: var(--st-magenta);
+  --color-progressbar-paused: #3a3646;
+  --color-progressbar-seed-1: #2ea660;
+  --color-progressbar-seed-2: var(--st-green);
+  --color-progressbar-seed-paused: #3a3646;
+  --color-progressbar-magnet: #ffd75f;
+  --color-progressbar-verify: #ffd75f;
+  --color-progressbar-background-2: #1d1b27;
+  --color-progressbar-fg-1: #e8e6ef;
+  --color-progressbar-fg-2: #ffffff;
+  --color-progressbar-fg-3: #ffffff;
+  --progress-bar-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.6);
+  --progress-bar-shadow-2: 0 1px 2px rgba(0, 0, 0, 0.6);
+  --progress-bar-shadow-3: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+/* the bar at the top: a thin pink line, and the name of seedtunnel on the left */
+#mainwin-toolbar {
+  box-shadow: inset 0 -2px 0 rgba(255, 95, 255, 0.45);
+}
+#mainwin-toolbar::before {
+  content: "";
+  flex: none;
+  width: 150px;
+  height: 100%;
+  margin: 0 10px 0 14px;
+  background: no-repeat left center / auto 30px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='150' height='30' viewBox='0 0 150 30'%3E%3Crect x='1' y='7' width='26' height='16' rx='3' fill='none' stroke='%23ff5fff' stroke-width='2'/%3E%3Ccircle cx='8' cy='15' r='2.6' fill='%23ff5fff'/%3E%3Ccircle cx='20' cy='15' r='2.6' fill='%23ff5fff'/%3E%3Cpath d='M8 15h12' stroke='%23ff5fff' stroke-width='2'/%3E%3Ctext x='35' y='21' font-family='DejaVu Sans,Segoe UI,Helvetica,Arial,sans-serif' font-size='17' font-weight='700' fill='%23ffffff'%3ESeed%3Ctspan fill='%23ff5fff'%3ETunnel%3C/tspan%3E%3C/text%3E%3C/svg%3E");
+}
+/* narrow screen (phone): the emblem only */
+@media (width < 600px) {
+  #mainwin-toolbar::before {
+    width: 30px;
+    margin: 0 6px 0 8px;
+  }
+}
+#mainwin-toolbar button:hover {
+  background-color: rgba(255, 95, 255, 0.12);
+}
+#mainwin-toolbar button:hover svg {
+  stroke: var(--st-pink);
+}
+
+/* torrents: the selected one marked on the left, rounded bars */
+#torrent-list .torrent.selected {
+  box-shadow: inset 3px 0 0 var(--st-pink);
+}
+#torrent-list .torrent-progress-bar {
+  border-radius: 5px;
+  overflow: hidden;
+}
+#torrent-list .torrent-name {
+  font-weight: 600;
+}
+
+/* fields and buttons of the dialogs */
+input,
+select,
+textarea {
+  background: #0b0a10;
+  border: 1px solid var(--st-line);
+  border-radius: 6px;
+  color: var(--color-fg-primary);
+}
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--st-pink);
+  outline: none;
+}
+.dialog-buttons button,
+.dialog-container button {
+  background: var(--st-bg-2);
+  border: 1px solid var(--st-line);
+  border-radius: 6px;
+  color: var(--color-fg-primary);
+}
+.dialog-buttons button:last-child {
+  background: var(--st-magenta);
+  border-color: var(--st-magenta);
+  color: #fff;
+}

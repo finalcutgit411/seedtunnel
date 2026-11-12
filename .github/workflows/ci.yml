@@ -1,0 +1,115 @@
+# Automatic checks at every push to GitHub:
+#   1. code analysis (shellcheck), formatting (shfmt), translations, unit tests
+#   2. real installation on each supported system, then tests of every service
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Code analysis and unit tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install shellcheck, shfmt, inotify-tools and qrencode
+        run: sudo apt-get update -q && sudo apt-get install -y -q shellcheck shfmt inotify-tools qrencode
+
+      - name: shellcheck (bash pitfalls)
+        run: make lint
+
+      - name: shfmt (formatting)
+        run: make fmt-check
+
+      - name: Every message translated into French
+        run: make i18n
+
+      - name: Unit tests
+        run: make unit
+
+  integration:
+    name: Tests on ${{ matrix.system }}
+    needs: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        system: ["debian:bookworm", "debian:trixie", "ubuntu:24.04", "ubuntu:26.04"]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Kernel modules (WireGuard, nftables)
+        run: sudo modprobe -a wireguard nf_tables
+
+      - name: Build the ${{ matrix.system }} image
+        run: docker build --build-arg IMAGE=${{ matrix.system }} -t seedtunnel-test tests/
+
+      - name: Start the test server (systemd)
+        run: |
+          docker run -d --name st --hostname seedtunnel-ci --privileged --cgroupns=host \
+            -v /sys/fs/cgroup:/sys/fs/cgroup:rw -v "$PWD":/opt/seedtunnel:ro seedtunnel-test
+          docker exec st systemctl is-system-running --wait || true
+
+      - name: Phase 1 — VPN, seedbox, links, SFTP, SSH keys, firewall, full disk
+        run: docker exec st /opt/seedtunnel/tests/integration.sh phase1
+
+      - name: From the outside — firewall, open port of a VPN client
+        run: |
+          ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' st)
+          # waits until something listens on port $2 ($1: command prefix, e.g.
+          # to look inside the network namespace of the VPN client)
+          wait_listen() {
+            for i in $(seq 1 10); do
+              if docker exec st $1 ss -ltn "sport = :$2" | grep -q LISTEN; then return 0; fi
+              sleep 1
+            done
+            echo "✘ nothing listens on port $2: the test would prove nothing"
+            return 1
+          }
+          nc -z -w 3 "$ip" 22 || { echo "✘ SSH unreachable"; exit 1; }
+          echo "✔ SSH reachable"
+          nc -z -w 3 "$ip" 443 || { echo "✘ HTTPS unreachable"; exit 1; }
+          echo "✔ HTTPS reachable"
+          # a service that is not allowed listens on 8080: it must stay unreachable
+          docker exec -d st nc -lk 8080
+          wait_listen "" 8080
+          if nc -z -w 3 "$ip" 8080; then
+            echo "✘ port 8080 is reachable: the firewall does not block"
+            exit 1
+          fi
+          echo "✔ port 8080 blocked by the firewall"
+          # open port of the VPN client « phone » (60001 → 10.8.0.2): a service
+          # listens inside the client, which sends everything through the
+          # tunnel, as with its real configuration (AllowedIPs = 0.0.0.0/0)
+          docker exec st sh -c 'ip netns exec st-client wg set wgc peer "$(ip netns exec st-client wg show wgc peers)" allowed-ips 0.0.0.0/0 && ip -n st-client route replace default dev wgc'
+          docker exec -d st ip netns exec st-client nc -lk 60001
+          wait_listen "ip netns exec st-client" 60001
+          nc -z -w 5 "$ip" 60001 || { echo "✘ port 60001 does not reach the VPN client"; exit 1; }
+          echo "✔ port 60001 reaches the VPN client through the tunnel"
+
+      - name: Phase 2 — diagnostics, backups, restore, removal
+        run: docker exec st /opt/seedtunnel/tests/integration.sh phase2
+
+      - name: Logs (on failure)
+        if: failure()
+        run: |
+          docker exec st cat /var/log/seedtunnel.log || true
+          docker exec st journalctl --no-pager -n 300 || true
+          # end of the logs also as annotations, readable from the summary
+          annotate() {
+            local t=$1 b
+            b=$(cat)
+            b=${b//'%'/'%25'}
+            b=${b//$'\n'/'%0A'}
+            echo "::error title=$t::$b"
+          }
+          docker exec st tail -n 60 /var/log/seedtunnel.log 2>&1 | annotate "seedtunnel.log (${{ matrix.system }})"
+          docker exec st journalctl --no-pager -p warning -n 40 2>&1 | annotate "system journal (${{ matrix.system }})"

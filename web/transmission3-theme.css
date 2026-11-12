@@ -1,0 +1,178 @@
+/* =============================================================================
+   seedtunnel — style of the web interface of Transmission 3 (Debian 12)
+   The colors of seedtunnel on the page of Transmission 3, as for Transmission
+   4 (transmission-theme.css): dark background, pink for what downloads, green
+   for what is shared, the name of seedtunnel in the bar at the top. Only
+   colors: the layout, the buttons and their icons stay those of Transmission.
+   nginx adds this file to the page as it passes (see nginx_generate_site in
+   lib/seedbox.sh): Transmission itself is not changed. If a later version
+   changes its page, its own colors simply come back where these rules no
+   longer match.
+   ============================================================================= */
+
+html { color-scheme: dark; }
+body, div#torrent_container, ul.torrent_list { background: #0f0e16; color: #e8e6ef; }
+
+/* --- bar at the top and bar of the filters ----------------------------------- */
+div#toolbar {
+  background: #0b0a10 no-repeat center / auto 26px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='150' height='30' viewBox='0 0 150 30'%3E%3Crect x='1' y='7' width='26' height='16' rx='3' fill='none' stroke='%23ff5fff' stroke-width='2'/%3E%3Ccircle cx='8' cy='15' r='2.6' fill='%23ff5fff'/%3E%3Ccircle cx='20' cy='15' r='2.6' fill='%23ff5fff'/%3E%3Cpath d='M8 15h12' stroke='%23ff5fff' stroke-width='2'/%3E%3Ctext x='35' y='21' font-family='DejaVu Sans,Segoe UI,Helvetica,Arial,sans-serif' font-size='17' font-weight='700' fill='%23ffffff'%3ESeed%3Ctspan fill='%23ff5fff'%3ETunnel%3C/tspan%3E%3C/text%3E%3C/svg%3E");
+  border-bottom: 1px solid #2b2838;
+  box-shadow: inset 0 -2px 0 rgba(255, 95, 255, .45);
+}
+@media (max-width: 700px) {
+  div#toolbar { background-image: none; }
+}
+div#toolbar > div#toolbar-separator { border-left-color: #2b2838; }
+div#toolbar > *.disabled { opacity: .35; }
+#statusbar {
+  background: #15141d;
+  border-bottom: 1px solid #2b2838;
+  color: #b9b4c7;
+}
+#statusbar select, #statusbar input#torrent_search,
+div.dialog_container input, div.dialog_container select, #prefs-dialog input, #prefs-dialog select,
+div#torrent_inspector select {
+  background: #0f0e16;
+  color: #e8e6ef;
+  border: 1px solid #3a3646;
+}
+#statusbar input#torrent_search.blur { color: #6c6878; }
+
+/* --- list of the torrents ---------------------------------------------------- */
+ul.torrent_list li.torrent { background: #0f0e16; color: #b9b4c7; border-bottom-color: #2b2838; }
+ul.torrent_list li.torrent.even { background: #13121b; }
+ul.torrent_list li.torrent.selected {
+  background: #2a1730;
+  box-shadow: inset 4px 0 0 #ff5fff;
+}
+ul.torrent_list li.torrent div.torrent_name,
+ul.torrent_list li.torrent.compact div.torrent_name { color: #ffffff; }
+ul.torrent_list li.torrent div.torrent_name.paused { color: #8a8499; }
+ul.torrent_list li.torrent div.torrent_progress_details.error,
+ul.torrent_list li.torrent div.torrent_peer_details.error { color: #ff6b81; }
+ul.torrent_list li.torrent.selected div.torrent_progress_details.error,
+ul.torrent_list li.torrent.selected div.torrent_peer_details.error { color: #ff9aa9; }
+
+/* progress bars: pink downloads, green shares, grey paused. Same selectors as
+   those of Transmission 3, which give each state its picture, its border and
+   the position of the picture (it would move the colors out of the bar). */
+ul.torrent_list div.torrent_progress_bar,
+ul.torrent_list div.torrent_progress_bar.incomplete.paused,
+ul.torrent_list div.torrent_progress_bar.incomplete.leeching,
+ul.torrent_list div.torrent_progress_bar.incomplete.leeching.queued {
+  background-image: none;
+  background-position: 0 0;
+  background-color: #1d1b27;
+  border-color: #3a3646;
+}
+ul.torrent_list div.torrent_progress_bar.complete.leeching {
+  background-position: 0 0;
+  background-image: linear-gradient(90deg, #c21fc2, #ff5fff);
+  border-color: #ff5fff;
+}
+ul.torrent_list div.torrent_progress_bar.complete.leeching.queued,
+ul.torrent_list div.torrent_progress_bar.complete.seeding.queued {
+  background-image: none;
+  background-position: 0 0;
+  background-color: #af00af;
+  border-color: #af00af;
+}
+ul.torrent_list div.torrent_progress_bar.complete.seeding {
+  background-position: 0 0;
+  background-image: linear-gradient(90deg, #5fe08a, #a6f5c1);
+  border-color: #5fe08a;
+}
+ul.torrent_list div.torrent_progress_bar.incomplete.seeding {
+  background-position: 0 0;
+  background-image: linear-gradient(90deg, #2ea660, #5fe08a);
+  border-color: #5fe08a;
+}
+ul.torrent_list div.torrent_progress_bar.complete.paused {
+  background-image: none;
+  background-position: 0 0;
+  background-color: #4a4558;
+  border-color: #4a4558;
+}
+ul.torrent_list div.torrent_progress_bar.complete.magnet,
+ul.torrent_list div.torrent_progress_bar.incomplete.magnet {
+  background-image: none;
+  background-position: 0 0;
+  background-color: #ffd75f;
+  border-color: #ffd75f;
+}
+/* the arrows of the speeds are dark pictures */
+#statusbar #speed-up-icon, #statusbar #speed-dn-icon { filter: invert(1); }
+
+/* --- inspector (details of a torrent) ---------------------------------------- */
+div#torrent_inspector {
+  background: #15141d;
+  color: #e8e6ef;
+  border-left-color: #2b2838;
+}
+div#torrent_inspector h2, div#torrent_inspector .prefs-section-title { color: #ff5fff; }
+div#torrent_inspector .inspector_label, div#torrent_inspector .inspector_row > div:first-child { color: #8a8499; }
+div#torrent_inspector #inspector-tabs-wrapper #inspector-tabs > * { background-color: #221f2e; border-color: #3a3646; }
+div#torrent_inspector #inspector-tabs-wrapper #inspector-tabs > *.selected,
+div#torrent_inspector #inspector-tabs-wrapper #inspector-tabs > *:active { background-color: #4a2a52; }
+div#torrent_inspector li.inspector_tracker_entry.odd,
+div#torrent_inspector li.inspector_torrent_file_list_entry.even,
+tr.inspector_peer_entry.odd { background: #1b1a25; }
+div#torrent_inspector div.tracker_host,
+div#torrent_inspector div.inspector_torrent_file_list_entry_name { color: #e8e6ef; }
+div#torrent_inspector ul.tier_list .tracker_activity,
+div#torrent_inspector ul.tier_list table,
+div#torrent_inspector li.inspector_torrent_file_list_entry.skip,
+div#torrent_inspector div.inspector_torrent_file_list_entry_progress { color: #8a8499; }
+div.file-priority-radiobox > * { background-color: #221f2e; border-color: #3a3646; }
+div.file-priority-radiobox > *.selected, div.file-priority-radiobox > *:active { background-color: #4a2a52; }
+
+/* --- bar at the bottom: buttons kept light, their icons are dark ------------- */
+div.torrent_footer {
+  background: #0b0a10;
+  border-top: 1px solid #2b2838;
+  color: #b9b4c7;
+}
+div.torrent_footer > div { border-color: #3a3646; }
+div.torrent_footer #settings_menu, div.torrent_footer #prefs-button,
+div.torrent_footer #turtle-button, div.torrent_footer #compact-button { background-color: #d9d6e3; }
+div.torrent_footer #settings_menu.selected, div.torrent_footer #prefs-button.selected,
+div.torrent_footer #turtle-button.selected, div.torrent_footer #compact-button.selected { background-color: #ff9fff; }
+
+/* --- windows: removal, upload, moving, preferences, menus -------------------- */
+div.dialog_container { color: #e8e6ef; }
+div.dialog_container div.dialog_window {
+  background: #15141d;
+  border: 1px solid #2b2838;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, .6);
+}
+div.dialog_container div.dialog_window h2.dialog_heading { color: #ffffff; }
+div.dialog_container div.dialog_window a {
+  background: #221f2e;
+  color: #e8e6ef;
+  border-color: #4a4558;
+}
+div.dialog_container div.dialog_window a:hover { border-color: #ff5fff; }
+.ui-widget-content, .ui-dialog, .ui-menu, .ui-tabs .ui-tabs-panel {
+  background: #15141d;
+  color: #e8e6ef;
+  border-color: #2b2838;
+}
+.ui-widget-header, .ui-tabs .ui-tabs-nav {
+  background: #0b0a10;
+  color: #e8e6ef;
+  border-color: #2b2838;
+}
+.ui-state-default, .ui-widget-content .ui-state-default, .ui-widget-header .ui-state-default, .ui-button {
+  background: #221f2e;
+  color: #e8e6ef;
+  border-color: #3a3646;
+}
+.ui-state-default a, .ui-state-default a:link, .ui-state-default a:visited { color: #e8e6ef; }
+.ui-state-active, .ui-widget-content .ui-state-active, .ui-widget-header .ui-state-active,
+.ui-state-hover, .ui-state-focus, .ui-menu .ui-state-focus, .ui-menu .ui-state-active {
+  background: #4a2a52;
+  color: #ffffff;
+  border-color: #ff5fff;
+}
+.ui-state-active a, .ui-state-active a:link, .ui-state-active a:visited { color: #ffffff; }
+.ui-widget-overlay { background: #000000; opacity: .6; }
