@@ -231,6 +231,75 @@ ui_paragraph() {
     for part in "${UI_LINES[@]}"; do printf '  %s\n' "${part//$'\x01'/ }"; done
 }
 
+# ui_wrap_words TEXT N → UI_LINES: TEXT in lines of N characters at most, cut
+# between words, the words keeping their colors (each colored part of TEXT is
+# one word: a port, an address). A word longer than a line goes alone on its
+# line, whole. French punctuation glued (ui_glue): \x01 to put back as spaces.
+ui_wrap_words() {
+    local max=$2 word line="" length=0
+    local -a words=()
+    UI_LINES=()
+    ui_glue "$1"
+    read -r -a words <<<"$UI_GLUED"
+    for word in "${words[@]}"; do
+        ui_len "$word"
+        if ((length == 0)); then
+            line=$word
+            length=$UI_LEN
+        elif ((length + 1 + UI_LEN <= max)); then
+            line+=" $word"
+            length=$((length + 1 + UI_LEN))
+        else
+            UI_LINES+=("$line")
+            line=$word
+            length=$UI_LEN
+        fi
+    done
+    if ((length > 0)); then UI_LINES+=("$line"); fi
+}
+
+# ui_group TITLE [WIDTH] — a part of a screen: its title (« ● » in pink, the
+# title in bold), then the fields added with ui_field_add: labels in grey,
+# padded to WIDTH (the widest label of the screen, so that every part lines
+# up; their own widest by default), values wrapped under themselves. Less
+# than 28 columns left for the values: each value under its label.
+ui_group() {
+    local title=$1 width=${2:-0} i room part name indent first=1
+    for i in "${!UI_FIELD_LABELS[@]}"; do
+        ui_len "${UI_FIELD_LABELS[i]}"
+        if ((UI_LEN > width)); then width=$UI_LEN; fi
+    done
+    ui_wrap_words "$title" $((UI_WIDTH - 4))
+    for part in "${UI_LINES[@]}"; do
+        if ((first)); then
+            printf '  %s●%s %s%s%s\n' "$C_BRAND$C_BOLD" "$C_RESET" "$C_BOLD" "${part//$'\x01'/ }" "$C_RESET"
+            first=0
+        else
+            printf '    %s%s%s\n' "$C_BOLD" "${part//$'\x01'/ }" "$C_RESET"
+        fi
+    done
+    room=$((UI_WIDTH - 4 - width - 2))
+    for i in "${!UI_FIELD_LABELS[@]}"; do
+        if ((room >= 28)); then
+            ui_pad "${UI_FIELD_LABELS[i]}" "$width"
+            name="    $C_GREY$UI_PAD$C_RESET  "
+            printf -v indent '%*s' $((4 + width + 2)) ''
+            ui_wrap_words "${UI_FIELD_VALUES[i]}" "$room"
+        else
+            printf '    %s%s%s\n' "$C_GREY" "${UI_FIELD_LABELS[i]}" "$C_RESET"
+            name="      "
+            indent=$name
+            ui_wrap_words "${UI_FIELD_VALUES[i]}" $((UI_WIDTH - 6))
+        fi
+        for part in "${UI_LINES[@]}"; do
+            printf '%s%s\n' "$name" "${part//$'\x01'/ }"
+            name=$indent
+        done
+    done
+    UI_FIELD_LABELS=()
+    UI_FIELD_VALUES=()
+}
+
 # ui_glue TEXT → UI_GLUED: the spaces before « : », « ? », « ! », « ; » and
 # « » », and after « « », replaced by \x01 for the time of a ui_wrap (put back
 # as spaces when printed)

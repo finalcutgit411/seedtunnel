@@ -536,7 +536,7 @@ vpn_client_screen() {
     while true; do
         banner
         section 'Client "%s"' "$name"
-        text vpn_client_help | ui_text
+        if seedbox_installed; then vpn_client_guide "$port" 1; else vpn_client_guide "$port" 0; fi
         echo
         ui_menu_add 1 "$(t 'Show the file (to copy and paste)')"
         if seedbox_installed; then ui_menu_add 2 "$(t 'One-time download link for the file')"; fi
@@ -550,6 +550,33 @@ vpn_client_screen() {
             q) ui_quit ;;
         esac
     done
+}
+
+# vpn_client_guide PORT LINK — in the menus, what to do with the file of a
+# client, in three parts (to install the tunnel, the port for torrents, the
+# kill switch). LINK: 1 when the key [2] (one-time link) is there.
+vpn_client_guide() {
+    local port=$1 link=$2 width=0 label
+    for label in "$(t 'Phone')" "$(t 'Computer')" "$(t 'Open port')" "$(t 'Incoming')" Windows Android qBittorrent; do
+        ui_len "$label"
+        if ((UI_LEN > width)); then width=$UI_LEN; fi
+    done
+    ui_field_add "$(t 'Phone')" "$(t 'WireGuard → « + » → « Scan from QR code »')"
+    if ((link)); then
+        ui_field_add "$(t 'Computer')" "$(t 'WireGuard → « Import tunnel(s) from file »: the file through [2] or [1]')"
+    else
+        ui_field_add "$(t 'Computer')" "$(t 'WireGuard → « Import tunnel(s) from file »: the file through [1]')"
+    fi
+    ui_group "$(t 'Install the tunnel')" "$width"
+    echo
+    ui_field_add "$(t 'Open port')" "$(t '%s (TCP and UDP)' "$C_CYAN$port$C_RESET")"
+    ui_field_add "$(t 'Incoming')" "$(t '%s → this client, while it is connected: set this port in your torrent program' "$C_CYAN$VPN_PUBLIC_ADDRESS:$port$C_RESET")"
+    ui_group "$(t 'Port for torrents')" "$width"
+    echo
+    ui_field_add Windows "$(t 'WireGuard → Edit the tunnel → tick « Block untunneled traffic (kill-switch) »')"
+    ui_field_add Android "$(t 'Settings → VPN → WireGuard (gear) → « Always-on VPN » and « Block connections without VPN »')"
+    ui_field_add qBittorrent "$(t 'Options → Advanced → Network interface → the WireGuard tunnel')"
+    ui_group "$(t 'Kill switch: if the tunnel drops, nothing goes out without it')" "$width"
 }
 
 vpn_client_file() {

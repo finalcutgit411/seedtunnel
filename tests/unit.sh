@@ -6041,8 +6041,8 @@ vpn_client_screens() (
     [[ $(grep -A1 -- "--- clear" <<<"$out" | sed -n 2p) == *█* ]] || return 1
     # (the key line is the prompt of « read »: shown only on a terminal)
     [[ $(grep -A1 '█' <<<"$out" | tail -n 1) == "--- clear" ]] && declare -f vpn_qr_screen | grep -q "ui_pause next tight" || return 1
-    # then what to do, the keys, the file shown by 1
-    [[ $out == *"Phone    : WireGuard app"*"[1] Show the file (to copy and paste)"*"[Interface]"* ]] || return 1
+    # then what to do, in three parts, the keys, the file shown by 1
+    [[ $out == *"● Install the tunnel"*"Phone"*"« Scan from QR code »"*"through"*"[1]"*"● Port for torrents"*"● Kill switch"*"[1] Show the file (to copy and paste)"*"[Interface]"* ]] || return 1
     [[ $out != *"[2]"* && $out != *"[y/N]"* ]] || return 1
     # with the seedbox: 2 too
     seedbox_installed() { return 0; }
@@ -6299,6 +6299,39 @@ sftp_profile_steps() (
     [[ $out == *'Sous Windows : C:\Users\VOTRE-NOM\.ssh (le profil WinSCP'* ]]
 )
 
+# The screen of a client in the menus: three parts with their title, values
+# aligned and wrapped under themselves (under their label on a narrow
+# screen), the port and the address in cyan even on a wrapped line, nothing
+# wider than the screen, no « … »
+vpn_client_guide_layout() (
+    load
+    local out line
+    C_CYAN=$'\e[36m' C_RESET=$'\e[0m' C_GREY=$'\e[2m' C_BOLD=$'\e[1m' C_BRAND=$'\e[35m'
+    VPN_PUBLIC_ADDRESS=203.0.113.10
+    for UI_COLUMNS in 80 40; do
+        ui_width
+        out=$(vpn_client_guide 60004 1)
+        printf '%s\n' "$out"
+        while IFS= read -r line; do
+            ui_len "$line"
+            ((UI_LEN <= UI_WIDTH)) && [[ $line != *…* ]] || return 1
+        done <<<"$out"
+        [[ $out == *"●$C_RESET ${C_BOLD}Install the tunnel"*"●$C_RESET ${C_BOLD}Port for torrents"*"●$C_RESET ${C_BOLD}Kill switch"* ]] || return 1
+        [[ $out == *"${C_CYAN}60004$C_RESET (TCP and UDP)"*"${C_CYAN}203.0.113.10:60004$C_RESET → this client"* ]] || return 1
+        [[ $(tr -s ' \n' ' ' <<<"$out") == *"through [2] or [1]"* ]] || return 1
+    done
+    # at 80 columns, the values in one column; at 40, under their labels
+    UI_COLUMNS=80
+    ui_width
+    grep -qF "    ${C_GREY}Open port  ${C_RESET}  ${C_CYAN}60004" <<<"$(vpn_client_guide 60004 1)" || return 1
+    UI_COLUMNS=40
+    ui_width
+    [[ $(vpn_client_guide 60004 0 | grep -A1 "Open port" | sed -n 2p) == "      ${C_CYAN}60004$C_RESET (TCP and UDP)" ]] || return 1
+    # without the seedbox: no key [2] to speak of
+    out=$(vpn_client_guide 60004 0 | tr -s ' \n' ' ')
+    [[ $out == *"through [1]"* && $out != *"[2]"* ]]
+)
+
 # Cards and summaries before an action: green with « ● »; « ✔ » stays for
 # what is done
 ui_box_good_and_ok() (
@@ -6402,6 +6435,7 @@ check "choices with a note: beside or under, nothing cut (80, 40, 30)" ui_choice
 check "SSH keys of the list: two short lines in the menus" sftp_key_list_lines
 check "public key asked: a private key pasted is named, not kept" sftp_private_key_pasted
 check "frames: cards and summaries green with « ● », « ✔ » when done" ui_box_good_and_ok
+check "client screen: three parts, values under themselves, colors kept, nothing cut" vpn_client_guide_layout
 check "domain menu: same name, certificate kept without a new request" domain_change_same_name_keeps_certificate
 check "domain menu: warning and confirmation before replacing the certificate" domain_change_warns_before_replacing_certificate
 check "domain menu: B (or Q) goes back when the name points elsewhere" domain_change_back_when_name_points_elsewhere

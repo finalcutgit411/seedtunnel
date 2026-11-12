@@ -325,7 +325,7 @@ screen_client() {
     top client
     ui_crumbs VPN "$(t 'Client "%s"' "$name")"
     echo
-    text vpn_client_help | ui_text | print_lines
+    vpn_client_guide "$port" 1 | print_lines
     echo
     ui_menu_add 1 "$(t 'Show the file (to copy and paste)')"
     ui_menu_add 2 "$(t 'One-time download link for the file')"

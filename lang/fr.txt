@@ -2444,3 +2444,44 @@ fr: VOTRE-NOM
 
 en: Linux or macOS: your public key is in ~/.ssh/id_ed25519.pub (no key? ssh-keygen -t ed25519).
 fr: Linux ou macOS : votre clé publique est dans ~/.ssh/id_ed25519.pub (pas de clé ? ssh-keygen -t ed25519).
+
+# --- Screen of a client in the menus, in three parts (1.0.0) ----------------------
+
+en: Install the tunnel
+fr: Installer le tunnel
+
+en: Phone
+fr: Téléphone
+
+en: Computer
+fr: Ordinateur
+
+en: WireGuard → « + » → « Scan from QR code »
+fr: WireGuard → « + » → « Scanner un code QR »
+
+en: WireGuard → « Import tunnel(s) from file »: the file through [2] or [1]
+fr: WireGuard → « Importer un tunnel depuis un fichier » : le fichier par [2] ou [1]
+
+en: WireGuard → « Import tunnel(s) from file »: the file through [1]
+fr: WireGuard → « Importer un tunnel depuis un fichier » : le fichier par [1]
+
+en: Port for torrents
+fr: Port pour le torrent
+
+en: Incoming
+fr: Entrées
+
+en: %s → this client, while it is connected: set this port in your torrent program
+fr: %s → ce client, quand il est connecté : mettez ce port dans votre logiciel torrent
+
+en: Kill switch: if the tunnel drops, nothing goes out without it
+fr: Kill switch : si le tunnel tombe, rien ne sort sans lui
+
+en: WireGuard → Edit the tunnel → tick « Block untunneled traffic (kill-switch) »
+fr: WireGuard → Modifier le tunnel → cochez la case « kill-switch »
+
+en: Settings → VPN → WireGuard (gear) → « Always-on VPN » and « Block connections without VPN »
+fr: Paramètres → VPN → WireGuard (roue dentée) → « VPN permanent » et « Bloquer les connexions sans VPN »
+
+en: Options → Advanced → Network interface → the WireGuard tunnel
+fr: Options → Avancé → Interface réseau → le tunnel WireGuard
