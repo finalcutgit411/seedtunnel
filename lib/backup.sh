@@ -416,11 +416,13 @@ backup_file_name() {
     printf '%s/seedtunnel-%s-%s%s.tar.gz.enc' "$BACKUP_DIR" "$(hostname -s)" "$(date +%Y%m%d-%H%M%S)" "${1-}"
 }
 
-# Most recent backup (manual or weekly)
+# The newest backup of the list (seedtunnel backup list): made on this server,
+# or copied into /root or a home folder (the one a new server was restored
+# from, for example). Status 1: none.
 backup_latest() {
-    local file
-    file=$(ls -1t "$BACKUP_DIR"/*.tar.gz.enc 2>/dev/null | head -n 1 || true)
-    [[ -n $file ]] && printf '%s' "$file"
+    local -a files
+    mapfile -t files < <(backup_candidates)
+    ((${#files[@]})) && printf '%s' "${files[0]}"
 }
 
 # Age of a file in calendar days: 0 today, 1 yesterday… (empty if it does not
@@ -714,11 +716,19 @@ backup_auto_disable_asked() {
     backup_auto_disable
 }
 
+# The passphrase saved on the server goes with it: said, the backups already
+# made then open only with the one written down
 backup_auto_disable() {
+    local passphrase=0
+    if [[ -e $BACKUP_PASSPHRASE_FILE ]]; then passphrase=1; fi
     log_run 'Turning the weekly backup off' systemctl disable --now seedtunnel-backup.timer
     rm -f "$BACKUP_SERVICE" "$BACKUP_TIMER" "$BACKUP_PASSPHRASE_FILE"
     systemctl daemon-reload 2>/dev/null || true
-    ok 'Weekly backup off (the existing backups are kept in %s).' "$BACKUP_DIR"
+    if ((passphrase)); then
+        ok 'Weekly backup off, its passphrase deleted from the server: the backups already made (kept in %s) open only with the one you wrote down.' "$BACKUP_DIR"
+    else
+        ok 'Weekly backup off (the existing backups are kept in %s).' "$BACKUP_DIR"
+    fi
 }
 
 # backup_removal_note vpn|seedbox — said before removing the other one: when
@@ -1428,7 +1438,7 @@ restore_cli() {
 }
 
 restore_main() {
-    local file=${1-} list bad stamp was=$INTERACTIVE kept_passphrase=0 kept_firewall=0 kept_links=0 kept previous="" tries=0
+    local file=${1-} list bad stamp was=$INTERACTIVE kept_passphrase=0 kept_firewall=0 kept_links=0 kept previous="" tries=0 agreed=1
     WENT_BACK=0
     [[ -n $file ]] || die 'Usage: seedtunnel restore FILE'
     [[ -r $file ]] || die 'File not found: %s' "$file"
@@ -1541,8 +1551,16 @@ restore_main() {
         say 'The SFTP account %s takes back the name of the backup: %s.' "$RESTORE_RENAME_FROM" "$RESTORE_RENAME_TO"
     fi
     echo
-    danger "$(t 'Restore a backup')" "$(t 'The current settings of seedtunnel are replaced by those of the backup (a copy of them is kept in /etc).')"
-    if ! confirm 'Restore? The current settings of seedtunnel will be replaced' n; then
+    # a copy is kept only when there are settings to keep (none on a new
+    # server)
+    if restore_has_settings "$APP_STATE_DIR"; then
+        danger "$(t 'Restore a backup')" "$(t 'The current settings of seedtunnel are replaced by those of the backup (a copy of them is kept in /etc).')"
+        confirm 'Restore? The current settings of seedtunnel will be replaced' n || agreed=0
+    else
+        danger "$(t 'Restore a backup')" "$(t 'The settings of the backup are put in place: this server has none of its own yet.')"
+        confirm 'Restore the backup on this server?' n || agreed=0
+    fi
+    if ((!agreed)); then
         backup_cleanup
         trap - EXIT INT TERM
         WENT_BACK=1

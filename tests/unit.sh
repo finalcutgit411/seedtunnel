@@ -44,6 +44,8 @@ load() {
         . "$ROOT/lib/$library.sh"
     done
     i18n_load en
+    # never the backups of the machine that runs the tests (/root, /home)
+    BACKUP_COPIED=()
     # the tests do not run as root: the command, as the current user
     runuser() {
         while [[ $1 != -- ]]; do shift; done
@@ -497,6 +499,31 @@ vpn_change_failed_then_retried() (
     (($(wc -l <"$WORK/syncconf") == 2))
 )
 
+# A name that differs from a client only by the case of its letters is that
+# client: refused by the command and by the menu (Windows cannot keep
+# PHONE.conf beside phone.conf, and the two are mixed up on screen)
+vpn_client_names_ignore_case() (
+    back_load
+    mkdir -p "$VPN_CLIENTS_DIR"
+    (
+        CLIENT_NUMBER=1
+        CLIENT_PUBLIC_KEY="yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk="
+        CLIENT_PRESHARED_KEY=$CLIENT_PUBLIC_KEY
+        state_write "$VPN_CLIENTS_DIR/phone.env" CLIENT_NUMBER CLIENT_PUBLIC_KEY CLIENT_PRESHARED_KEY
+    )
+    [[ $(vpn_client_same_name PHONE) == phone && $(vpn_client_same_name Phone) == phone ]] || return 1
+    ! vpn_client_same_name tablet || return 1
+    if (vpn_add_client PHONE) >"$WORK/case.out" 2>&1; then
+        cat "$WORK/case.out"
+        return 1
+    fi
+    grep -q 'Client "phone" already exists.' "$WORK/case.out" && [[ ! -e $VPN_CLIENTS_DIR/PHONE.env ]] || return 1
+    local name
+    answers "PHONE" "tablet"
+    vpn_ask_client_name name >"$WORK/case.out" 2>&1 || return 1
+    [[ $name == tablet ]] && grep -q 'Client "phone" already exists.' "$WORK/case.out"
+)
+
 # --- VPN: NAT rules loaded by systemd, not by wg-quick (AppArmor, Ubuntu 26.04) ----
 
 vpn_nat_loaded_by_systemd() (
@@ -513,6 +540,39 @@ vpn_nat_loaded_by_systemd() (
     grep -qx '\[Service\]' "$WORK/dropin.test" \
         && grep -qxF "ExecStartPost=/usr/sbin/nft -f $VPN_NAT_RULES" "$WORK/dropin.test" \
         && grep -qxF "ExecStopPost=-/usr/sbin/nft delete table ip seedtunnel" "$WORK/dropin.test"
+)
+
+# The clients cannot reach each other, and nothing from outside the tunnel
+# reaches them but the replies and their open port. In the table of the VPN:
+# there whenever the VPN runs, firewall on or off. Policy « accept »: the
+# traffic of other programs (Docker) is not cut.
+vpn_clients_isolated_and_protected() (
+    load
+    VPN_STATE_DIR="$WORK/vpn-forward"
+    VPN_CLIENTS_DIR="$VPN_STATE_DIR/clients"
+    VPN_OUT_INTERFACE=ens3
+    rm -rf "$VPN_STATE_DIR"
+    mkdir -p "$VPN_CLIENTS_DIR"
+    (
+        CLIENT_NUMBER=1
+        CLIENT_PUBLIC_KEY="yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk="
+        CLIENT_PRESHARED_KEY=$CLIENT_PUBLIC_KEY
+        state_write "$VPN_CLIENTS_DIR/phone.env" CLIENT_NUMBER CLIENT_PUBLIC_KEY CLIENT_PRESHARED_KEY
+    )
+    local rules forward
+    rules=$(vpn_generate_nat_rules) || return 1
+    # the rules of the chain, without comments nor indentation
+    forward=$(awk '/^    chain forward \{/ { on = 1; next }
+        on && /^    \}/ { exit }
+        on && !/^[[:space:]]*(#|$)/ { sub(/^[[:space:]]+/, ""); print }' <<<"$rules")
+    printf '%s\n' "$forward"
+    [[ $forward == 'type filter hook forward priority filter; policy accept;
+iifname "wg0" oifname "wg0" drop
+oifname "wg0" ct state established,related accept
+oifname "wg0" ct status dnat accept
+oifname "wg0" drop' ]] || return 1
+    # the open port of the client is still forwarded to it
+    grep -qF 'iifname "ens3" meta l4proto { tcp, udp } th dport 60001 dnat to 10.8.0.2' <<<"$rules"
 )
 
 # The addition is written, and systemd reloaded, before the VPN starts
@@ -1486,6 +1546,167 @@ transmission_waits_for_data_disk() (
     load
     SEEDBOX_DATA_DIR=/srv/seedbox
     transmission_generate_dropin | grep -qxF "RequiresMountsFor=/srv/seedbox"
+)
+
+# Documents kept when the account was deleted (then owned by root): given back
+# to the account created again (restore, new installation), never through a
+# link; a hard link to a download leaves the download to its owner. Nothing
+# done when they already belong to the account.
+sftp_documents_given_back() (
+    load
+    install_without_owner
+    local data="$WORK/data-docs" calls="$WORK/chown-calls"
+    rm -rf "$data" "$WORK/fake-bin"
+    SEEDBOX_DATA_DIR=$data
+    SEEDBOX_USER=lancelot
+    mkdir -p "$data/documents/sub" "$data/complete" "$WORK/fake-bin"
+    echo a >"$data/documents/a.txt"
+    echo b >"$data/documents/sub/b.txt"
+    ln -s /etc/passwd "$data/documents/link"
+    echo iso >"$data/complete/dl.iso"
+    # a download belongs to the account of Transmission, never to root
+    if ((EUID == 0)); then command chown nobody "$data/complete/dl.iso"; fi
+    ln "$data/complete/dl.iso" "$data/documents/dl.iso"
+    printf '#!/bin/sh\nprintf "%%s\\n" "$@" >>"%s"\n' "$calls" >"$WORK/fake-bin/chown"
+    chmod +x "$WORK/fake-bin/chown"
+    : >"$calls"
+    PATH="$WORK/fake-bin:$PATH" seedbox_apply_dirs >"$WORK/docs.out" 2>&1 || {
+        cat "$WORK/docs.out"
+        return 1
+    }
+    cat "$WORK/docs.out" "$calls"
+    grep -q "Giving the documents back to lancelot" "$WORK/docs.out" || return 1
+    grep -qx -- -h "$calls" && grep -qx lancelot:lancelot "$calls" || return 1
+    local path
+    for path in documents documents/a.txt documents/sub documents/sub/b.txt documents/link; do
+        grep -qxF "$data/$path" "$calls" || {
+            echo "not given back: $path"
+            return 1
+        }
+    done
+    ! grep -q 'dl.iso' "$calls" || return 1
+    # already the owner (the account was not deleted): nothing
+    SEEDBOX_USER=$(id -un)
+    : >"$calls"
+    PATH="$WORK/fake-bin:$PATH" seedbox_apply_dirs >"$WORK/docs.out" 2>&1 || return 1
+    [[ ! -s $calls ]] && ! grep -q "Giving the documents back" "$WORK/docs.out"
+)
+
+# --- Transmission: settings private, no program run at the end of a download ---
+
+# No program run by Transmission: the setting of Transmission 3, and the two
+# more of Transmission 4 (never written for Transmission 3, which would drop
+# them: Transmission restarted at every run)
+transmission_scripts_turned_off() (
+    load
+    local file="$WORK/settings-scripts.json" tested
+    TRANSMISSION_DROPIN="$WORK/dropin-scripts/seedtunnel.conf"
+    TRANSMISSION_STATE_DIR="$WORK/tr-state-scripts"
+    SEEDBOX_DATA_DIR="$WORK/data"
+    SEEDBOX_USER=lancelot
+    SEEDBOX_HASH_TRANSMISSION='{0123456789abcdef'
+    mkdir -p "$TRANSMISSION_STATE_DIR"
+    transmission_settings_file() { echo "$file"; }
+    diskguard_stopped() { return 1; }
+    chown() { :; }
+    systemctl() { return 0; }
+    for tested in "4.1.1+dfsg-1ubuntu1.1" "4.0.6-1" "3.00-2.1+deb12u1"; do
+        printf '%s\n' '{"script-torrent-done-enabled": true, "script-torrent-done-filename": "/srv/seedbox/documents/x"}' >"$file"
+        dpkg-query() { echo "$tested"; }
+        seedbox_apply_transmission &>/dev/null || return 1
+        case $tested in
+            3.*) [[ $(jq -c '[."script-torrent-done-enabled", has("script-torrent-added-enabled"), has("script-torrent-done-seeding-enabled")]' "$file") == '[false,false,false]' ]] ;;
+            *) [[ $(jq -c '[."script-torrent-done-enabled", ."script-torrent-added-enabled", ."script-torrent-done-seeding-enabled"]' "$file") == '[false,false,false]' ]] ;;
+        esac || {
+            echo "$tested: $(<"$file")"
+            return 1
+        }
+    done
+)
+
+# Nothing run from the folders where Transmission or the SFTP account write;
+# its settings private again each time it stops, by its own account
+transmission_dropin_noexec_and_private() (
+    load
+    SEEDBOX_DATA_DIR=/srv/seedbox
+    local dropin
+    dropin=$(transmission_generate_dropin /etc/transmission-daemon/settings.json)
+    grep -qxF "NoExecPaths=-/var/lib/transmission-daemon -/etc/transmission-daemon -/srv/seedbox" <<<"$dropin" \
+        && grep -qxF "ExecStopPost=-/bin/chmod 600 /etc/transmission-daemon/settings.json" <<<"$dropin" || {
+        echo "$dropin"
+        return 1
+    }
+    # run by the account of Transmission (no « + »: never as root)
+    ! grep -q '^ExecStopPost=[-@:!]*+' <<<"$dropin"
+)
+
+# After each run, its settings in 600 and its folder closed to the others,
+# changed by its own account
+transmission_settings_made_private() (
+    load
+    install_without_owner
+    local dir="$WORK/tr-private"
+    rm -rf "$dir"
+    mkdir -p "$dir/state" "$dir/dropin"
+    printf '{"umask": 2}\n' >"$dir/settings.json"
+    chmod 664 "$dir/settings.json"
+    chmod 755 "$dir/state"
+    TRANSMISSION_STATE_DIR="$dir/state"
+    TRANSMISSION_DROPIN="$dir/dropin/seedtunnel.conf"
+    SEEDBOX_DATA_DIR="$WORK/data"
+    transmission_settings_file() { echo "$dir/settings.json"; }
+    transmission_desired_settings() { echo '{"umask": 2}'; }
+    transmission_knows_transports() { return 1; }
+    transmission_knows_more_scripts() { return 1; }
+    diskguard_stopped() { return 1; }
+    systemctl() { :; }
+    chown() { :; }
+    : >"$WORK/runuser-calls"
+    seedbox_apply_transmission >"$WORK/tr-private.out" 2>&1 || {
+        cat "$WORK/tr-private.out"
+        return 1
+    }
+    [[ $(stat -c %a "$dir/settings.json") == 600 && $(stat -c %a "$dir/state") == 750 ]] || {
+        stat -c '%a %n' "$dir/settings.json" "$dir/state"
+        return 1
+    }
+    (($(grep -cx "runuser $TRANSMISSION_USER" "$WORK/runuser-calls") == 2))
+)
+
+# Diagnostics: a program set to run, or settings readable by all, said
+doctor_transmission_settings_checked() (
+    load
+    local dir="$WORK/tr-doctor"
+    rm -rf "$dir"
+    mkdir -p "$dir/state"
+    chmod 750 "$dir/state"
+    TRANSMISSION_STATE_DIR="$dir/state"
+    transmission_settings_file() { echo "$dir/settings.json"; }
+    printf '%s\n' '{"script-torrent-done-enabled": false, "script-torrent-added-enabled": false}' >"$dir/settings.json"
+    chmod 600 "$dir/settings.json"
+    DOCTOR_WARNINGS=0
+    doctor_transmission_settings >"$WORK/trd.out" 2>&1
+    ((DOCTOR_WARNINGS == 0)) && grep -q "Settings of Transmission private, no program run by it" "$WORK/trd.out" || {
+        cat "$WORK/trd.out"
+        return 1
+    }
+    chmod 664 "$dir/settings.json"
+    DOCTOR_WARNINGS=0
+    doctor_transmission_settings >"$WORK/trd.out" 2>&1
+    ((DOCTOR_WARNINGS == 1)) && grep -q "can be read by every account" "$WORK/trd.out" || {
+        cat "$WORK/trd.out"
+        return 1
+    }
+    chmod 600 "$dir/settings.json"
+    chmod 755 "$dir/state"
+    DOCTOR_WARNINGS=0
+    doctor_transmission_settings >"$WORK/trd.out" 2>&1
+    ((DOCTOR_WARNINGS == 1)) || return 1
+    printf '%s\n' '{"script-torrent-done-enabled": false, "script-torrent-added-enabled": true}' >"$dir/settings.json"
+    DOCTOR_WARNINGS=0
+    doctor_transmission_settings >"$WORK/trd.out" 2>&1
+    cat "$WORK/trd.out"
+    ((DOCTOR_WARNINGS == 1)) && grep -q "runs a program that seedtunnel did not set (script-torrent-added-enabled)" "$WORK/trd.out"
 )
 
 # --- ports 80/443: every program listening is checked -----------------------------
@@ -2493,6 +2714,34 @@ doctor_nat_checks_interface() (
     ((DOCTOR_ERRORS == 0))
 )
 
+# Rules loaded by an older version (no protection of the clients): said, with
+# the command that puts them in place
+doctor_sees_clients_unprotected() (
+    load
+    VPN_PORT=51820
+    systemctl() { return 0; }
+    wg() { echo 51820; }
+    sysctl() { echo 1; }
+    vpn_count_clients() { echo 1; }
+    vpn_connected_count() { echo 0; }
+    default_interface() { echo ens3; }
+    nft() { printf '%s\n' 'table ip seedtunnel {' '	chain postrouting {' '		ip saddr 10.8.0.0/24 oifname "ens3" masquerade' '	}' '}'; }
+    DOCTOR_ERRORS=0 DOCTOR_WARNINGS=0
+    doctor_vpn_nat >"$WORK/protect.out" 2>&1
+    cat "$WORK/protect.out"
+    ((DOCTOR_ERRORS == 0 && DOCTOR_WARNINGS == 1)) && grep -q "Clients of the VPN not protected" "$WORK/protect.out" || return 1
+    # the rules of this version: fine
+    nft() {
+        printf '%s\n' 'table ip seedtunnel {' '	chain postrouting {' '		ip saddr 10.8.0.0/24 oifname "ens3" masquerade' '	}' \
+            '	chain forward {' '		type filter hook forward priority filter; policy accept;' '		iifname "wg0" oifname "wg0" drop' \
+            '		oifname "wg0" ct state established,related accept' '		oifname "wg0" ct status dnat accept' '		oifname "wg0" drop' '	}' '}'
+    }
+    DOCTOR_ERRORS=0 DOCTOR_WARNINGS=0
+    doctor_vpn_nat >"$WORK/protect.out" 2>&1
+    cat "$WORK/protect.out"
+    ((DOCTOR_ERRORS == 0 && DOCTOR_WARNINGS == 0)) && grep -q "clients of the VPN protected" "$WORK/protect.out"
+)
+
 firewall_policy_checked() (
     load
     FIREWALL_CONF_FILE="$WORK/fw-policy.conf"
@@ -2792,6 +3041,19 @@ share_refused_without_room() (
     fi
     cat "$WORK/share.out"
     grep -q "Not enough room" "$WORK/share.out" && [[ -z $(find "$SHARE_DIR" -mindepth 1 2>/dev/null) ]]
+)
+
+# A download refused by the limit is written to error.log with the whole
+# request: below the level of that log, so that the token is never there
+share_limit_not_in_error_log() (
+    load
+    local block
+    block=$(share_generate_nginx "" | sed -n '/location \^~ \/share\/ {/,/^    }/p')
+    grep -qxF '        limit_req zone=seedtunnel_share;' <<<"$block" \
+        && grep -qxF '        limit_req_log_level info;' <<<"$block" && grep -qxF '        log_not_found off;' <<<"$block" || {
+        echo "$block"
+        return 1
+    }
 )
 
 # nginx takes the first expression of the map that matches the address
@@ -4575,6 +4837,25 @@ changed_by_hand_copy_kept() (
     [[ -z $out && -z $(doctor_changed_by_hand) ]]
 )
 
+# A file deleted since it was written (removal of the seedbox…) leaves the
+# list of fingerprints at the next write; the others stay, a path with a
+# space included
+written_list_drops_deleted_files() (
+    load
+    APP_STATE_DIR="$WORK/written-state"
+    rm -rf "$APP_STATE_DIR"
+    mkdir -p "$APP_STATE_DIR"
+    generate() { echo "$1"; }
+    mkdir -p "$WORK/written dir"
+    write_if_changed "$WORK/written dir/kept.conf" 600 "$ME" generate kept
+    write_if_changed "$WORK/written-gone.conf" 600 "$ME" generate gone
+    rm "$WORK/written-gone.conf"
+    write_if_changed "$WORK/written-new.conf" 600 "$ME" generate new
+    cat "$(written_list)"
+    grep -qF " $WORK/written dir/kept.conf" "$(written_list)" && grep -qF " $WORK/written-new.conf" "$(written_list)" \
+        && ! grep -q "written-gone" "$(written_list)" && (($(wc -l <"$(written_list)") == 2))
+)
+
 # After a restore, the fingerprints are those of the server backed up; after
 # a return to an older version, files are rewritten without them: forgotten
 # in both cases, so that nothing is taken for a change by hand. sshd refusing
@@ -4918,6 +5199,25 @@ release_attested() (
     grep -qE '^ +uses: actions/attest@[0-9a-f]{40} # v[0-9]' "$file" \
         && grep -qE '^ +id-token: write$' "$file" && grep -qE '^ +attestations: write$' "$file" \
         && grep -qE '^ +subject-path: seedtunnel-.*\.tar\.gz$' "$file"
+)
+
+# The archive of a version: folders in 755, files in 644 (git makes them 775
+# and 664 by default). An update makes them so whatever its archive says.
+release_archive_not_group_writable() (
+    load
+    grep -qE '^ +git -c tar\.umask=0022 archive ' "$ROOT/.github/workflows/release.yml" || return 1
+    local src="$WORK/archive-modes/src" out="$WORK/archive-modes/out"
+    rm -rf "$WORK/archive-modes"
+    mkdir -p "$src/seedtunnel-9.9.9/lib" "$out"
+    echo 'echo ok' >"$src/seedtunnel-9.9.9/seedtunnel.sh"
+    echo ': ' >"$src/seedtunnel-9.9.9/lib/common.sh"
+    chmod 775 "$src/seedtunnel-9.9.9" "$src/seedtunnel-9.9.9/lib" "$src/seedtunnel-9.9.9/seedtunnel.sh"
+    chmod 664 "$src/seedtunnel-9.9.9/lib/common.sh"
+    tar -czf "$WORK/archive-modes/a.tar.gz" -C "$src" seedtunnel-9.9.9
+    update_extract "$WORK/archive-modes/a.tar.gz" "$out" || return 1
+    find "$out/seedtunnel-9.9.9" -printf '%m %p\n'
+    [[ -z $(find "$out/seedtunnel-9.9.9" -perm /022) ]] \
+        && [[ $(stat -c %a "$out/seedtunnel-9.9.9/seedtunnel.sh") == 755 && $(stat -c %a "$out/seedtunnel-9.9.9/lib/common.sh") == 644 ]]
 )
 
 # --- Ubuntu 24.04 / 26.04, Debian 11 ---------------------------------------
@@ -5471,6 +5771,10 @@ bans_load() {
             "get recidive banip --with-time") ban_line 198.51.100.23 604800 $((6 * 86400 + 120)) ;;
             "status sshd") printf 'Status for the jail: sshd\n`- Actions\n   |- Currently banned:\t2\n   |- Total banned:\t4\n   `- Banned IP list:\t203.0.113.7 192.0.2.9\n' ;;
             "status recidive") printf '`- Actions\n   |- Total banned:\t1\n' ;;
+            "banned 203.0.113.7" | "banned 192.0.2.9") echo "[['sshd']]" ;;
+            "banned 2001:db8::17") echo "[['nginx-http-auth']]" ;;
+            "banned 198.51.100.23") echo "[['recidive', 'sshd']]" ;;
+            banned*) echo "[[]]" ;;
             unban*) echo "unban $2" >>"$WORK/back-calls" ;;
         esac
     }
@@ -5493,6 +5797,26 @@ bans_listed_with_their_end() (
     answers "2"
     fail2ban_bans_menu >/dev/null 2>&1 || return 1
     grep -qx "unban 203.0.113.7" "$WORK/back-calls"
+)
+
+# seedbox unban: an address that is not one refused, one not banned said
+# (nothing done, not an error)
+unban_checks_the_address() (
+    bans_load
+    : >"$WORK/back-calls"
+    local address
+    for address in 999.1.2.3 1.2.3 "" "x;y" 2001:db8:::1; do
+        if (fail2ban_unban "$address") >"$WORK/unban.out" 2>&1; then
+            echo "accepted: $address"
+            return 1
+        fi
+        grep -q "Invalid IP address" "$WORK/unban.out" || return 1
+    done
+    fail2ban_unban 1.2.3.4 >"$WORK/unban.out" 2>&1 || return 1
+    cat "$WORK/unban.out"
+    grep -q "1.2.3.4 is not banned right now: nothing to do." "$WORK/unban.out" && [[ ! -s $WORK/back-calls ]] || return 1
+    fail2ban_unban 2001:db8::17 >"$WORK/unban.out" 2>&1 || return 1
+    grep -qx "unban 2001:db8::17" "$WORK/back-calls"
 )
 
 bans_none_or_fail2ban_stopped() (
@@ -5690,6 +6014,25 @@ weekly_backup_off_asked() (
     (backup_cli auto off) >/dev/null 2>&1 </dev/null && grep -qx disable "$WORK/off-calls" || return 1
     # removing the VPN and the seedbox turns it off without a question
     declare -f backup_auto_stop_if_unused | grep -q 'backup_auto_disable;'
+)
+
+# The last line says the passphrase saved on the server was deleted (only when
+# there was one: a restore turns off a weekly backup that had none)
+weekly_backup_off_says_passphrase_deleted() (
+    load
+    BACKUP_SERVICE="$WORK/off-units/seedtunnel-backup.service"
+    BACKUP_TIMER="$WORK/off-units/seedtunnel-backup.timer"
+    BACKUP_PASSPHRASE_FILE="$WORK/off-units/backup.passphrase"
+    mkdir -p "$WORK/off-units"
+    systemctl() { :; }
+    echo "a passphrase" >"$BACKUP_PASSPHRASE_FILE"
+    backup_auto_disable >"$WORK/off-last.out" 2>&1 || return 1
+    cat "$WORK/off-last.out"
+    grep -q "Weekly backup off, its passphrase deleted from the server" "$WORK/off-last.out" \
+        && [[ ! -e $BACKUP_PASSPHRASE_FILE ]] || return 1
+    backup_auto_disable >"$WORK/off-last.out" 2>&1 || return 1
+    grep -q "Weekly backup off (the existing backups are kept in" "$WORK/off-last.out" \
+        && ! grep -q "passphrase" "$WORK/off-last.out"
 )
 
 # =============================================================================
@@ -6348,17 +6691,83 @@ restore_keeps_aside_only_settings() (
     }
     cat "$WORK/aside.out"
     [[ -z $(compgen -G "$APP_STATE_DIR.before-restore-*") ]] && ! grep -q "Once everything works" "$WORK/aside.out" || return 1
+    # nothing kept: not said before either
+    grep -q "this server has none of its own yet" "$WORK/aside.out" && ! grep -q "a copy of them is kept" "$WORK/aside.out" || return 1
     # now a server with settings: kept aside, and how to delete them said
     restore_main "$WORK/aside.enc" >"$WORK/aside.out" 2>&1 || {
         cat "$WORK/aside.out"
         return 1
     }
     cat "$WORK/aside.out"
+    grep -q "a copy of them is kept in /etc" "$WORK/aside.out" || return 1
     previous=$(compgen -G "$APP_STATE_DIR.before-restore-*")
     [[ -n $previous && -f $previous/vpn.conf && ! -e $previous.undo && ! -e $previous.outside ]] \
         && grep -q "The settings it replaced are kept in $previous" "$WORK/aside.out" \
         && grep -q "delete them in Backup / restore › My backups, or:" "$WORK/aside.out" \
         && grep -qxF "  seedtunnel restore clean" "$WORK/aside.out" && ! grep -q "rm -rf" "$WORK/aside.out"
+)
+
+# Clock not synchronized in the first minutes after a start: said as being
+# synchronized, not as a problem; later, a warning
+doctor_clock_after_start() (
+    load
+    timedatectl() { echo no; }
+    REBOOT_REQUIRED_FILE="$WORK/clock-no-reboot"
+    RESTORE_MARKER="$WORK/clock.restore-unfinished"
+    APP_STATE_DIR="$WORK/clock/state"
+    PROC_STAT="$WORK/clock-stat"
+    rm -rf "$WORK/clock"
+    mkdir -p "$APP_STATE_DIR"
+    local now
+    printf -v now '%(%s)T' -1
+    printf 'cpu 1 2 3\nbtime %s\n' "$((now - 150))" >"$PROC_STAT"
+    DOCTOR_WARNINGS=0
+    doctor_system >"$WORK/clock.out" 2>&1
+    grep -q "Clock being synchronized (the server started 2 min ago)" "$WORK/clock.out" && ! grep -q "Clock not synchronized" "$WORK/clock.out" || {
+        cat "$WORK/clock.out"
+        return 1
+    }
+    printf 'cpu 1 2 3\nbtime %s\n' "$((now - 3600))" >"$PROC_STAT"
+    doctor_system >"$WORK/clock.out" 2>&1
+    grep -q "Clock not synchronized: certificates and WireGuard depend on it" "$WORK/clock.out" || return 1
+    # start unknown: a warning too
+    : >"$PROC_STAT"
+    doctor_system >"$WORK/clock.out" 2>&1
+    grep -q "Clock not synchronized: certificates and WireGuard depend on it" "$WORK/clock.out"
+)
+
+# A backup copied into a home folder (the one this server was restored from)
+# counts like in « backup list »: in the menu header and in « Latest »
+menu_counts_copied_backups() (
+    load
+    colors_init off
+    BACKUP_DIR="$WORK/latest/var"
+    BACKUP_COPIED=("$WORK/latest/home/*/*.tar.gz.enc")
+    rm -rf "$WORK/latest"
+    mkdir -p "$BACKUP_DIR" "$WORK/latest/home/debian"
+    seedbox_installed() { return 0; }
+    vpn_installed() { return 1; }
+    backup_auto_enabled() { return 1; }
+    systemctl() { return 1; }
+    ui_status_reset
+    home_backup
+    [[ ${UI_STATUS_STATES[0]} == "none yet" ]] || return 1
+    echo "copied" >"$WORK/latest/home/debian/seedtunnel-old-20261113-160123.tar.gz.enc"
+    [[ $(backup_latest) == "$WORK/latest/home/debian/seedtunnel-old-20261113-160123.tar.gz.enc" ]] || return 1
+    ui_status_reset
+    home_backup
+    [[ ${UI_STATUS_STATES[0]} == manual ]] || {
+        echo "${UI_STATUS_STATES[*]}"
+        return 1
+    }
+    backup_status_fields >"$WORK/latest.out" 2>&1
+    cat "$WORK/latest.out"
+    ! grep -q "none yet" "$WORK/latest.out" && grep -q "0 in $BACKUP_DIR" "$WORK/latest.out" || return 1
+    # a link is never one of them
+    rm "$WORK/latest/home/debian/seedtunnel-old-20261113-160123.tar.gz.enc"
+    echo "server" >"$WORK/latest/server.enc"
+    ln -s "$WORK/latest/server.enc" "$WORK/latest/home/debian/link.tar.gz.enc"
+    ! backup_latest
 )
 
 # The diagnostics say the settings replaced by a finished restore, still kept
@@ -7689,6 +8098,8 @@ check "firewall: first activation refused → no rules left" firewall_first_tria
 check "firewall: change confirmed → becomes the rules loaded at boot" firewall_change_confirmed_becomes_permanent
 check "VPN: a change refused by WireGuard is applied at the next run" vpn_change_failed_then_retried
 check "VPN: NAT rules loaded by systemd, wg0.conf runs no command (AppArmor, Ubuntu 26.04)" vpn_nat_loaded_by_systemd
+check "VPN: the clients cannot reach each other, nothing from outside the tunnel but replies and their open port" vpn_clients_isolated_and_protected
+check "VPN: a client name that differs from another only by case refused (command and menu)" vpn_client_names_ignore_case
 check "VPN: the addition to its service written, systemd reloaded, before the start" vpn_apply_writes_dropin_before_start
 check "backup: a failed backup leaves no file, never « the latest »" backup_failed_leaves_nothing
 check "backup: complete archive, checked, then renamed" backup_complete_and_checked
@@ -7730,6 +8141,11 @@ check "packages: kept if removing them would take another program" purge_kept_wh
 check "packages: list kept when the installed packages cannot be read" registry_kept_when_list_unreadable
 check "Transmission: settings write failing → previous ones whole, Transmission started" transmission_settings_failure_keeps_them
 check "Transmission: waits for the disk of the data" transmission_waits_for_data_disk
+check "Transmission: no program run at the end of a download (and when added, done seeding: Transmission 4)" transmission_scripts_turned_off
+check "Transmission: nothing run from the folders where it or SFTP write, settings private when it stops" transmission_dropin_noexec_and_private
+check "Transmission: settings in 600 and its folder closed to the others after each run, by its own account" transmission_settings_made_private
+check "diagnostics: settings of Transmission readable by all, or a program set to run → warning" doctor_transmission_settings_checked
+check "SFTP: documents kept by the deletion of the account given back to it, never through a link nor to a download" sftp_documents_given_back
 check "ports 80/443: another program beside nginx is seen" web_ports_other_program_beside_nginx
 check "full disk: free space not measurable → said, Transmission left alone" diskguard_warns_when_unmeasurable
 check "diagnostics: certificate served refused by browsers → error" doctor_reports_certificate_refused
@@ -7778,6 +8194,7 @@ check "back: restore, wrong passphrase asked again (3 tries, a pasted text is on
 check "df failing: free space unreadable, nothing stops (diagnostics, full disk)" df_failure_does_not_stop
 check "network settings: one value off (IPv6 too) → said, and loaded again" net_hardening_checked_everywhere
 check "diagnostics: NAT made for another network interface → error" doctor_nat_checks_interface
+check "diagnostics: clients of the VPN not protected (rules of an older version) → warning" doctor_sees_clients_unprotected
 check "firewall: rules that do not refuse by default → said (doctor, status)" firewall_policy_checked
 check "diagnostics: weekly backup without timer or passphrase → error" doctor_weekly_backup_needs
 check "diagnostics: update cut short (.previous left) → said" doctor_reports_unfinished_update
@@ -7792,6 +8209,7 @@ check "shortcut: link elsewhere put right, another program left alone" shortcut_
 check "commands: unknown, or arguments too many → refused before anything" commands_refused_first
 check "one-time link: not enough room in /run → no link" share_refused_without_room
 check "one-time link: its page is not counted, its file is" share_page_not_limited
+check "links: a download refused by the limit leaves no token in error.log of nginx" share_limit_not_in_error_log
 check "VPN: NAT rules refused → the clients are not changed" vpn_sync_checks_nat_first
 check "VPN: test interface left behind → removed before the check" vpn_kernel_check_cleans_up
 check "VPN: new port with a session through the VPN → asked, no by default" vpn_port_change_through_vpn
@@ -7861,6 +8279,7 @@ check "sizes: free space rounded down, as in the diagnostic" free_space_rounded_
 check "log: titles in the language of the messages, report still anonymous" log_titles_translated
 check "restore: a decryption error under its own title in the log" decrypt_errors_under_their_title
 check "files changed by hand: a copy is kept and it is said" changed_by_hand_copy_kept
+check "fingerprints of the files written: a file deleted since leaves the list" written_list_drops_deleted_files
 check "files changed by hand: nothing taken for a change after a restore or a return" fingerprints_forgotten_when_unknown
 check "nginx: the site « default » of the administrator stays on" nginx_default_site_kept_if_changed
 check "page « access denied »: colors of seedtunnel, without its name, only if the page is there" denied_page_discreet
@@ -7891,6 +8310,7 @@ check "backup: without the fingerprints of the files nor the copies changed by h
 check "home screen: the details under the blocks never cut (80 columns)" home_details_never_cut
 check "preview: the labels of the real menus" preview_labels_are_those_of_the_menus
 check "release: the archive comes with its attestation" release_attested
+check "release: files of a version changed by root only (archive in 755/644, update whatever its archive)" release_archive_not_group_writable
 check "answers: the spaces around them are not part of them (restore « File not found »)" answers_without_spaces_around
 check "restore: the backups found, numbered (/var/backups, /root, /home), a number or a path" restore_picks_a_backup_by_number
 check "my backups: numbered, one downloaded by its number, deleted after a question (the last said), copied ones left alone" backup_list_download_delete
@@ -7899,12 +8319,14 @@ check "VPN clients: since when the VPN runs, or that it is stopped" vpn_table_sa
 check "DNS: going back changes nothing, the same DNS applies nothing" vpn_dns_can_go_back
 check "DNS: Quad9, Cloudflare, DNS4EU, AdGuard or other, from the menu and by command" vpn_dns_changed
 check "bans: address, jail and end of the ban, the soonest first; unbanned by number" bans_listed_with_their_end
+check "seedbox unban: an invalid address refused, one not banned said, nothing done" unban_checks_the_address
 check "bans: « no address banned », or fail2ban stopped" bans_none_or_fail2ban_stopped
 check "removing the seedbox: certificate, user and links under their own titles in the log" seedbox_removal_log_titles
 check "restore: torrents through watch/, whatever the version of Transmission (4.1 → 3 included)" restore_torrents_through_watch
 check "restore: Transmission stopped and started once" restore_stops_transmission_once
 check "diagnostics: a .torrent of watch/ unreadable by Transmission" doctor_sees_watch_unreadable
 check "weekly backup off: said and asked first, --yes without a terminal" weekly_backup_off_asked
+check "weekly backup off: the deletion of its passphrase said at the end, only if there was one" weekly_backup_off_says_passphrase_deleted
 check "the request for the password names nothing (« Restricted »)" password_request_names_nothing
 check "restore: a step that fails stops it, says how to go back, marker kept" restore_stops_when_a_step_fails
 check "no action that changes the server called in an if, || or && (set -e kept)" actions_never_called_in_a_condition
@@ -7931,8 +8353,10 @@ check "report: the SFTP account logged in is not an administrator, the DNS of th
 check "report: the SFTP account renamed is in the log, both names hidden" sftp_rename_in_log_hidden_in_report
 check "restore cut short: the way back puts back settings, SSH keys, certificate and torrents" restore_undo_puts_everything_back
 check "restore: the SFTP account renamed since the backup takes back its name, never another account, back on the way back" restore_takes_back_account_name
-check "restore: the settings replaced kept aside only if there is something to go back to, how to delete them said" restore_keeps_aside_only_settings
+check "restore: the settings replaced kept aside (and said before) only if there is something to go back to, how to delete them said" restore_keeps_aside_only_settings
 check "diagnostics: settings replaced by a finished restore said, with the command to delete them" doctor_reports_restore_leftovers
+check "menu: a backup copied into a home folder counts as in « backup list » (header, Latest)" menu_counts_copied_backups
+check "diagnostics: clock not synchronized yet just after a start: said as such, not as a problem" doctor_clock_after_start
 check "restore clean: the settings kept by restores deleted after a red frame, only those, never during a restore cut short" restore_clean_deletes_old_settings
 check "my backups: the settings kept by a restore said, [3] deletes them; nothing during a restore cut short" backup_menu_mine_old_settings
 check "restore without a file: the list of the backups in a terminal, the usage without" restore_command_without_file

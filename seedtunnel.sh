@@ -88,6 +88,10 @@ while (($#)); do
             text usage
             exit 0
             ;;
+        -V | --version)
+            printf 'seedtunnel %s\n' "$APP_VERSION"
+            exit 0
+            ;;
         --)
             shift
             ARGUMENTS+=("$@")

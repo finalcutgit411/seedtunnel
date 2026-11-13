@@ -173,7 +173,10 @@ share_generate_nginx() {
             return 405;
         }
         limit_req zone=seedtunnel_share;
-        limit_req_status 404;$gone
+        limit_req_status 404;
+        # a refusal of the limit is written to error.log with the whole
+        # request, token included: below the level of that log
+        limit_req_log_level info;$gone
         max_ranges 0;
         open_file_cache off;
         if_modified_since off;

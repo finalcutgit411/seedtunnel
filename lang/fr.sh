@@ -54,7 +54,7 @@ Serveur
   update back [--yes]                revenir à la version d'avant la dernière mise à jour
   apply                              réappliquer la configuration enregistrée
   language en|fr                     langue des messages
-  version | help
+  version | help                     aussi --version, --help
 
 Options
   -c, --config FICHIER   réglages lus dans un fichier (voir examples/seedtunnel.conf)

@@ -83,7 +83,7 @@ certificate_days_left() {
 }
 
 doctor_system() {
-    local free synced
+    local free synced started
     doctor_title 'System'
     doctor_ok '%s, seedtunnel %s' "$APP_OS_DESCRIPTION" "$APP_VERSION"
     free=$(disk_free_gb /)
@@ -121,9 +121,23 @@ doctor_system() {
     synced=$(timedatectl show -p NTPSynchronized --value 2>/dev/null || true)
     if [[ $synced == yes ]]; then
         doctor_ok 'Clock synchronized'
+    elif started=$(server_started_minutes_ago) && ((started < 10)); then
+        # it takes a little while after a start: nothing to worry about yet
+        doctor_ok 'Clock being synchronized (the server started %s min ago)' "$started"
     else
         doctor_warn 'Clock not synchronized: certificates and WireGuard depend on it (timedatectl)'
     fi
+}
+
+# Minutes since the server started (« btime » of /proc/stat). Status 1:
+# unknown.
+server_started_minutes_ago() {
+    local boot now
+    boot=$(awk '$1 == "btime" { print $2 }' "$PROC_STAT" 2>/dev/null || true)
+    [[ $boot =~ ^[0-9]+$ ]] || return 1
+    printf -v now '%(%s)T' -1
+    ((now >= boot)) || return 1
+    printf '%s' "$(((now - boot) / 60))"
 }
 
 doctor_vpn() {
@@ -201,7 +215,9 @@ doctor_restore_leftovers() {
 
 # The clients go out to the Internet through the masquerade rule: it must be
 # there, for the network of the VPN, and use the network interface the server
-# uses now (it may have changed: new server, other name after an upgrade)
+# uses now (it may have changed: new server, other name after an upgrade).
+# The rules that protect the clients must be there too (rules loaded by an
+# older version, until the next apply).
 doctor_vpn_nat() {
     local rules interface
     rules=$(nft list table ip seedtunnel 2>/dev/null || true)
@@ -210,8 +226,11 @@ doctor_vpn_nat() {
         doctor_error 'NAT rules missing   → seedtunnel vpn restart'
     elif ! grep -qF "ip saddr $VPN_SUBNET.0/24 oifname \"$interface\" masquerade" <<<"$rules"; then
         doctor_error 'NAT rules not made for the network interface of the server (%s): the clients have no Internet   → seedtunnel apply' "${interface:-?}"
+    elif ! grep -qF "iifname \"$VPN_INTERFACE\" oifname \"$VPN_INTERFACE\" drop" <<<"$rules" \
+        || ! grep -qxE "[[:space:]]*oifname \"$VPN_INTERFACE\" drop" <<<"$rules"; then
+        doctor_warn 'Clients of the VPN not protected: they can reach each other, and be reached from outside the tunnel   → seedtunnel apply'
     else
-        doctor_ok 'NAT rules in place'
+        doctor_ok 'NAT rules in place, clients of the VPN protected'
     fi
 }
 
@@ -304,6 +323,26 @@ doctor_transmission_apparmor() {
         doctor_error 'AppArmor refused Transmission %s time(s) since its rules were written   → journalctl -k -b | grep transmission-daemon' "$refused"
     else
         doctor_ok 'AppArmor lets Transmission write to %s' "$SEEDBOX_DATA_DIR"
+    fi
+}
+
+# The settings of Transmission hold the hash of the password, its folder the
+# names of the downloads: closed to the other accounts. No program run by it
+# (one may have been set through the web interface; written in its settings
+# when it stops).
+doctor_transmission_settings() {
+    local settings mode dir_mode scripts
+    settings=$(transmission_settings_file 2>/dev/null) || return 0
+    [[ -f $settings ]] || return 0
+    mode=$(stat -c %a -- "$settings" 2>/dev/null || echo 0)
+    dir_mode=$(stat -c %a -- "$TRANSMISSION_STATE_DIR" 2>/dev/null || echo 0)
+    scripts=$(jq -r '[to_entries[] | select((.key | test("^script-torrent-.*-enabled$")) and .value == true) | .key] | join(", ")' "$settings" 2>/dev/null || true)
+    if [[ -n $scripts ]]; then
+        doctor_warn 'Transmission runs a program that seedtunnel did not set (%s): set through the web interface?   → seedtunnel apply' "$scripts"
+    elif (((8#$mode | 8#$dir_mode) & 8#7)); then
+        doctor_warn 'The settings of Transmission (hash of the password) or its folder can be read by every account   → seedtunnel apply'
+    else
+        doctor_ok 'Settings of Transmission private, no program run by it'
     fi
 }
 
@@ -449,6 +488,7 @@ doctor_seedbox() {
         doctor_error 'Permissions of the folder %s incompatible with the locked SFTP' "$SEEDBOX_DATA_DIR"
     fi
     doctor_transmission_apparmor
+    doctor_transmission_settings
     doctor_watch_unreadable
     free=$(disk_free_gb "$SEEDBOX_DATA_DIR")
     if [[ -z $free ]]; then

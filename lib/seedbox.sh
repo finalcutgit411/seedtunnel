@@ -57,7 +57,10 @@ TORRENT_PORT=60000
 SEEDBOX_NEW_PASSWORD=""
 
 # Settings imposed on Transmission. DHT, PEX, LPD and uTP are off: suited to
-# private trackers (can be changed in the web interface, Preferences).
+# private trackers (can be changed in the web interface, Preferences). No
+# program run at the end of a download: anyone with the password of the web
+# interface could turn one on (Transmission 4 has two more: see
+# seedbox_apply_transmission).
 read -r -d '' TRANSMISSION_SETTINGS_FILTER <<'JQ' || true
 {
   "download-dir": $dl,
@@ -81,6 +84,7 @@ read -r -d '' TRANSMISSION_SETTINGS_FILTER <<'JQ' || true
   "pex-enabled": false,
   "lpd-enabled": false,
   "utp-enabled": false,
+  "script-torrent-done-enabled": false,
   "umask": 2
 }
 JQ
@@ -143,6 +147,16 @@ transmission_settings_file() {
 # already. Replaced by renaming, never half-written, readable by it alone.
 transmission_settings_write() {
     runuser -u "$TRANSMISSION_USER" -- sh -c 'umask 077 && cat >"$1.new" && mv -f "$1.new" "$1"' sh "$1" <"$2"
+}
+
+# transmission_make_private SETTINGS — its settings (hash of the password) and
+# its folder (torrents, names of the downloads) closed to the other accounts.
+# By its own account, for the same reason: it can only change its own files.
+transmission_make_private() {
+    runuser -u "$TRANSMISSION_USER" -- chmod 600 -- "$1" >>"$APP_LOG" 2>&1 || true
+    if [[ -d $TRANSMISSION_STATE_DIR ]]; then
+        runuser -u "$TRANSMISSION_USER" -- chmod o-rwx -- "$TRANSMISSION_STATE_DIR" >>"$APP_LOG" 2>&1 || true
+    fi
 }
 
 seedbox_certificate_label() {
@@ -439,12 +453,30 @@ seedbox_remove_apparmor() {
 }
 
 seedbox_apply_dirs() {
+    local documents="$SEEDBOX_DATA_DIR/documents" give_back=0
     install -d -m 755 -o root -g root "$SEEDBOX_DATA_DIR"
     # setgid (the 2 of 2775): everything created inside belongs to the group of
     # Transmission, so the SFTP user can read and delete the files.
     install -d -m 2775 -o "$TRANSMISSION_USER" -g "$TRANSMISSION_USER" \
         "$SEEDBOX_DATA_DIR/complete" "$SEEDBOX_DATA_DIR/incomplete" "$SEEDBOX_DATA_DIR/watch"
-    install -d -m 700 -o "$SEEDBOX_USER" -g "$SEEDBOX_USER" "$SEEDBOX_DATA_DIR/documents"
+    # documents kept when the account was deleted (they then belong to root):
+    # given back to the account created again (restore, new installation)
+    if [[ -d $documents && ! -L $documents && $(stat -c %U -- "$documents" 2>/dev/null) != "$SEEDBOX_USER" ]]; then
+        give_back=1
+    fi
+    install -d -m 700 -o "$SEEDBOX_USER" -g "$SEEDBOX_USER" "$documents"
+    if ((give_back)); then
+        run "$(t 'Giving the documents back to %s' "$SEEDBOX_USER")" seedbox_documents_owner "$SEEDBOX_USER:$SEEDBOX_USER" root
+    fi
+}
+
+# seedbox_documents_owner OWNER FROM — gives to OWNER what documents/ holds:
+# the files of FROM, and the others that have no other name elsewhere (a hard
+# link made by SFTP to a download: changing it would change the download).
+# Never through a link: find does not follow them, chown -h changes the link
+# itself.
+seedbox_documents_owner() {
+    find "$SEEDBOX_DATA_DIR/documents" -xdev \( -type d -o -links 1 -o -user "$2" \) -exec chown -h "$1" {} +
 }
 
 # The hash of the password goes through the environment, never as an argument:
@@ -471,8 +503,19 @@ transmission_settings_differences() {
 
 # systemd hardening: if Transmission were compromised, it could only write to
 # its own folders and to the download folder.
+#
+# Nothing can be run from the folders where it, or the SFTP account, can
+# write: a program sent by SFTP, then set to run at the end of the downloads
+# through the web interface, would run outside the folder SFTP is locked in.
+#
+# Its settings hold the hash of the password: Transmission writes them again
+# when it stops, readable by every account (its umask, made for the
+# downloads). They are made private again right after, by its own account
+# (never by root, which a link put there could lead to another file).
+# transmission_generate_dropin [SETTINGS] — SETTINGS: the real file of its
+# settings (transmission_settings_file).
 transmission_generate_dropin() {
-    local home=yes
+    local home=yes settings=${1:-$TRANSMISSION_ETC_SETTINGS}
     case $SEEDBOX_DATA_DIR in
         /home/* | /root/* | /run/user/*) home=no ;;
     esac
@@ -485,10 +528,12 @@ RequiresMountsFor=$SEEDBOX_DATA_DIR
 [Service]
 # not started on an almost full disk (« + »: this check runs as root)
 ExecStartPre=+$APP_DIR/seedtunnel.sh diskguard-prestart
+ExecStopPost=-/bin/chmod 600 $settings
 UMask=0002
 NoNewPrivileges=yes
 ProtectSystem=strict
 ReadWritePaths=-/var/lib/transmission-daemon -/etc/transmission-daemon -$SEEDBOX_DATA_DIR
+NoExecPaths=-/var/lib/transmission-daemon -/etc/transmission-daemon -$SEEDBOX_DATA_DIR
 ProtectHome=$home
 PrivateTmp=yes
 PrivateDevices=yes
@@ -531,8 +576,11 @@ seedbox_apply_transmission() {
     if jq -e 'has("preferred_transports")' "$settings" &>/dev/null || transmission_knows_transports; then
         desired=$(jq -c '. + {"preferred_transports": ["tcp"]}' <<<"$desired")
     fi
+    if jq -e 'has("script-torrent-added-enabled")' "$settings" &>/dev/null || transmission_knows_more_scripts; then
+        desired=$(jq -c '. + {"script-torrent-added-enabled": false, "script-torrent-done-seeding-enabled": false}' <<<"$desired")
+    fi
     install -d -m 755 "${TRANSMISSION_DROPIN%/*}"
-    if write_if_changed "$TRANSMISSION_DROPIN" 644 root:root transmission_generate_dropin; then
+    if write_if_changed "$TRANSMISSION_DROPIN" 644 root:root transmission_generate_dropin "$settings"; then
         run 'Reloading systemd' systemctl daemon-reload
         restart=1
     fi
@@ -559,6 +607,7 @@ seedbox_apply_transmission() {
         rm -f "$tmp"
         restart=1
     fi
+    transmission_make_private "$settings"
     systemctl enable --quiet transmission-daemon 2>/dev/null || true
     # stopped on purpose because the disk is almost full: left alone
     if diskguard_stopped; then return 0; fi
@@ -667,22 +716,28 @@ letsencrypt_request() {
     return 1
 }
 
+# transmission_version_at_least VERSION — is the Transmission installed this
+# version or a later one? (No: not installed.)
+transmission_version_at_least() {
+    local version
+    version=$(dpkg-query -W -f='${Version}' transmission-daemon 2>/dev/null || true)
+    [[ -n $version ]] && dpkg --compare-versions "$version" ge "$1"
+}
+
 # Does the Transmission installed know « preferred_transports »? Since
 # 4.1.0-beta.4 (in its code: libtransmission/session.h). An older one would
 # drop it from its settings, and it would be added again at every run.
-transmission_knows_transports() {
-    local version
-    version=$(dpkg-query -W -f='${Version}' transmission-daemon 2>/dev/null || true)
-    [[ -n $version ]] && dpkg --compare-versions "$version" ge 4.1.0~beta4
-}
+transmission_knows_transports() { transmission_version_at_least 4.1.0~beta4; }
 
 # Does the Transmission installed take magnet links (NAME.magnet) from its
 # watch folder? Since 4.0.0 (« add magnet file support to watchdir »).
-transmission_reads_magnets() {
-    local version
-    version=$(dpkg-query -W -f='${Version}' transmission-daemon 2>/dev/null || true)
-    [[ -n $version ]] && dpkg --compare-versions "$version" ge 4.0.0~
-}
+transmission_reads_magnets() { transmission_version_at_least 4.0.0~; }
+
+# Does the Transmission installed also run a program when a torrent is added,
+# and when it is done seeding? Since 4.0.0 (« script-torrent-added-* »,
+# « script-torrent-done-seeding-* »). Transmission 3 would drop them from its
+# settings, and they would be added again at every run.
+transmission_knows_more_scripts() { transmission_version_at_least 4.0.0~; }
 
 # The style sheet of seedtunnel for the version of Transmission installed:
 # Transmission 3 (Debian 12) and 4 (Debian 13…) have different pages. Nothing
@@ -2137,9 +2192,18 @@ fail2ban_bans_print() {
     printf '  %s%s%s\n' "$C_GREY" "$(t 'Banned? The VPN still connects, and nobody is banned through it.')" "$C_RESET"
 }
 
+# fail2ban_unban IP — an address fail2ban does not ban is said, nothing done
 fail2ban_unban() {
-    [[ $1 =~ ^[0-9A-Fa-f.:]+$ ]] || die 'Invalid IP address: "%s"' "$1"
-    run "$(t 'Unbanning %s' "$1")" fail2ban-client unban "$1"
+    local ip=$1 jails
+    is_ipv4 "$ip" || is_ipv6 "$ip" || die 'Invalid IP address: "%s"' "$ip"
+    # the jails that ban it: « [['sshd', 'recidive']] », none: « [[]] »
+    jails=$(fail2ban-client banned "$ip" 2>>"$APP_LOG") \
+        || die 'fail2ban does not answer (details in %s)   → seedtunnel seedbox restart' "$APP_LOG"
+    if [[ $jails != *[A-Za-z]* ]]; then
+        warn '%s is not banned right now: nothing to do.' "$ip"
+        return 0
+    fi
+    run "$(t 'Unbanning %s' "$ip")" fail2ban-client unban "$ip"
 }
 
 fail2ban_bans_menu() {
@@ -2158,7 +2222,7 @@ fail2ban_bans_menu() {
             ip=${FAIL2BAN_LISTED[10#$ip - 1]}
             break
         fi
-        if [[ $ip =~ ^[0-9A-Fa-f.:]+$ && $ip == *[.:]* ]]; then break; fi
+        if is_ipv4 "$ip" || is_ipv6 "$ip"; then break; fi
         warn 'Invalid IP address: "%s"' "$ip"
     done
     fail2ban_unban "$ip"
@@ -2186,7 +2250,9 @@ seedbox_delete_user() {
     [[ -n $SEEDBOX_USER ]] && id "$SEEDBOX_USER" &>/dev/null || return 0
     log_title 'Deleting the user %s' "$SEEDBOX_USER"
     # the documents stay readable by root once the user is deleted
-    if [[ -d $SEEDBOX_DATA_DIR/documents ]]; then chown -R root:root "$SEEDBOX_DATA_DIR/documents"; fi
+    if [[ -d $SEEDBOX_DATA_DIR/documents && ! -L $SEEDBOX_DATA_DIR/documents ]]; then
+        seedbox_documents_owner root:root "$SEEDBOX_USER"
+    fi
     for attempt in 1 2 3; do
         pkill -KILL -u "$SEEDBOX_USER" >>"$APP_LOG" 2>&1 || true
         if userdel "$SEEDBOX_USER" >>"$APP_LOG" 2>&1 || ! id "$SEEDBOX_USER" &>/dev/null; then return 0; fi

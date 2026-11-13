@@ -123,6 +123,9 @@ fr: Notez la passphrase ailleurs : sans elle, aucune sauvegarde ne peut être re
 en: Weekly backup off (the existing backups are kept in %s).
 fr: Sauvegarde hebdomadaire désactivée (les sauvegardes existantes restent dans %s).
 
+en: Weekly backup off, its passphrase deleted from the server: the backups already made (kept in %s) open only with the one you wrote down.
+fr: Sauvegarde hebdomadaire désactivée, sa passphrase effacée du serveur : les sauvegardes déjà faites (gardées dans %s) ne s'ouvrent plus qu'avec celle que vous avez notée.
+
 en: No saved passphrase:  seedtunnel backup auto on
 fr: Aucune passphrase enregistrée :  seedtunnel backup auto on
 
@@ -555,6 +558,9 @@ fr: Redémarrage conseillé (mise à jour du noyau ou d'une bibliothèque)
 en: Clock synchronized
 fr: Horloge synchronisée
 
+en: Clock being synchronized (the server started %s min ago)
+fr: Horloge en cours de synchronisation (le serveur a démarré il y a %s min)
+
 en: Clock not synchronized: certificates and WireGuard depend on it (timedatectl)
 fr: Horloge non synchronisée : les certificats et WireGuard en dépendent (timedatectl)
 
@@ -573,8 +579,11 @@ fr: Routage IPv4 activé
 en: IPv4 routing off: the clients will have no Internet   → seedtunnel apply
 fr: Routage IPv4 désactivé : les clients n'auront pas Internet   → seedtunnel apply
 
-en: NAT rules in place
-fr: Règles NAT en place
+en: NAT rules in place, clients of the VPN protected
+fr: Règles NAT en place, clients du VPN protégés
+
+en: Clients of the VPN not protected: they can reach each other, and be reached from outside the tunnel   → seedtunnel apply
+fr: Clients du VPN non protégés : ils peuvent se joindre entre eux, et être joints depuis l'extérieur du tunnel   → seedtunnel apply
 
 en: NAT rules missing   → seedtunnel vpn restart
 fr: Règles NAT absentes   → seedtunnel vpn restart
@@ -984,6 +993,9 @@ fr:   R) Recommencer    C) Continuer avec un certificat auto-signé
 en: Creating the user %s
 fr: Création de l'utilisateur %s
 
+en: Giving the documents back to %s
+fr: Documents rendus à %s
+
 en: No known password for %s: set one with  seedtunnel seedbox password
 fr: Aucun mot de passe connu pour %s : définissez-en un avec  seedtunnel seedbox password
 
@@ -1281,6 +1293,12 @@ fr: Adresse IP invalide : « %s »
 
 en: Unbanning %s
 fr: Débannissement de %s
+
+en: %s is not banned right now: nothing to do.
+fr: %s n'est pas bannie en ce moment : rien à faire.
+
+en: fail2ban does not answer (details in %s)   → seedtunnel seedbox restart
+fr: fail2ban ne répond pas (détails dans %s)   → seedtunnel seedbox restart
 
 en: Deleting the user %s
 fr: Suppression de l'utilisateur %s
@@ -1787,6 +1805,12 @@ fr: Activer / désactiver la sauvegarde hebdomadaire
 en: The current settings of seedtunnel are replaced by those of the backup (a copy of them is kept in /etc).
 fr: Les réglages actuels de seedtunnel sont remplacés par ceux de la sauvegarde (une copie en est gardée dans /etc).
 
+en: The settings of the backup are put in place: this server has none of its own yet.
+fr: Les réglages de la sauvegarde sont mis en place : ce serveur n'en a pas encore.
+
+en: Restore the backup on this server?
+fr: Restaurer la sauvegarde sur ce serveur ?
+
 en: Restart the server
 fr: Redémarrer le serveur
 
@@ -2113,6 +2137,15 @@ fr: AppArmor a refusé %s fois l'accès à Transmission depuis l'écriture de se
 
 en: AppArmor lets Transmission write to %s
 fr: AppArmor autorise Transmission à écrire dans %s
+
+en: Transmission runs a program that seedtunnel did not set (%s): set through the web interface?   → seedtunnel apply
+fr: Transmission lance un programme que seedtunnel n'a pas réglé (%s) : réglé par l'interface web ?   → seedtunnel apply
+
+en: The settings of Transmission (hash of the password) or its folder can be read by every account   → seedtunnel apply
+fr: Les réglages de Transmission (empreinte du mot de passe) ou son dossier sont lisibles par tous les comptes   → seedtunnel apply
+
+en: Settings of Transmission private, no program run by it
+fr: Réglages de Transmission privés, aucun programme lancé par lui
 
 en: %s: running, but not started at boot: it will not come back after a restart of the server   → seedtunnel apply
 fr: %s : actif, mais pas lancé au démarrage : il ne reviendra pas après un redémarrage du serveur   → seedtunnel apply

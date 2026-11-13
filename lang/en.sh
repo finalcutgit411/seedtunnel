@@ -55,7 +55,7 @@ Server
   update back [--yes]                back to the version before the last update
   apply                              apply the saved configuration again
   language en|fr                     language of the messages
-  version | help
+  version | help                     also --version, --help
 
 Options
   -c, --config FILE      settings read from a file (see examples/seedtunnel.conf)

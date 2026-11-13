@@ -3,6 +3,29 @@
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 
+## [1.0.5] - 2026-11-13
+
+### Security
+- VPN: the clients can no longer reach each other, and nothing from outside the tunnel reaches them any more, except the answers to their own connections and their open port. Until now, the server forwarded to them any packet addressed to 10.8.0.x, from a machine of the network of the host for example. The rules are in the table of the VPN: with the firewall on or off. Policy « accept »: Docker and the other programs keep their traffic. `seedtunnel doctor` says when these rules are missing (rules loaded by an older version, until the next `seedtunnel apply`).
+- Transmission: no program can run at the end of a download. The web interface could turn one on, run by the account of Transmission; `seedtunnel apply` turns it off again (and the two more of Transmission 4), and `seedtunnel doctor` says it. Transmission can no longer run anything from the folders where it or the SFTP user write.
+- Transmission: its settings, which hold the hash of the password, were readable by every account after each stop (Transmission writes them again with its own umask). They are made private again right after, by its own account, and its folder is closed to the other accounts. `seedtunnel doctor` checks it.
+- Links: a second download within the minute, refused by nginx, wrote the whole request (token included) to `error.log` of nginx. No longer.
+- Files of seedtunnel: the archive of a version now has its folders in 755 and its files in 644 (775 and 664 until now), and an update sets them so whatever its archive says: only root can change what root runs.
+
+### Changed
+- `seedtunnel seedbox unban` refuses an address that is not one, and says when an address is not banned (nothing done).
+- A VPN client name that differs from another only by the case of its letters (`PHONE` beside `phone`) is refused: Windows cannot keep both files in one folder.
+- Turning the weekly backup off says that its passphrase is deleted from the server: the backups already made open only with the one written down.
+- Restore on a new server: the frame says that the settings of the backup are put in place, no longer that a copy of the current ones is kept (there are none).
+- Menu: a backup copied into `/root` or a home folder counts in the header and in « Latest », as in `seedtunnel backup list`.
+- `seedtunnel doctor`: a clock not synchronized yet in the first 10 minutes after a start is said as being synchronized, not as a problem.
+- `seedtunnel --version` (and `-V`), like `seedtunnel version`.
+- Documentation: the security page says that the clients are isolated, and that every backup holds the passphrase of the weekly backup (whoever can open one backup can open the weekly ones).
+
+### Fixed
+- SFTP: after the removal of the seedbox then a restore, the documents of the account stayed owned by root, out of its reach. They are given back to the account when it is created again (never through a link, never a download it made a hard link to).
+- The list of the fingerprints of the files written by seedtunnel no longer keeps the files deleted since.
+
 ## [1.0.4] - 2026-11-13
 
 ### Added

@@ -5,8 +5,9 @@
 ## What SeedTunnel protects
 
 - The control interface of Transmission (RPC) only listens on `127.0.0.1`: it is reached through nginx, and the password is checked twice, by nginx then by Transmission. Only its BitTorrent port (60000) is open to peers.
-- Transmission is **locked down by systemd** (`ProtectSystem=strict`…): it can only write in its own folders.
-- Passwords are **never written in plain text**, nor passed as the argument of a command: only their hashes are kept. One exception: the passphrase of the weekly backup, if you turn it on, saved readable by root only so that the backup runs by itself.
+- Transmission is **locked down by systemd** (`ProtectSystem=strict`…): it can only write in its own folders, and can run nothing from the folders where it or the SFTP user writes. It runs no program at the end of a download (the web interface could turn one on: `seedtunnel apply` turns it off again, `seedtunnel doctor` says it). Its settings, which hold the hash of the password, can only be read by its own account.
+- The **VPN clients cannot reach each other**, and nothing from outside the tunnel reaches them, except the answers to their own connections and their open port (60001 and up). This holds with the firewall on or off.
+- Passwords are **never written in plain text**, nor passed as the argument of a command: only their hashes are kept. One exception: the passphrase of the weekly backup, if you turn it on, saved readable by root only so that the backup runs by itself. Every backup holds it too, so that a restore keeps the weekly backup running: whoever can open one backup can open the weekly ones. Give the passphrase of any backup the same care.
 - The SFTP user is locked in the data folder: no shell, no tunnel. If sshd does not apply all these restrictions to it, from the server, through the VPN and from the Internet (a `Match` block placed before them in `sshd_config`, for example), the account is suspended rather than left without them. In « keys only » mode, it is also checked that sshd refuses passwords (`keyboard-interactive` included).
 - Files that may hold a secret (`--config`, `SEEDBOX_PASSWORD_FILE`, `--passphrase-file`) are refused if anyone other than root can read them.
 - With a self-signed certificate, each download link comes with its SHA-256 fingerprint, to check before accepting the warning of the browser.

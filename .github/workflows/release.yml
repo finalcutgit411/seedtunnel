@@ -91,7 +91,9 @@ jobs:
 
       - name: Archive, checksum and release notes
         run: |
-          git archive --format=tar.gz --prefix="seedtunnel-$V/" -o "seedtunnel-$V.tar.gz" "$GITHUB_SHA"
+          # folders in 755, files in 644 (git uses 775 and 664 by default):
+          # only root can change what root runs
+          git -c tar.umask=0022 archive --format=tar.gz --prefix="seedtunnel-$V/" -o "seedtunnel-$V.tar.gz" "$GITHUB_SHA"
           sha256sum "seedtunnel-$V.tar.gz" > SHA256SUMS
           # section of this version in the CHANGELOG
           awk -v v="[$V]" '/^## /{p = index($0, v) > 0; next} p' CHANGELOG.md > notes.md

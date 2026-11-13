@@ -27,7 +27,7 @@ Connectez-vous en SSH, puis :
 ```bash
 sudo -i
 apt update && apt full-upgrade -y
-V=1.0.4
+V=1.0.5
 cd "$(mktemp -d)"
 curl -fLO https://github.com/finalcutgit411/seedtunnel/releases/download/v$V/seedtunnel-$V.tar.gz \
   && curl -fLO https://github.com/finalcutgit411/seedtunnel/releases/download/v$V/SHA256SUMS \
@@ -269,6 +269,7 @@ Relancée, l'installation ne change que ce qui doit l'être. Un fichier modifié
 
 - **WireGuard ne passe qu'en UDP.** Sur un réseau qui bloque l'UDP, essayez le port 443 (menu VPN → `[7] Modifier l'adresse ou le port`).
 - **Le VPN est en IPv4.** L'IPv6 des appareils est bloquée dans le tunnel plutôt que de fuiter.
+- **Les appareils du VPN ne se voient pas entre eux** : un ordinateur ne peut pas joindre un téléphone par le tunnel. Chacun joint le serveur et Internet.
 - **Une seule personne par seedbox.**
 - **Docker sur le même serveur** peut couper le VPN d'Internet : les appareils se connectent, mais rien ne revient. Le diagnostic le voit. La correction : ajoutez `"ip-forward-no-drop": true` dans `/etc/docker/daemon.json` (le fichier entier, s'il n'existe pas : `{ "ip-forward-no-drop": true }`), puis redémarrez le serveur. SeedTunnel ne touche jamais aux règles de Docker.
 

@@ -29,6 +29,13 @@ update_check_syntax() {
     done
 }
 
+# update_extract ARCHIVE FOLDER — the files of the new version can be changed
+# by root only, whatever the archive says (up to 1.0.4: folders in 775, files
+# in 664, so a member of the group root could change what root runs)
+update_extract() {
+    tar -xzf "$1" -C "$2" && chmod -R go-w -- "$2"
+}
+
 # The tag of the latest version, from the answer of the GitHub API (standard
 # input, indented or not). Without jq: it comes with the VPN or the seedbox,
 # and seedtunnel must also update before them.
@@ -59,7 +66,7 @@ update_from_release() {
     run "$(t 'Downloading seedtunnel %s' "$version")" curl -fsSL -o "$tmp/seedtunnel-$version.tar.gz" "$base/seedtunnel-$version.tar.gz"
     run 'Downloading the checksums' curl -fsSL -o "$tmp/SHA256SUMS" "$base/SHA256SUMS"
     run 'Checking the SHA-256 checksum' update_verify_checksum "$tmp" "$version"
-    run 'Extracting' tar -xzf "$tmp/seedtunnel-$version.tar.gz" -C "$tmp"
+    run 'Extracting' update_extract "$tmp/seedtunnel-$version.tar.gz" "$tmp"
     run 'Checking the syntax' update_check_syntax "$tmp/seedtunnel-$version"
     update_switch "$tmp/seedtunnel-$version" "$version"
 }

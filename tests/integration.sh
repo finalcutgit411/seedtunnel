@@ -137,6 +137,28 @@ vpn_nat_follows_wg0() {
     nft list table ip seedtunnel | grep -q masquerade
 }
 
+# Nothing can be run by Transmission from the folder of the data: the folder
+# is mounted « noexec » for it (a program sent by SFTP, then set to run at the
+# end of the downloads through the web interface, would be refused)
+transmission_noexec_test() {
+    local pid
+    pid=$(systemctl show -p MainPID --value transmission-daemon)
+    [[ -n $pid && $pid != 0 ]] || return 1
+    grep -F " $DATA " "/proc/$pid/mountinfo"
+    awk -v dir="$DATA" '$5 == dir { options = $6 } END { exit !(options ~ /(^|,)noexec(,|$)/) }' "/proc/$pid/mountinfo"
+}
+
+# Transmission writes its settings again when it stops, readable by every
+# account (its umask): private again right after. Its folder closed to the
+# other accounts.
+transmission_private_test() {
+    local settings=/etc/transmission-daemon/settings.json state=/var/lib/transmission-daemon/.config/transmission-daemon
+    chmod 664 "$settings"
+    systemctl restart transmission-daemon || return 1
+    stat -c '%a %U %n' "$settings" "$state"
+    [[ $(stat -c %a "$settings") == 600 ]] && (((8#$(stat -c %a "$state") & 8#7) == 0))
+}
+
 # HTTP code returned by the seedbox (credentials optional)
 http_code() {
     local path=$1
@@ -255,6 +277,60 @@ tunnel_test() {
     ip -n st-client link set wgc up
     ip -n st-client route add 10.8.0.0/24 dev wgc
     ip netns exec st-client ping -c 3 -W 2 10.8.0.1
+}
+
+# A second client, « tablet », in its own network namespace with its own way to
+# the server (192.168.251.0/24). The two clients cannot reach each other
+# through the tunnel, and a ping sent to the tablet from outside the tunnel
+# (from the network of the phone, straight to the server) does not reach it.
+# Each client would answer: without the protection, every ping goes through.
+vpn_isolation_test() {
+    local conf=/etc/seedtunnel/vpn/clients/tablet.conf private psk public address status=0
+    app vpn add tablet || return 1
+    private=$(awk -F' = ' '/^PrivateKey/ { print $2 }' "$conf")
+    psk=$(awk -F' = ' '/^PresharedKey/ { print $2 }' "$conf")
+    public=$(awk -F' = ' '/^PublicKey/ { print $2 }' "$conf")
+    address=$(awk -F' = ' '/^Address/ { print $2 }' "$conf")
+    address=${address%/*}
+    ip netns del st-client2 2>/dev/null || true
+    ip link del st-veth2 2>/dev/null || true
+    ip netns add st-client2
+    ip link add st-veth2 type veth peer name st-veth3
+    ip link set st-veth3 netns st-client2
+    ip addr add 192.168.251.1/24 dev st-veth2
+    ip link set st-veth2 up
+    ip -n st-client2 addr add 192.168.251.2/24 dev st-veth3
+    ip -n st-client2 link set st-veth3 up
+    ip -n st-client2 link set lo up
+    ip -n st-client2 link add wgc type wireguard
+    ip netns exec st-client2 wg set wgc private-key <(printf '%s\n' "$private") \
+        peer "$public" preshared-key <(printf '%s\n' "$psk") \
+        endpoint 192.168.251.1:51820 allowed-ips 10.8.0.0/24,192.168.250.0/24
+    ip -n st-client2 addr add "$address/32" dev wgc
+    ip -n st-client2 link set wgc up
+    ip -n st-client2 route add 10.8.0.0/24 dev wgc
+    ip -n st-client2 route add 192.168.250.0/24 dev wgc
+    if ! ip netns exec st-client2 ping -c 2 -W 2 10.8.0.1; then
+        echo "the tablet does not reach the server: the test would prove nothing"
+        status=1
+    elif ip netns exec st-client ping -c 2 -W 2 "$address"; then
+        echo "the phone reaches the tablet through the tunnel"
+        status=1
+    elif ip netns exec st-client2 ping -c 2 -W 2 10.8.0.2; then
+        echo "the tablet reaches the phone through the tunnel"
+        status=1
+    else
+        ip -n st-client route add "$address/32" via 192.168.250.1 dev st-veth1
+        if ip netns exec st-client ping -c 2 -W 2 "$address"; then
+            echo "the tablet is reached from outside the tunnel"
+            status=1
+        fi
+        ip -n st-client route del "$address/32" via 192.168.250.1 dev st-veth1
+    fi
+    ip netns del st-client2
+    ip link del st-veth2 2>/dev/null || true
+    app vpn remove tablet --yes || status=1
+    return "$status"
 }
 
 # The command succeeds without any « starting / applying… » line: nothing was
@@ -586,8 +662,8 @@ links_site_removed() {
         && ! dpkg-query -W -f='${Status}\n' nginx 2>/dev/null | grep -q ' installed$'
 }
 
-# The tokens of the links never reach the access log of nginx: /share/<token>/
-# instead, with the address, the time and the result
+# The tokens of the links never reach the logs of nginx: /share/<token>/ in
+# the access log instead, with the address, the time and the result
 share_log_test() {
     local out path token
     out=$(app vpn share phone 2>&1) || return 1
@@ -602,6 +678,12 @@ share_log_test() {
     sleep 1
     if grep -qF "$token" /var/log/nginx/access.log; then
         echo "token found in the access log"
+        return 1
+    fi
+    # the second download within the minute is refused by the limit of nginx,
+    # which would write the whole request (token included) to error.log
+    if grep -F "$token" /var/log/nginx/error.log; then
+        echo "token found in the error log"
         return 1
     fi
     grep -qF '"GET /share/<token>/phone.conf HTTP' /var/log/nginx/access.log \
@@ -798,7 +880,9 @@ fail2ban_all_ports_test() {
 }
 
 # The screen of the bans reads what this fail2ban writes (« --with-time »): the
-# address, its jail and the end of its ban; then « no address banned »
+# address, its jail and the end of its ban. « seedbox unban » reads its answer
+# to « banned »: unbanned, then « not banned » the second time; then « no
+# address banned »
 fail2ban_bans_shown_test() {
     local ip=203.0.113.8 out i
     fail2ban-client set sshd banip "$ip" >/dev/null || return 1
@@ -807,9 +891,18 @@ fail2ban_bans_shown_test() {
         [[ $out == *"$ip"* ]] && break
         sleep 1
     done
-    fail2ban-client set sshd unbanip "$ip" >/dev/null || true
     grep -qE "^ +1\) +$ip +sshd +([0-9-]{10} )?[0-9]{2}:[0-9]{2} \(in (59 min|60 min|1 h)\)$" <<<"$out" || {
         printf '%s\n' "$out"
+        fail2ban-client set sshd unbanip "$ip" >/dev/null || true
+        return 1
+    }
+    out=$(app seedbox unban "$ip" 2>&1) && [[ $out == *"Unbanning $ip"*ok* ]] || {
+        printf 'unban: %s\n' "$out"
+        fail2ban-client set sshd unbanip "$ip" >/dev/null || true
+        return 1
+    }
+    out=$(app seedbox unban "$ip" 2>&1) && [[ $out == *"$ip is not banned right now: nothing to do."* ]] || {
+        printf 'unban again: %s\n' "$out"
         return 1
     }
     out=$(app seedbox bans 2>&1)
@@ -1101,6 +1194,7 @@ EOF
     check "system recognised (header, diagnostics)" system_named
     check "seedtunnel version" output_has "seedtunnel $(sed -n 's/^APP_VERSION="\(.*\)"$/\1/p' "${APP%/*}/lib/common.sh")" app version
     check "seedtunnel help" output_has "vpn add NAME" app help
+    check "seedtunnel --version" output_has "seedtunnel $(sed -n 's/^APP_VERSION="\(.*\)"$/\1/p' "${APP%/*}/lib/common.sh")" app --version
     check "help: new commands" output_has "backup auto on|off|status" app help
     check "help in French" output_has "Utilisation : seedtunnel" env SEEDTUNNEL_LANG=fr "$APP" help
     check_fails "unknown command refused" app whatever
@@ -1151,11 +1245,15 @@ EOF
     check "vpn show phone" output_has "[Interface]" app vpn show phone
     check "vpn show phone: the QR code fits in 80 columns" vpn_qr_test
     check_fails "invalid client name refused" app vpn add "invalid name!"
+    check_fails "a client name that differs from « phone » only by case refused" app vpn add PHONE
     check "vpn dns: Quad9 in use" output_has "DNS of the clients: Quad9 · 9.9.9.9, 149.112.112.112." app vpn dns
     check "vpn dns cloudflare: in the file of the clients" vpn_dns_test
 
     step "VPN: end-to-end tunnel"
     check "a client connects and reaches 10.8.0.1" tunnel_test
+    check "VPN clients: cannot reach each other, nor be reached from outside the tunnel" vpn_isolation_test
+    check "VPN clients: protected in the NAT table of the VPN, said by the diagnostics" \
+        output_has "clients of the VPN protected" app doctor
     # for phase 2: a backup of this server while it has its VPN only
     printf 'a test passphrase\n' >"$W/vpn-only.pass"
     chmod 600 "$W/vpn-only.pass"
@@ -1200,6 +1298,8 @@ EOF
     check "vpn links: through the site of the seedbox" output_has "through the HTTPS site of the seedbox" app vpn links
     check "Transmission locked down by systemd" output_has "ProtectSystem=strict" systemctl show transmission-daemon -p ProtectSystem
     check "Transmission waits for the disk of the data" output_has "$DATA" systemctl show transmission-daemon -p RequiresMountsFor
+    check "Transmission: nothing can be run from the folder of the data" transmission_noexec_test
+    check "Transmission: its settings private again after a restart, its folder closed to the others" transmission_private_test
     # Ubuntu 26.04: its AppArmor profile confines Transmission; elsewhere, nothing
     if [[ -f /etc/apparmor.d/transmission ]] && grep -q 'local/transmission-daemon' /etc/apparmor.d/transmission; then
         check "AppArmor: Transmission allowed in the data folder" grep -qxF "\"$DATA/**\" rwk," /etc/apparmor.d/local/transmission-daemon
@@ -1217,7 +1317,7 @@ EOF
     check "two requests on the same connection: the file only once" share_same_connection_test
     check "HEAD refused (405) without using the link up" share_head_test
     check "watcher killed: the link is deleted anyway" share_watcher_killed_test
-    check "tokens of the links hidden in the access log of nginx" share_log_test
+    check "tokens of the links hidden in the logs of nginx (access, errors)" share_log_test
     check "seedbox sftp-config: WinSCP address with fingerprint, FileZilla and WinSCP files" sftp_config_test
     check "list of links impossible: page « nothing here », no password" share_folder_test
     check "unknown token: 404" http_is 404 /share/0123456789abcdef0123456789abcdef/
@@ -1259,7 +1359,8 @@ EOF
     check "sshd, nginx-http-auth and recidive jails" bash -c \
         "fail2ban-client status | grep -q sshd && fail2ban-client status | grep -q nginx-http-auth && fail2ban-client status | grep -q recidive"
     check "SSH: ban from every port, whatever the port of SSH" fail2ban_all_ports_test
-    check "bans: the address, its jail and the end of its ban, then « no address banned »" fail2ban_bans_shown_test
+    check "bans: the address, its jail and the end of its ban; unban, « not banned » the second time" fail2ban_bans_shown_test
+    check_fails "unban: an invalid address refused" app seedbox unban 999.1.2.3
 
     step "Firewall"
     check_fails "without --yes nor terminal: refused" app firewall enable
@@ -1325,6 +1426,9 @@ phase2() {
     check "WireGuard running" systemctl is-active --quiet wg-quick@wg0
     check "the old client connects without any change" tunnel_test
     check "seedbox password kept" http_is 409 /transmission/rpc -u "$SBU:$PW2"
+    # kept by the removal (owned by root then): the account writes them again
+    check "documents given back to the SFTP account: a file written again by SFTP" \
+        sftp_password "$PW2" "put /etc/hostname documents/test.txt"
     check "list of torrents restored" wait_torrents 1
     check "torrent restored through watch/: its file checked, complete without downloading" torrent_restored_complete
     check "firewall restored" systemctl is-active --quiet seedtunnel-firewall.service

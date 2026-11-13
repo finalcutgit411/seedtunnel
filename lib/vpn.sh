@@ -59,6 +59,20 @@ vpn_client_names() {
     done
 }
 
+# vpn_client_same_name NAME — the client whose name is NAME, whatever the case
+# of its letters (« PHONE » is « phone »: Windows cannot keep both files in
+# one folder, and the two would be mixed up on screen). Status 1: none.
+vpn_client_same_name() {
+    local existing
+    while IFS= read -r existing; do
+        if [[ ${existing,,} == "${1,,}" ]]; then
+            printf '%s' "$existing"
+            return 0
+        fi
+    done < <(vpn_client_names)
+    return 1
+}
+
 vpn_count_clients() {
     local count=0 file
     for file in "$VPN_CLIENTS_DIR"/*.env; do
@@ -256,8 +270,9 @@ EOF
 # VPN did not start). The « - » keeps the stop going if the table is gone.
 vpn_generate_systemd_dropin() {
     cat <<EOF
-# Written by seedtunnel: NAT rules of the VPN (way out to the Internet, open
-# ports of the clients), loaded when $VPN_INTERFACE starts, removed when it stops.
+# Written by seedtunnel: rules of the VPN (way out to the Internet, open ports
+# of the clients, protection of the clients), loaded when $VPN_INTERFACE starts,
+# removed when it stops.
 [Service]
 ExecStartPost=/usr/sbin/nft -f $VPN_NAT_RULES
 ExecStopPost=-/usr/sbin/nft delete table ip seedtunnel
@@ -266,11 +281,19 @@ EOF
 
 # « table / delete / table » replaces the table in one go, whether it exists or
 # not, without touching the other rules of the system.
+#
+# The chain « forward » protects the clients: the server forwards packets, so
+# without it anything that reaches the server (a machine of the same network
+# of the host, a container) could reach the clients, and the clients each
+# other. Only the replies and the open port of each client go to them. Its
+# policy stays « accept »: a refusal by default would also cut the traffic of
+# other programs (Docker), which never goes to the VPN.
 vpn_generate_nat_rules() {
     local file name CLIENT_NUMBER CLIENT_PUBLIC_KEY CLIENT_PRESHARED_KEY CLIENT_PRIVATE_KEY
     cat <<EOF
 #!/usr/sbin/nft -f
-# Written by seedtunnel — NAT of the VPN, loaded when $VPN_INTERFACE starts.
+# Written by seedtunnel — NAT and protection of the clients of the VPN, loaded
+# when $VPN_INTERFACE starts.
 table ip seedtunnel
 delete table ip seedtunnel
 table ip seedtunnel {
@@ -293,6 +316,15 @@ EOF
         type nat hook postrouting priority srcnat; policy accept;
         # clients go out to the Internet with the IP of the server
         ip saddr $VPN_SUBNET.0/24 oifname "$VPN_OUT_INTERFACE" masquerade
+    }
+    chain forward {
+        type filter hook forward priority filter; policy accept;
+        # the clients cannot reach each other
+        iifname "$VPN_INTERFACE" oifname "$VPN_INTERFACE" drop
+        # to the clients: the replies, and their open port; nothing else
+        oifname "$VPN_INTERFACE" ct state established,related accept
+        oifname "$VPN_INTERFACE" ct status dnat accept
+        oifname "$VPN_INTERFACE" drop
     }
 }
 EOF
@@ -409,9 +441,9 @@ vpn_next_client_number() {
 # --- Clients --------------------------------------------------------------------------
 
 vpn_add_client() {
-    local name=$1 CLIENT_NUMBER CLIENT_PUBLIC_KEY CLIENT_PRESHARED_KEY CLIENT_PRIVATE_KEY
+    local name=$1 existing CLIENT_NUMBER CLIENT_PUBLIC_KEY CLIENT_PRESHARED_KEY CLIENT_PRIVATE_KEY
     vpn_is_valid_client_name "$name" || die 'Invalid client name: "%s" (letters, digits, - and _, 15 characters at most).' "$name"
-    [[ ! -e $VPN_CLIENTS_DIR/$name.env ]] || die 'Client "%s" already exists.' "$name"
+    if existing=$(vpn_client_same_name "$name"); then die 'Client "%s" already exists.' "$existing"; fi
     if ! CLIENT_NUMBER=$(vpn_next_client_number); then die 'Maximum number of clients reached (%s).' "$VPN_MAX_CLIENTS"; fi
     CLIENT_PRIVATE_KEY=$(wg genkey)
     CLIENT_PUBLIC_KEY=$(printf '%s' "$CLIENT_PRIVATE_KEY" | wg pubkey)
@@ -639,13 +671,13 @@ vpn_pick_client() {
 }
 
 vpn_ask_client_name() {
-    local _client_var=$1 _client_default=${2-} _client_name
+    local _client_var=$1 _client_default=${2-} _client_name _client_existing
     while true; do
         ask_back _client_name 'Client name (e.g. phone, laptop)' "$_client_default" || return 1
         if ! vpn_is_valid_client_name "$_client_name"; then
             warn 'Letters, digits, - and _ only, 15 characters at most.'
-        elif [[ -e $VPN_CLIENTS_DIR/$_client_name.env ]]; then
-            warn 'Client "%s" already exists.' "$_client_name"
+        elif _client_existing=$(vpn_client_same_name "$_client_name"); then
+            warn 'Client "%s" already exists.' "$_client_existing"
         else
             break
         fi

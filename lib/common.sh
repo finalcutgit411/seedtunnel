@@ -7,7 +7,7 @@
 # =============================================================================
 
 APP_NAME="seedtunnel"
-APP_VERSION="1.0.4"
+APP_VERSION="1.0.5"
 # Format of the settings in /etc/seedtunnel, and so of the backups that hold
 # them: 1 up to now. Raised by a version that writes its settings another
 # way; a backup of a format newer than this version knows is refused.
@@ -509,18 +509,29 @@ write_if_changed() {
 
 written_list() { printf '%s' "$APP_STATE_DIR/written.sha256"; }
 
-# written_remember FILE — the content of FILE is now the one seedtunnel wrote
+# written_remember FILE — the content of FILE is now the one seedtunnel wrote.
+# The files deleted since (removal of the seedbox…) leave the list.
 written_remember() {
     local list sum tmp
     list=$(written_list)
     [[ -d ${list%/*} ]] || return 0
     sum=$(sha256sum <"$1") || return 0
     tmp=$(mktemp "$list.XXXXXX") || return 0
-    if { if [[ -f $list ]]; then awk -v file="$1" '$2 != file' "$list"; fi && printf '%s %s\n' "${sum%% *}" "$1"; } >"$tmp" \
+    if { if [[ -f $list ]]; then written_others "$list" "$1"; fi && printf '%s %s\n' "${sum%% *}" "$1"; } >"$tmp" \
         && chmod 600 "$tmp" && mv -f "$tmp" "$list"; then
         return 0
     fi
     rm -f "$tmp"
+}
+
+# written_others LIST FILE — the lines of LIST of the other files that still
+# exist (« FINGERPRINT PATH », the path may hold spaces)
+written_others() {
+    local line path
+    while IFS= read -r line; do
+        path=${line#* }
+        if [[ $path != "$2" && -e $path ]]; then printf '%s\n' "$line"; fi
+    done <"$1"
 }
 
 # written_changed FILE — true if FILE changed since seedtunnel wrote it
