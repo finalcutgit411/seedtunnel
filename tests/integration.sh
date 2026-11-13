@@ -543,8 +543,10 @@ links_site_test() {
     cmp "$W/links-shared.conf" /etc/seedtunnel/vpn/clients/phone.conf || return 1
     link_gone "${path}phone.conf" || return 1
     [[ $(curl -sk --max-time 10 "https://127.0.0.1${path}phone.conf") == *"Link already used or expired"* ]] || return 1
-    # nothing else: 404, no password asked; http goes to https
+    # nothing else: 404 with the page « nothing here », no password asked; http
+    # goes to https
     [[ $(http_code /) == 404 && $(http_code /transmission/web/) == 404 && $(http_code /share/) == 403 ]] || return 1
+    [[ $(curl -sk --max-time 10 "https://127.0.0.1/") == *"Nothing here"* ]] || return 1
     [[ $(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "http://127.0.0.1/share/x") == 301 ]] || return 1
     ! grep -qE 'proxy_pass|auth_basic "' /etc/nginx/sites-available/seedtunnel
 }

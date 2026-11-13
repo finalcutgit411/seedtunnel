@@ -6809,8 +6809,21 @@ links_site_serves_only_links() (
     [[ $site == *"server_name 203.0.113.7;"* && $site == *"location ^~ /share/"* && $site == *"/.well-known/acme-challenge/"* ]] || return 1
     [[ $site == *"$SEEDBOX_SSL_DIR/selfsigned.crt"* && $site != *Strict-Transport-Security* ]] || return 1
     [[ $site != *"auth_basic \"Restricted\""* && $site != *proxy_pass* && $site != *transmission* && $site != *htpasswd* ]] || return 1
-    # any other address of the HTTPS site: 404
+    # any other address of the HTTPS site: 404, with the page « nothing here »
+    # (the links keep their own page)
     [[ $site == *$'    location / {\n        return 404;\n    }\n}'* ]] || return 1
+    local nothing
+    nothing=$(sed -n '/location = \/seedtunnel\/nothing-here.html {/,/^    }/p' <<<"$site")
+    grep -qx "    error_page 404 /seedtunnel/nothing-here.html;" <<<"$site" && grep -qF "internal;" <<<"$nothing" \
+        && grep -qF "alias $ROOT/web/nothing-here.html;" <<<"$nothing" \
+        && grep -qF "Content-Security-Policy \"default-src 'none'" <<<"$nothing" \
+        && grep -qF 'X-Robots-Tag "noindex, nofollow"' <<<"$nothing" \
+        && grep -qF "error_page 404 /seedtunnel/link-gone.html;" <<<"$site" || return 1
+    # page missing: the 404 of nginx
+    if (APP_DIR=$WORK/elsewhere links_run links_generate_site | grep -q "nothing-here"); then return 1; fi
+    # the page stands alone and names nothing
+    if grep -qiE 'https?:|src=|href=|url\(|<script|transmission|seedtunnel|seedbox' "$ROOT/web/nothing-here.html"; then return 1; fi
+    grep -q "Rien ici" "$ROOT/web/nothing-here.html" && grep -q "Nothing here" "$ROOT/web/nothing-here.html" || return 1
     # the variables of the seedbox untouched
     [[ $SEEDBOX_DOMAIN == seed.example.org && $SEEDBOX_CERTIFICATE == letsencrypt && -z ${NGINX_SITE_GENERATOR-} ]] || return 1
     # Let's Encrypt: its certificate, and HSTS (in the links too)

@@ -3,6 +3,11 @@
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 
+## [1.0.1] - 2026-11-13
+
+### Changed
+- Site of the links (VPN without a seedbox): an address that is not a link shows a page « Nothing here » in the colors of SeedTunnel, without its name, instead of the 404 of nginx.
+
 ## [1.0.0] - 2026-11-13
 
 The version for everyday use: new screens in the terminal, download pages in the colors of SeedTunnel, one-time links without a seedbox, and the fixes found while testing it on real servers (Debian 12 and 13, Ubuntu 24.04 and 26.04). From 0.9.0: `sudo seedtunnel update`.

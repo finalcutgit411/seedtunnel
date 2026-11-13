@@ -77,6 +77,8 @@ EOF
 }
 
 SHARE_GONE_PAGE="web/link-gone.html"
+# Any address of the site of the links that is not a link
+LINKS_NOTHING_PAGE="web/nothing-here.html"
 
 # A link used or expired (or a wrong token) answers 404 with a page that says
 # so, in the colors of seedtunnel but without its name (like the page « access
@@ -250,12 +252,35 @@ $(nginx_generate_tls)
     add_header X-Content-Type-Options nosniff always;
     add_header Referrer-Policy no-referrer always;$hsts
 $(share_generate_nginx "${hsts//$'\n    '/$'\n        '}")
+$(links_generate_nothing_page "${hsts//$'\n    '/$'\n        '}")
 
     # nothing else here
     location / {
         return 404;
     }
 }
+EOF
+}
+
+# Any other address of the site of the links: a page « nothing here », in the
+# colors of seedtunnel but without its name (anyone can open it), still a 404.
+# Only if the page is there: otherwise the 404 of nginx. $1: HSTS header, if
+# any, already formatted.
+links_generate_nothing_page() {
+    [[ -r $APP_DIR/$LINKS_NOTHING_PAGE ]] || return 0
+    cat <<EOF
+
+    error_page 404 /seedtunnel/nothing-here.html;
+    location = /seedtunnel/nothing-here.html {
+        internal;
+        alias $APP_DIR/$LINKS_NOTHING_PAGE;
+        default_type text/html;
+        add_header Cache-Control "no-store" always;
+        add_header X-Content-Type-Options nosniff always;
+        add_header Referrer-Policy no-referrer always;
+        add_header X-Robots-Tag "noindex, nofollow" always;
+        add_header Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'" always;${1-}
+    }
 EOF
 }
 
