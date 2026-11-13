@@ -758,7 +758,7 @@ report_known_values() {
     # each client by its number: the same in every report, as its address
     # 10.8.0.(N+1) and its port 60000+N
     for client in "$VPN_CLIENTS_DIR"/*.env; do
-        [[ -e $client ]] || continue
+        vpn_is_client_file "$client" || continue
         name=${client##*/}
         name=${name%.env}
         number=$(vpn_client_number "$client")

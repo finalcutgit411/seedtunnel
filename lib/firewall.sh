@@ -218,7 +218,7 @@ firewall_forwarded_rows() {
         number=$((${address##*.} - 1))
         name="?"
         for file in "$VPN_CLIENTS_DIR"/*.env; do
-            [[ -e $file ]] || continue
+            vpn_is_client_file "$file" || continue
             if [[ $(vpn_client_number "$file") == "$number" ]]; then
                 name=${file##*/}
                 name=${name%.env}

@@ -29,10 +29,17 @@ update_check_syntax() {
     done
 }
 
+# The tag of the latest version, from the answer of the GitHub API (standard
+# input, indented or not). Without jq: it comes with the VPN or the seedbox,
+# and seedtunnel must also update before them.
+update_tag_from_json() {
+    grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed -E 's/.*"([^"]*)"$/\1/'
+}
+
 update_from_release() {
     local tag version tmp base
     tag=$(curl -fsSL --max-time 15 "https://api.github.com/repos/$APP_REPO/releases/latest" 2>/dev/null \
-        | jq -r '.tag_name // empty' 2>/dev/null || true)
+        | update_tag_from_json || true)
     [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die 'Cannot find the latest version published on github.com/%s.' "$APP_REPO"
     version=${tag#v}
     if ! version_greater "$version" "$APP_VERSION"; then

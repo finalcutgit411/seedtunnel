@@ -3,6 +3,14 @@
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 
+## [1.0.2] - 2026-11-13
+
+### Security
+- Restore: a backup holding a VPN client file with a name SeedTunnel never gives (a line break, a space, more than 15 characters…), or any file whose name holds a control character, is refused before anything changes. The name of a client goes into `wg0.conf`, where a line break could add a command run as root when the VPN starts. Backups made by SeedTunnel always pass: the names of the clients follow the same rule since 0.9.0. A file of this kind put there by hand is ignored: no client, nothing of it in `wg0.conf` nor in the NAT rules.
+
+### Fixed
+- `seedtunnel update` on a server where nothing is installed yet: the latest version is read without `jq`, which comes with the VPN or the seedbox. It said « Cannot find the latest version published ».
+
 ## [1.0.1] - 2026-11-13
 
 ### Changed

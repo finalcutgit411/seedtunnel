@@ -53,7 +53,7 @@ vpn_require_installed() {
 vpn_client_names() {
     local file
     for file in "$VPN_CLIENTS_DIR"/*.env; do
-        [[ -e $file ]] || continue
+        vpn_is_client_file "$file" || continue
         file=${file##*/}
         printf '%s\n' "${file%.env}"
     done
@@ -62,7 +62,7 @@ vpn_client_names() {
 vpn_count_clients() {
     local count=0 file
     for file in "$VPN_CLIENTS_DIR"/*.env; do
-        if [[ -e $file ]]; then count=$((count + 1)); fi
+        if vpn_is_client_file "$file"; then count=$((count + 1)); fi
     done
     printf '%s' "$count"
 }
@@ -84,6 +84,15 @@ vpn_connected_count() {
 
 # 15 characters at most: on Linux the file name becomes the interface name
 vpn_is_valid_client_name() { [[ $1 =~ ^[A-Za-z0-9_-]{1,15}$ ]]; }
+
+# vpn_is_client_file FILE — FILE (clients/NAME.env) is the file of a client.
+# With another name, it was not made by seedtunnel (a restore refuses it): no
+# client, never written into wg0.conf, read as root by wg-quick (a line break
+# in the name would make a line of settings there: PostUp…)
+vpn_is_client_file() {
+    local name=${1##*/}
+    [[ -f $1 ]] && vpn_is_valid_client_name "${name%.env}"
+}
 
 vpn_require_client() {
     vpn_is_valid_client_name "$1" || die 'Invalid client name: "%s".' "$1"
@@ -225,7 +234,7 @@ ListenPort = $VPN_PORT
 PrivateKey = $key
 EOF
     for file in "$VPN_CLIENTS_DIR"/*.env; do
-        [[ -e $file ]] || continue
+        vpn_is_client_file "$file" || continue
         name=${file##*/}
         name=${name%.env}
         # shellcheck source=/dev/null
@@ -269,7 +278,7 @@ table ip seedtunnel {
         type nat hook prerouting priority dstnat; policy accept;
 EOF
     for file in "$VPN_CLIENTS_DIR"/*.env; do
-        [[ -e $file ]] || continue
+        vpn_is_client_file "$file" || continue
         name=${file##*/}
         name=${name%.env}
         # shellcheck source=/dev/null
@@ -691,7 +700,7 @@ vpn_status_table() {
     now=$(date +%s)
     rows+=("$(t 'CLIENT')"$'\t'IP$'\t'PORT$'\t'"$(t 'RECEIVED / SENT')"$'\t'"$(t 'LAST CONNECTION')")
     for file in "$VPN_CLIENTS_DIR"/*.env; do
-        [[ -e $file ]] || continue
+        vpn_is_client_file "$file" || continue
         name=${file##*/}
         name=${name%.env}
         # shellcheck source=/dev/null

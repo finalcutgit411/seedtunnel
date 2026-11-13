@@ -1127,6 +1127,26 @@ backup_unsafe_state_file() {
     done
 }
 
+# restore_bad_name FOLDER — the first file of the settings of the backup
+# (FOLDER: its etc/seedtunnel) whose name seedtunnel would not have given, as
+# in the archive, quoted (a name may hold a line break): a file of a client of
+# the VPN (vpn/clients/*.env, *.conf) whose name is not one a client may have
+# (it goes into wg0.conf, read as root by wg-quick: after a line break,
+# « PostUp = … » would be a command); anywhere, a line break or another
+# control character. Nothing: all fine.
+restore_bad_name() {
+    local dir=$1 path name
+    while IFS= read -r -d '' path; do
+        path=${path#"$dir/"}
+        name=${path##*/}
+        if [[ $path == *[[:cntrl:]]* ]] || { [[ $path == "vpn/clients/$name" && $name =~ \.(env|conf)$ ]] \
+            && ! vpn_is_valid_client_name "${name%.*}"; }; then
+            printf '%q' "etc/seedtunnel/$path"
+            return 0
+        fi
+    done < <(find "$dir" -mindepth 1 -print0 2>/dev/null)
+}
+
 # restore_setting_ok NAME VALUE — is VALUE one that seedtunnel could have
 # written for NAME? The same checks as at an installation: a backup made by
 # someone else must not bring a path, an account or a name that seedtunnel
@@ -1376,6 +1396,13 @@ restore_main() {
     # every file to root: an account of this server must not get a file of
     # seedtunnel because the archive says so
     run 'Extracting the archive' tar -xzf "$BACKUP_TMP_DIR/backup.tar.gz" --no-same-owner -C "$BACKUP_TMP_DIR/x"
+    # The names of the clients of the VPN go into wg0.conf: only the names
+    # seedtunnel gives
+    bad=$(restore_bad_name "$BACKUP_TMP_DIR/x/etc/seedtunnel")
+    if [[ -n $bad ]]; then
+        backup_cleanup
+        die 'Archive refused: unexpected path "%s"' "$bad"
+    fi
     # The settings are read by « . »: nothing in them may run a command
     bad=$(backup_unsafe_state_file "$BACKUP_TMP_DIR/x/etc/seedtunnel")
     if [[ -n $bad ]]; then

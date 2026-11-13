@@ -896,6 +896,28 @@ update_failed_keeps_previous_version() (
     grep -q "echo old" "$APP_DIR/seedtunnel.sh" && [[ $(<"$WORK/app/applied") == old ]]
 )
 
+# The latest version read without jq (installed with the VPN or the seedbox
+# only): seedtunnel updates before them
+update_without_jq() (
+    load
+    jq() {
+        echo "jq used" >>"$WORK/jq-used"
+        return 127
+    }
+    rm -f "$WORK/jq-used"
+    [[ $(printf '{\n  "url": "x",\n  "tag_name": "v1.2.3",\n  "name": "v1.2.3"\n}\n' | update_tag_from_json) == v1.2.3 ]] || return 1
+    [[ $(printf '{"url":"x","tag_name" : "v2.0.0","name":"v2.0.0"}' | update_tag_from_json) == v2.0.0 ]] || return 1
+    [[ -z $(printf '{"message":"Not Found"}' | update_tag_from_json) ]] || return 1
+    # the same version published: up to date, said as such
+    curl() { printf '{\n  "tag_name": "v%s",\n  "draft": false\n}\n' "$APP_VERSION"; }
+    update_from_release >"$WORK/update.out" 2>&1 || return 1
+    grep -q "seedtunnel is up to date (version $APP_VERSION)" "$WORK/update.out" || return 1
+    # nothing read: said, with the address
+    curl() { return 22; }
+    if (update_from_release) >"$WORK/update.out" 2>&1; then return 1; fi
+    grep -q "Cannot find the latest version published on github.com/$APP_REPO" "$WORK/update.out" && [[ ! -e $WORK/jq-used ]]
+)
+
 # installed version (records « old » when it applies) and new version (records
 # « new », then ends with status $1)
 update_versions_make() {
@@ -5451,6 +5473,38 @@ restore_refuses_programs() (
     declare -f restore_main | grep -q -- "--no-same-owner"
 )
 
+# A client of the VPN named as no client can be (its name goes into wg0.conf:
+# after a line break, « PostUp = … » would run as root), a control character
+# in any name: refused, said as in the archive, nothing restored. A file of
+# another kind in clients/ (left by a write cut short) does not matter.
+restore_refuses_bad_names() (
+    local name expected
+    for name in $'vpn/clients/x\n[Interface]\nPostUp = touch pwned\n#.env' "vpn/clients/my phone.env" \
+        "vpn/clients/a.b.conf" "vpn/clients/sixteen-letters-.env" $'ssl/a\tb.key'; do
+        restore_archive_load badname
+        mkdir -p "$RESTORE_ROOT/etc/seedtunnel/${name%/*}"
+        cp "$RESTORE_ROOT/etc/seedtunnel/vpn/clients/laptop.env" "$RESTORE_ROOT/etc/seedtunnel/$name"
+        restore_archive_make badname
+        if (restore_main "$WORK/badname.enc") >"$WORK/badname.out" 2>&1; then
+            echo "accepted: $name"
+            return 1
+        fi
+        expected="Archive refused: unexpected path \"$(printf '%q' "etc/seedtunnel/$name")\""
+        grep -qF "$expected" "$WORK/badname.out" && [[ -z $(ls -A "$APP_STATE_DIR") ]] || {
+            echo "expected: $expected"
+            cat "$WORK/badname.out"
+            return 1
+        }
+    done
+    # names seedtunnel gives, and a temporary file left behind: restored
+    restore_archive_load goodname
+    cp "$RESTORE_ROOT/etc/seedtunnel/vpn/clients/laptop.env" "$RESTORE_ROOT/etc/seedtunnel/vpn/clients/Phone_2-b.env"
+    echo x >"$RESTORE_ROOT/etc/seedtunnel/vpn/clients/laptop.conf.Ab12Cd"
+    restore_archive_make goodname
+    (restore_main "$WORK/goodname.enc") >"$WORK/goodname.out" 2>&1
+    ! grep -q "refused" "$WORK/goodname.out" && grep -q "The backup contains" "$WORK/goodname.out"
+)
+
 # The renewal file of the certificate: no command but the reload of nginx, the
 # paths of seedtunnel only
 restore_refuses_letsencrypt_commands() (
@@ -5522,6 +5576,36 @@ vpn_server_key_one_line() (
     local conf
     conf=$(vpn_generate_server_conf)
     [[ $conf == *"PrivateKey = yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk="* && $conf != *PostUp* ]]
+)
+
+# A file in clients/ named as no client can be (put there by hand): no client,
+# nothing of it in wg0.conf nor in the NAT rules, nor in the lists
+vpn_ignores_bad_client_names() (
+    load
+    VPN_STATE_DIR="$WORK/vpn-names"
+    VPN_CLIENTS_DIR="$VPN_STATE_DIR/clients"
+    VPN_PORT=51820
+    VPN_OUT_INTERFACE=eth0
+    rm -rf "$VPN_STATE_DIR"
+    mkdir -p "$VPN_CLIENTS_DIR"
+    echo "yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk=" >"$VPN_STATE_DIR/server.key"
+    local name conf rules
+    for name in laptop $'x\n[Interface]\nPostUp = touch pwned\n#' "my phone"; do
+        (
+            CLIENT_NUMBER=$((${#name} % 200 + 1))
+            CLIENT_PUBLIC_KEY="yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk="
+            CLIENT_PRESHARED_KEY=$CLIENT_PUBLIC_KEY
+            state_write "$VPN_CLIENTS_DIR/$name.env" CLIENT_NUMBER CLIENT_PUBLIC_KEY CLIENT_PRESHARED_KEY
+        )
+    done
+    mkdir "$VPN_CLIENTS_DIR/folder.env"
+    conf=$(vpn_generate_server_conf) && rules=$(vpn_generate_nat_rules) || return 1
+    [[ $conf == *"# client: laptop"* && $conf != *PostUp* && $conf != *"my phone"* && $(grep -c '^\[Interface\]' <<<"$conf") == 1 ]] || {
+        echo "$conf"
+        return 1
+    }
+    [[ $rules == *'# client "laptop"'* && $rules != *PostUp* && $rules != *"my phone"* ]] || return 1
+    [[ $(vpn_client_names) == laptop && $(vpn_count_clients) == 1 ]]
 )
 
 # --- One-time links: the token in no argument (ps, systemctl status) -------------
@@ -7182,6 +7266,7 @@ check "diagnostics: no automatic backup since it was turned on → warning" doct
 check "restore: decrypted files deleted after a failure" restore_cleans_up_after_failure
 check "full disk: Transmission refused to start, allowed again with room" diskguard_refuses_start_on_full_disk
 check "update: new version failing → previous version back" update_failed_keeps_previous_version
+check "update: the latest version read without jq (before the VPN or the seedbox are installed)" update_without_jq
 check "update: interrupted earlier (.previous left) → refused, nothing touched" update_refused_when_previous_left
 check "update: new version cannot be put in place → previous one back at once" update_second_rename_failure_puts_back
 check "update: previous version back but its apply fails → said so" update_old_apply_failure_reported
@@ -7374,9 +7459,11 @@ check "restore with ufw on: refused before the choice of the file, and by comman
 check "restore: a name seedtunnel never writes (PATH…), another settings file → refused" restore_refuses_other_names
 check "restore: values refused at an installation (account, folder, port, DNS, key of the server) → refused" restore_refuses_unexpected_values
 check "restore: a file that could be run → refused; the files of the archive go to root" restore_refuses_programs
+check "restore: a VPN client named as no client can be, a control character in a name → refused" restore_refuses_bad_names
 check "restore: renewal of the certificate with another command or path → refused, as certbot writes it → accepted" restore_refuses_letsencrypt_commands
 check "restore: only the certificate of seedtunnel and the account of Let's Encrypt go back" restore_letsencrypt_only_seedtunnel
 check "VPN: wg0.conf takes the first line of the key of the server only" vpn_server_key_one_line
+check "VPN: a file of clients/ named as no client can be → no client, nothing of it in wg0.conf nor the NAT rules" vpn_ignores_bad_client_names
 check "Transmission: its settings written by its own account, a link beside them never followed by root" transmission_settings_never_through_a_link
 check "Transmission: its settings in /etc or in its folder, never where a link of its account leads" transmission_settings_link_to_etc_only
 check "links: the token in no argument of the watcher, its job in files of root only" share_token_not_in_arguments

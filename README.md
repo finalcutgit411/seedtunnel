@@ -29,7 +29,7 @@ Rent a small VPS with Debian 12/13 or Ubuntu Server 24.04/26.04, connect to it w
 
 ```bash
 apt update && apt full-upgrade -y
-V=1.0.0
+V=1.0.2
 cd "$(mktemp -d)"
 curl -fLO https://github.com/finalcutgit411/seedtunnel/releases/download/v$V/seedtunnel-$V.tar.gz \
   && curl -fLO https://github.com/finalcutgit411/seedtunnel/releases/download/v$V/SHA256SUMS \
