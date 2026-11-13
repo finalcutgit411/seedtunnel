@@ -4290,8 +4290,13 @@ decrypt_errors_under_their_title() (
     load
     OPT_PASSPHRASE_FILE=$WORK/passphrase
     printf 'wrong passphrase\n' >"$OPT_PASSPHRASE_FILE"
-    # encrypted with another passphrase: « bad decrypt », as on a real server
-    printf 'archive' | openssl enc -aes-256-cbc -pbkdf2 -iter 1000 -salt -pass pass:right -out "$WORK/seedtunnel-host-20261110.tar.gz.enc"
+    # encrypted with another passphrase: « bad decrypt », as on a real server.
+    # A fixed salt: with a random one, about 1 time in 256 the wrong key
+    # happens to give a valid end of block, and gzip fails instead
+    {
+        printf 'Salted__\001\002\003\004\005\006\007\010'
+        printf 'archive' | openssl enc -aes-256-cbc -pbkdf2 -iter 1000 -S 0102030405060708 -pass pass:right
+    } >"$WORK/seedtunnel-host-20261110.tar.gz.enc"
     banner() { :; }
     restore_unfinished() { :; }
     secret_file_check() { :; }
@@ -4892,8 +4897,8 @@ restore_picks_a_backup_by_number() (
 )
 
 # My backups: the list numbered (by command too), one downloaded by its
-# number, those of the server deleted after a question in red (the last one
-# said), those copied into a home folder left alone
+# number, deleted after a question in red (the last one of the server said, a
+# copy put there by hand said too); a file outside the list never deleted
 backup_list_download_delete() (
     back_load
     local file auto="" hand="" copied=""
@@ -4923,9 +4928,15 @@ backup_list_download_delete() (
     rm -f "$WORK/mine-calls"
     backup_share 3 >/dev/null 2>&1 || return 1
     [[ $(<"$WORK/mine-calls") == "share $hand" ]] || return 1
-    # a backup copied into a home folder: never deleted
-    if (backup_delete "$copied") >"$WORK/mine.out" 2>&1; then return 1; fi
-    grep -q "only deletes its own backups" "$WORK/mine.out" && [[ -f $copied ]] || return 1
+    # a file outside the list, a link to a backup: never deleted
+    touch "$WORK/mine/other.tar.gz.enc"
+    ln -sf "$hand" "$WORK/mine/home/ubuntu/link.tar.gz.enc"
+    for file in "$WORK/mine/other.tar.gz.enc" "$WORK/mine/home/ubuntu/link.tar.gz.enc" "$BACKUP_DIR/../mine/other.tar.gz.enc"; do
+        if (backup_delete "$file") >"$WORK/mine.out" 2>&1; then return 1; fi
+        grep -q "Not a backup of the list (seedtunnel backup list)" "$WORK/mine.out" || return 1
+    done
+    [[ -f $WORK/mine/other.tar.gz.enc && -L $WORK/mine/home/ubuntu/link.tar.gz.enc && -f $hand ]] || return 1
+    rm -f "$WORK/mine/home/ubuntu/link.tar.gz.enc"
     # « no »: kept, nothing more said
     confirm() { return 1; }
     backup_delete "$hand" >"$WORK/mine.out" 2>&1 || return 1
@@ -4940,12 +4951,18 @@ backup_list_download_delete() (
     confirm() { return 1; }
     backup_delete "$auto" >"$WORK/mine.out" 2>&1 || return 1
     grep -q "It is the only backup on the server" "$WORK/mine.out" && [[ -f $auto ]] || return 1
-    # the menu: a number not in the list asked again; a copied backup left alone
+    # the menu: a number not in the list asked again; a copied backup: said
+    # in the red frame, « no » keeps it, « yes » deletes it
     answers "9" "2"
     backup_menu_mine_delete >"$WORK/mine.out" 2>&1 || return 1
     cat "$WORK/mine.out"
-    grep -q "No backup number 9" "$WORK/mine.out" && grep -q "was copied into $WORK/mine/home/ubuntu" "$WORK/mine.out" \
-        && [[ -f $copied ]] || return 1
+    grep -q "No backup number 9" "$WORK/mine.out" && grep -q "It was copied by hand into $WORK/mine/home/ubuntu" "$WORK/mine.out" \
+        && grep -q "it may be your only copy" "$WORK/mine.out" \
+        && ! grep -q "only backup on the server" "$WORK/mine.out" && [[ -f $copied ]] || return 1
+    confirm() { return 0; }
+    answers "2"
+    backup_menu_mine_delete >"$WORK/mine.out" 2>&1 || return 1
+    [[ ! -e $copied ]] && grep -q "Backup deleted: ${copied##*/}" "$WORK/mine.out" || return 1
     # the screen: the table, the room taken, the two actions; empty: back
     answers ""
     backup_menu_mine >"$WORK/mine.out" 2>&1 || return 1

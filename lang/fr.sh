@@ -45,7 +45,7 @@ Serveur
   backup [--output FICHIER] [--passphrase-file FICHIER]
   backup list                        les sauvegardes, numérotées
   backup share [NUMÉRO]              lien de téléchargement (la dernière, ou NUMÉRO)
-  backup delete NUMÉRO [--yes]       supprimer une sauvegarde du serveur
+  backup delete NUMÉRO [--yes]       supprimer une sauvegarde de la liste
   backup auto on|off|status          sauvegarde chiffrée chaque semaine (off : --yes sans terminal)
   restore [FICHIER] [--passphrase-file FICHIER] [--yes]
                                      sans FICHIER : la liste des sauvegardes trouvées

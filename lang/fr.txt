@@ -2619,11 +2619,11 @@ fr: Suppression de %s
 en: Backup deleted: %s
 fr: Sauvegarde supprimée : %s
 
-en: seedtunnel only deletes its own backups, those of %s: delete %s yourself (WinSCP).
-fr: seedtunnel ne supprime que ses propres sauvegardes, celles de %s : supprimez %s vous-même (WinSCP).
+en: Not a backup of the list (seedtunnel backup list): %s
+fr: Ce n'est pas une sauvegarde de la liste (seedtunnel backup list) : %s
 
-en: This backup was copied into %s: seedtunnel leaves it there, delete it yourself (WinSCP).
-fr: Cette sauvegarde a été copiée dans %s : seedtunnel la laisse, supprimez-la vous-même (WinSCP).
+en: It was copied by hand into %s (WinSCP, scp): it may be your only copy.
+fr: Elle a été copiée à la main dans %s (WinSCP, scp) : c'est peut-être votre seule copie.
 
 en: No backup number %s (seedtunnel backup list).
 fr: Pas de sauvegarde numéro %s (seedtunnel backup list).

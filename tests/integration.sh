@@ -326,10 +326,13 @@ backup_delete_test() {
     test -f "$made" || return 1
     output_has "Backup deleted" app backup delete "$number" --yes || return 1
     ! test -e "$made" || return 1
+    # a copy put into /root by hand: deleted too, after the same question
     number=$(app backup list | awk -v f="$copied" '$NF == f { print $1 }')
     [[ $number =~ ^[0-9]+$ ]] || return 1
-    if app backup delete "$number" --yes; then status=1; fi
+    if app backup delete "$number"; then status=1; fi
     test -f "$copied" || status=1
+    output_has "Backup deleted" app backup delete "$number" --yes || status=1
+    ! test -e "$copied" || status=1
     rm -f "$copied"
     return "$status"
 }
@@ -1230,7 +1233,7 @@ phase2() {
     check "weekly backup: run by the timer, only the last 4 kept" backup_auto_test
     check_fails "weekly backup off without --yes nor terminal: refused" app backup auto off
     check "weekly backup still on" systemctl is-enabled --quiet seedtunnel-backup.timer
-    check "my backups: numbered, deleted by number with --yes, a copied one left alone" backup_delete_test
+    check "my backups: numbered, deleted by number with --yes, a copy put into /root too" backup_delete_test
     cp "$(ls -1t /var/backups/seedtunnel/*-auto.tar.gz.enc | head -n 1)" "$W/backup.enc"
 
     step "Removal, then restore"

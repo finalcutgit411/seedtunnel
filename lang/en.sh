@@ -46,7 +46,7 @@ Server
   backup [--output FILE] [--passphrase-file FILE]
   backup list                        the backups, numbered
   backup share [NUMBER]              one-time download link (the latest, or NUMBER)
-  backup delete NUMBER [--yes]       delete a backup of the server
+  backup delete NUMBER [--yes]       delete a backup of the list
   backup auto on|off|status          weekly encrypted backup (off: --yes without a terminal)
   restore [FILE] [--passphrase-file FILE] [--yes]
                                      without FILE: the list of the backups found

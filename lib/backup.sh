@@ -557,23 +557,35 @@ backup_share_file() {
         "$(t 'The backup is encrypted: it cannot be read without its passphrase.')" "$BACKUP_DOWNLOADED_MARK"
 }
 
-# backup_delete FILE — one backup of this server deleted for good, after a
-# question in red (« no » by default; said if it is the last one). Only those
-# of $BACKUP_DIR: a backup copied into /root or a home folder belongs to
-# whoever put it there. A link made before keeps its own copy.
+# backup_listed FILE — FILE is one of the backups of the list (backup_candidates:
+# regular files, never a link)
+backup_listed() {
+    local listed
+    while IFS= read -r listed; do
+        if [[ $listed == "$1" ]]; then return 0; fi
+    done < <(backup_candidates)
+    return 1
+}
+
+# backup_delete FILE — one backup of the list deleted for good, after a
+# question in red (« no » by default). Said in the frame: the last backup of
+# this server; a backup copied by hand into /root or a home folder (perhaps
+# the only copy of it). A link made before keeps its own copy.
 backup_delete() {
     local file=$1 other others=0
     local -a lines
     WENT_BACK=0
-    if [[ $file != "$BACKUP_DIR"/*.tar.gz.enc || ${file#"$BACKUP_DIR"/} == */* || ! -f $file || -L $file ]]; then
-        die 'seedtunnel only deletes its own backups, those of %s: delete %s yourself (WinSCP).' "$BACKUP_DIR" "$file"
-    fi
+    backup_listed "$file" || die 'Not a backup of the list (seedtunnel backup list): %s' "$file"
     for other in "$BACKUP_DIR"/*.tar.gz.enc; do
         if [[ -f $other && $other != "$file" ]]; then others=$((others + 1)); fi
     done
     lines=("$(t 'The backup of %s (%s, %s) is deleted for good.' "$(date -r "$file" '+%F %R')" \
         "$(human_size "$(stat -c %s "$file")")" "$(backup_kind "$file")")")
-    if ((!others)); then lines+=("$(t 'It is the only backup on the server: keep a copy of it on your computer first.')"); fi
+    if [[ $file != "$BACKUP_DIR"/* ]]; then
+        lines+=("$(t 'It was copied by hand into %s (WinSCP, scp): it may be your only copy.' "${file%/*}")")
+    elif ((!others)); then
+        lines+=("$(t 'It is the only backup on the server: keep a copy of it on your computer first.')")
+    fi
     danger "$(t 'Delete a backup')" "${lines[@]}"
     if ! confirm 'Delete this backup?' n; then
         WENT_BACK=1
@@ -889,11 +901,6 @@ backup_menu_mine_delete() {
     mapfile -t files < <(backup_candidates)
     ((${#files[@]})) || return 0
     backup_ask_number file 'Backup to delete (number)' "${files[@]}" || return 0
-    if [[ $file != "$BACKUP_DIR"/* ]]; then
-        warn 'This backup was copied into %s: seedtunnel leaves it there, delete it yourself (WinSCP).' "${file%/*}"
-        pause
-        return 0
-    fi
     backup_delete "$file"
     if ((!WENT_BACK)); then pause; fi
 }
