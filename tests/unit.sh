@@ -1625,19 +1625,21 @@ transmission_scripts_turned_off() (
 )
 
 # Nothing run from the folders where Transmission or the SFTP account write;
-# its settings private again each time it stops, by its own account
+# its settings private again each time it starts or stops (it writes them
+# then), by its own account
 transmission_dropin_noexec_and_private() (
     load
     SEEDBOX_DATA_DIR=/srv/seedbox
     local dropin
     dropin=$(transmission_generate_dropin /etc/transmission-daemon/settings.json)
     grep -qxF "NoExecPaths=-/var/lib/transmission-daemon -/etc/transmission-daemon -/srv/seedbox" <<<"$dropin" \
+        && grep -qxF "ExecStartPost=-/bin/chmod 600 /etc/transmission-daemon/settings.json" <<<"$dropin" \
         && grep -qxF "ExecStopPost=-/bin/chmod 600 /etc/transmission-daemon/settings.json" <<<"$dropin" || {
         echo "$dropin"
         return 1
     }
     # run by the account of Transmission (no « + »: never as root)
-    ! grep -q '^ExecStopPost=[-@:!]*+' <<<"$dropin"
+    ! grep -qE '^Exec(StartPost|StopPost)=[-@:!]*\+' <<<"$dropin"
 )
 
 # After each run, its settings in 600 and its folder closed to the others,
@@ -8142,7 +8144,7 @@ check "packages: list kept when the installed packages cannot be read" registry_
 check "Transmission: settings write failing → previous ones whole, Transmission started" transmission_settings_failure_keeps_them
 check "Transmission: waits for the disk of the data" transmission_waits_for_data_disk
 check "Transmission: no program run at the end of a download (and when added, done seeding: Transmission 4)" transmission_scripts_turned_off
-check "Transmission: nothing run from the folders where it or SFTP write, settings private when it stops" transmission_dropin_noexec_and_private
+check "Transmission: nothing run from the folders where it or SFTP write, settings private when it starts or stops" transmission_dropin_noexec_and_private
 check "Transmission: settings in 600 and its folder closed to the others after each run, by its own account" transmission_settings_made_private
 check "diagnostics: settings of Transmission readable by all, or a program set to run → warning" doctor_transmission_settings_checked
 check "SFTP: documents kept by the deletion of the account given back to it, never through a link nor to a download" sftp_documents_given_back

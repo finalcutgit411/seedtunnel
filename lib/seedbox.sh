@@ -509,9 +509,10 @@ transmission_settings_differences() {
 # through the web interface, would run outside the folder SFTP is locked in.
 #
 # Its settings hold the hash of the password: Transmission writes them again
-# when it stops, readable by every account (its umask, made for the
-# downloads). They are made private again right after, by its own account
-# (never by root, which a link put there could lead to another file).
+# when it starts and when it stops (4.1 and later: readable by every account,
+# its umask is made for the downloads). They are made private again right
+# after, by its own account (never by root, which a link put there could lead
+# to another file).
 # transmission_generate_dropin [SETTINGS] — SETTINGS: the real file of its
 # settings (transmission_settings_file).
 transmission_generate_dropin() {
@@ -528,6 +529,7 @@ RequiresMountsFor=$SEEDBOX_DATA_DIR
 [Service]
 # not started on an almost full disk (« + »: this check runs as root)
 ExecStartPre=+$APP_DIR/seedtunnel.sh diskguard-prestart
+ExecStartPost=-/bin/chmod 600 $settings
 ExecStopPost=-/bin/chmod 600 $settings
 UMask=0002
 NoNewPrivileges=yes

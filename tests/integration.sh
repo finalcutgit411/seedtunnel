@@ -148,14 +148,16 @@ transmission_noexec_test() {
     awk -v dir="$DATA" '$5 == dir { options = $6 } END { exit !(options ~ /(^|,)noexec(,|$)/) }' "/proc/$pid/mountinfo"
 }
 
-# Transmission writes its settings again when it stops, readable by every
-# account (its umask): private again right after. Its folder closed to the
-# other accounts.
+# Transmission writes its settings again when it starts and when it stops
+# (4.1: readable by every account, its umask): private again right after. Its
+# folder closed to the other accounts.
 transmission_private_test() {
     local settings=/etc/transmission-daemon/settings.json state=/var/lib/transmission-daemon/.config/transmission-daemon
     chmod 664 "$settings"
     systemctl restart transmission-daemon || return 1
     stat -c '%a %U %n' "$settings" "$state"
+    # the commands that make them private, with how they ended
+    systemctl show transmission-daemon -p ExecStartPost -p ExecStopPost
     [[ $(stat -c %a "$settings") == 600 ]] && (((8#$(stat -c %a "$state") & 8#7) == 0))
 }
 
