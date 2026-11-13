@@ -3564,6 +3564,8 @@ fake_server() {
     SEEDBOX_SFTP_PASSWORD=yes
     UI_SERVER=vps-test
     UI_SYSTEM="Debian 13"
+    UI_ADDRESS=203.0.113.10
+    UI_ADDRESS_READ=1
 }
 
 menus() { strict "$(declare -f fake_server); fake_server; $1"; }
@@ -4831,6 +4833,63 @@ header_names_ubuntu() (
     UI_SYSTEM=""
     ui_server_names
     [[ $UI_SYSTEM == "Debian 13" ]]
+)
+
+# On the right of the header: the full name of the server, its IPv4 address,
+# its system. On a narrow screen: the system next to the version, the name
+# and the address under the subtitle; nothing wider than the screen.
+header_name_address_system() (
+    load
+    colors_init off
+    UI_SERVER=vps-1234.example.net
+    UI_ADDRESS=203.0.113.10
+    UI_ADDRESS_READ=1
+    UI_SYSTEM="Debian 12"
+    local header
+    UI_COLUMNS=80
+    ui_width
+    header=$(ui_header)
+    [[ $(sed -n 1p <<<"$header") == *" vps-1234.example.net" && $(sed -n 2p <<<"$header") == *"  203.0.113.10" \
+        && $(sed -n 3p <<<"$header") == *"  Debian 12" ]] || {
+        printf '%s\n' "$header"
+        return 1
+    }
+    UI_COLUMNS=40
+    ui_width
+    header=$(ui_header)
+    [[ $(sed -n 1p <<<"$header") == "SeedTunnel  v$APP_VERSION"*"  Debian 12" \
+        && $(sed -n 3p <<<"$header") == "vps-1234.example.net  "*"203.0.113.10" ]] || {
+        printf '%s\n' "$header"
+        return 1
+    }
+    # no address: the name alone
+    UI_ADDRESS=""
+    header=$(ui_header)
+    [[ $(sed -n 3p <<<"$header") == "vps-1234.example.net" && $(wc -l <<<"$header") == 3 ]] || return 1
+    # the name: the full one when the system knows it, else the short one
+    mkdir -p "$WORK/bin-host"
+    printf '#!/bin/sh\necho vps-1234.example.net\n' >"$WORK/bin-host/hostname"
+    chmod +x "$WORK/bin-host/hostname"
+    UI_SERVER=""
+    PATH="$WORK/bin-host:$PATH" ui_server_names
+    [[ $UI_SERVER == vps-1234.example.net ]] || return 1
+    printf '#!/bin/sh\necho "hostname: Name or service not known" >&2\nexit 1\n' >"$WORK/bin-host/hostname"
+    UI_SERVER=""
+    HOSTNAME=vps-1234 PATH="$WORK/bin-host:$PATH" ui_server_names
+    [[ $UI_SERVER == vps-1234 ]] || return 1
+    # the address: the one the server goes out with, read on the server (the
+    # route), once; nothing when there is none
+    ip() { echo "1.1.1.1 via 198.51.100.1 dev eth0 src 198.51.100.7 uid 0"; }
+    UI_ADDRESS_READ=0
+    ui_server_names
+    [[ $UI_ADDRESS == 198.51.100.7 ]] || return 1
+    ip() { echo "called" >>"$WORK/ip-calls"; }
+    ui_server_names
+    [[ ! -e $WORK/ip-calls && $UI_ADDRESS == 198.51.100.7 ]] || return 1
+    ip() { return 2; }
+    UI_ADDRESS_READ=0
+    ui_server_names
+    [[ -z $UI_ADDRESS ]]
 )
 
 packages_without_candidate_stop() (
@@ -6133,7 +6192,8 @@ restore_keeps_aside_only_settings() (
     previous=$(compgen -G "$APP_STATE_DIR.before-restore-*")
     [[ -n $previous && -f $previous/vpn.conf && ! -e $previous.undo && ! -e $previous.outside ]] \
         && grep -q "The settings it replaced are kept in $previous" "$WORK/aside.out" \
-        && grep -qxF "  rm -rf $previous" "$WORK/aside.out"
+        && grep -q "delete them in Backup / restore › My backups, or:" "$WORK/aside.out" \
+        && grep -qxF "  seedtunnel restore clean" "$WORK/aside.out" && ! grep -q "rm -rf" "$WORK/aside.out"
 )
 
 # The diagnostics say the settings replaced by a finished restore, still kept
@@ -6153,16 +6213,109 @@ doctor_reports_restore_leftovers() (
     mkdir "$APP_STATE_DIR.before-restore-mine"
     doctor_system >"$WORK/leftovers.out" 2>&1
     cat "$WORK/leftovers.out"
-    grep -q "Settings replaced by a restore still kept" "$WORK/leftovers.out" \
-        && grep -qF "rm -rf $APP_STATE_DIR.before-restore-20261111-120000" "$WORK/leftovers.out" || return 1
+    grep -qF "Settings replaced by a restore still kept in $APP_STATE_DIR.before-restore-20261111-120000" "$WORK/leftovers.out" \
+        && grep -qF "seedtunnel restore clean" "$WORK/leftovers.out" && ! grep -q "rm -rf" "$WORK/leftovers.out" || return 1
     mkdir "$APP_STATE_DIR.before-restore-20261111-130000"
     doctor_system >"$WORK/leftovers.out" 2>&1
     grep -q "Settings replaced by 2 restores still kept" "$WORK/leftovers.out" \
-        && grep -qF "rm -rf $APP_STATE_DIR.before-restore-*" "$WORK/leftovers.out" || return 1
+        && grep -qF "seedtunnel restore clean" "$WORK/leftovers.out" && ! grep -q "rm -rf" "$WORK/leftovers.out" || return 1
     # a restore cut short needs them: said by its own line only
     echo "$APP_STATE_DIR.before-restore-20261111-130000" >"$RESTORE_MARKER"
     doctor_system >"$WORK/leftovers.out" 2>&1
     grep -q "A restore did not finish" "$WORK/leftovers.out" && ! grep -q "still kept" "$WORK/leftovers.out"
+)
+
+# « seedtunnel restore clean »: the settings kept by finished restores go,
+# after a red frame (« no » by default: nothing changes), written in the log.
+# Only the folders seedtunnel made (exact name, no link); never during a
+# restore cut short (they are its way back).
+restore_clean_deletes_old_settings() (
+    load
+    local out
+    RESTORE_MARKER="$WORK/clean.restore-unfinished"
+    APP_STATE_DIR="$WORK/clean/state"
+    rm -rf "$WORK/clean" "$RESTORE_MARKER"
+    mkdir -p "$APP_STATE_DIR" "$WORK/clean/elsewhere"
+    # nothing kept: said, nothing asked
+    confirm() { echo "asked" >>"$WORK/clean-asked"; }
+    rm -f "$WORK/clean-asked"
+    out=$(restore_clean 2>&1) || return 1
+    [[ $out == *"nothing to delete"* && ! -e $WORK/clean-asked ]] || return 1
+    mkdir "$APP_STATE_DIR.before-restore-20261113-062400" "$APP_STATE_DIR.before-restore-mine"
+    echo VPN_PORT=1194 >"$APP_STATE_DIR.before-restore-20261113-062400/vpn.conf"
+    touch "$APP_STATE_DIR.before-restore-20261113-062400.undo"
+    ln -s "$WORK/clean/elsewhere" "$APP_STATE_DIR.before-restore-20261113-070000"
+    [[ $(restore_leftovers_dates) == "2026-11-13 06:24" ]] || return 1
+    # « no » (the default): nothing changes
+    confirm() {
+        echo "$*" >>"$WORK/clean-asked"
+        return 1
+    }
+    out=$(restore_clean 2>&1) || return 1
+    printf '%s\n' "$out"
+    [[ -d $APP_STATE_DIR.before-restore-20261113-062400 && $out == *"restore of 2026-11-13 06:24"* \
+        && $out == *"old keys of the VPN, passwords, passphrase"* && $(<"$WORK/clean-asked") == "Delete them? n" ]] || return 1
+    # « yes »: only the folder made by seedtunnel goes (with what is beside
+    # it), never a link nor another name; written in the log
+    confirm() { return 0; }
+    : >"$APP_LOG"
+    out=$(restore_clean 2>&1) || {
+        printf '%s\n' "$out"
+        return 1
+    }
+    [[ ! -e $APP_STATE_DIR.before-restore-20261113-062400 && ! -e $APP_STATE_DIR.before-restore-20261113-062400.undo \
+        && -d $APP_STATE_DIR.before-restore-mine && -L $APP_STATE_DIR.before-restore-20261113-070000 \
+        && -d $WORK/clean/elsewhere && $out == *"Old settings deleted."* ]] || return 1
+    grep -qF "· Deleting $APP_STATE_DIR.before-restore-20261113-062400" "$APP_LOG" || return 1
+    # two restores: both said, both deleted
+    mkdir "$APP_STATE_DIR.before-restore-20261112-180000" "$APP_STATE_DIR.before-restore-20261113-080000"
+    [[ $(restore_leftovers_dates) == "2026-11-12 18:00, 2026-11-13 08:00" ]] || return 1
+    out=$(restore_clean 2>&1) || return 1
+    [[ $out == *"2 restores (2026-11-12 18:00, 2026-11-13 08:00)"* && -z $(restore_leftovers) ]] || return 1
+    # a restore cut short: they are its way back, nothing deleted
+    mkdir "$APP_STATE_DIR.before-restore-20261113-090000"
+    echo "$APP_STATE_DIR.before-restore-20261113-090000" >"$RESTORE_MARKER"
+    [[ -z $(restore_leftovers_dates) ]] || return 1
+    if out=$( (restore_clean) 2>&1); then return 1; fi
+    [[ -d $APP_STATE_DIR.before-restore-20261113-090000 && $out == *"A restore did not finish"* ]] || return 1
+    # the command « seedtunnel restore clean »
+    rm -f "$RESTORE_MARKER"
+    restore_clean() { echo "clean"; }
+    [[ $(restore_cli clean) == clean ]]
+)
+
+# My backups: the settings kept by a finished restore said on a line (since
+# when), with [3] to delete them; nothing of it without them, nor during a
+# restore cut short
+backup_menu_mine_old_settings() (
+    back_load
+    rm -rf "$WORK/mine-old"
+    BACKUP_DIR="$WORK/mine-old/backups"
+    BACKUP_COPIED=()
+    APP_STATE_DIR="$WORK/mine-old/state"
+    RESTORE_MARKER="$WORK/mine-old/state.restore-unfinished"
+    mkdir -p "$BACKUP_DIR" "$APP_STATE_DIR"
+    answers ""
+    backup_menu_mine >"$WORK/mine-old.out" 2>&1 || return 1
+    ! grep -q "Old settings\|\[3\]" "$WORK/mine-old.out" || return 1
+    mkdir "$APP_STATE_DIR.before-restore-20261113-072400"
+    answers ""
+    backup_menu_mine >"$WORK/mine-old.out" 2>&1 || return 1
+    cat "$WORK/mine-old.out"
+    grep -q "Old settings  *kept since the restore of 2026-11-13 07:24" "$WORK/mine-old.out" \
+        && grep -q "to delete once everything works" "$WORK/mine-old.out" \
+        && grep -q "^  \[3\] Delete the old settings$" "$WORK/mine-old.out" || return 1
+    # [3], yes: deleted, the line goes
+    confirm() { return 0; }
+    answers "3" ""
+    backup_menu_mine >"$WORK/mine-old.out" 2>&1 || return 1
+    [[ ! -e $APP_STATE_DIR.before-restore-20261113-072400 ]] && grep -q "Old settings deleted." "$WORK/mine-old.out" || return 1
+    # a restore cut short: neither the line nor [3]
+    mkdir "$APP_STATE_DIR.before-restore-20261113-090000"
+    echo "$APP_STATE_DIR.before-restore-20261113-090000" >"$RESTORE_MARKER"
+    answers "3" ""
+    backup_menu_mine >"$WORK/mine-old.out" 2>&1 || return 1
+    ! grep -q "Old settings\|\[3\]" "$WORK/mine-old.out" && [[ -d $APP_STATE_DIR.before-restore-20261113-090000 ]]
 )
 
 # « seedtunnel restore » without a file: the list of the backups, as in the
@@ -7549,6 +7702,7 @@ check "web interface: style of seedtunnel on Transmission 3 too (Debian 12)" web
 check "systems: Debian 12/13 and Ubuntu 24.04/26.04, the others refused with the list" systems_supported
 check "systems: Debian 11 refused with the way up (Debian 12, then 13)" debian11_refused_with_the_way_up
 check "header: « Ubuntu 26.04 », as « Debian 13 »" header_names_ubuntu
+check "header: full name, IPv4 address read on the server, system; narrow screens too" header_name_address_system
 check "packages: one APT does not know stops before anything is installed (« universe » on Ubuntu)" packages_without_candidate_stop
 check "packages: needrestart never restarts services during APT" apt_never_lets_needrestart_restart
 check "firewall: the ports of ssh.socket stay open" ssh_socket_ports_kept_open
@@ -7607,6 +7761,8 @@ check "restore cut short: the way back puts back settings, SSH keys, certificate
 check "restore: the SFTP account renamed since the backup takes back its name, never another account, back on the way back" restore_takes_back_account_name
 check "restore: the settings replaced kept aside only if there is something to go back to, how to delete them said" restore_keeps_aside_only_settings
 check "diagnostics: settings replaced by a finished restore said, with the command to delete them" doctor_reports_restore_leftovers
+check "restore clean: the settings kept by restores deleted after a red frame, only those, never during a restore cut short" restore_clean_deletes_old_settings
+check "my backups: the settings kept by a restore said, [3] deletes them; nothing during a restore cut short" backup_menu_mine_old_settings
 check "restore without a file: the list of the backups in a terminal, the usage without" restore_command_without_file
 check "removal of the last part: the end of the weekly backup and of its passphrase said before" removal_says_weekly_passphrase_deleted
 check "full system disk: said before anything is written" full_disk_said_before_anything

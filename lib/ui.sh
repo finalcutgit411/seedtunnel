@@ -20,6 +20,9 @@ UI_WIDTH=79
 UI_TEXT_IN_BYTES=0
 UI_SERVER=""
 UI_SYSTEM=""
+# IPv4 address of the server in the header, read once (UI_ADDRESS_READ=1)
+UI_ADDRESS=""
+UI_ADDRESS_READ=0
 UI_STATUS_LEVELS=()
 UI_STATUS_LABELS=()
 UI_STATUS_STATES=()
@@ -381,9 +384,23 @@ ui_screen() {
     ui_width
 }
 
-# Name of the server and of its system, for the header (read once)
+# Name of the server (its full name when it has one), its IPv4 address and its
+# system, for the header (read once). The address is read on the server
+# itself: nothing is asked of an outside site at each screen.
 ui_server_names() {
-    if [[ -z $UI_SERVER ]]; then UI_SERVER=${HOSTNAME:-$(uname -n)}; fi
+    local fqdn
+    if [[ -z $UI_SERVER ]]; then
+        fqdn=$(timeout 2 hostname -f 2>/dev/null || true)
+        if [[ $fqdn == *.* && $fqdn != *[[:space:]]* ]]; then
+            UI_SERVER=$fqdn
+        else
+            UI_SERVER=${HOSTNAME:-$(uname -n)}
+        fi
+    fi
+    if ((!UI_ADDRESS_READ)); then
+        UI_ADDRESS=$(local_ipv4)
+        UI_ADDRESS_READ=1
+    fi
     [[ -z $UI_SYSTEM ]] || return 0
     if [[ -z $APP_OS_ID && -r $APP_OS_RELEASE ]]; then os_read; fi
     case $APP_OS_ID in
@@ -393,22 +410,35 @@ ui_server_names() {
     esac
 }
 
-# Header: the emblem, the name, the version, and the server on the right.
-# Without room for the emblem, two plain lines.
+# Header: the emblem, the name, the version, and on the right the server: its
+# name, its address, its system. Without room for the emblem, plain lines: the
+# system next to the version, the name and the address under the subtitle.
 ui_header() {
-    local name badge subtitle
+    local name badge subtitle address="" room
     ui_server_names
     name="${C_BOLD}Seed$C_RESET${C_BRAND}Tunnel$C_RESET"
     if [[ -n $C_BADGE ]]; then badge="$C_BADGE v$APP_VERSION $C_RESET"; else badge="v$APP_VERSION"; fi
     subtitle=$(t 'WireGuard VPN · private seedbox')
-    ui_cut "$UI_SERVER" 24
+    if [[ -n $UI_ADDRESS ]]; then address="$C_GREY$UI_ADDRESS$C_RESET"; fi
     if ((UI_WIDTH >= 60)); then
+        ui_cut "$UI_SERVER" 40
         ui_line "      $C_BRAND┌─────────┐$C_RESET" "$C_GREY$UI_CUT$C_RESET"
-        ui_line "  $C_GREY────$C_BRAND┤ ●═════● ├$C_GREY────$C_RESET  $name  $badge" "$C_GREY$UI_SYSTEM$C_RESET"
-        ui_line "      $C_BRAND└─────────┘$C_RESET      $C_GREY$subtitle$C_RESET"
+        ui_line "  $C_GREY────$C_BRAND┤ ●═════● ├$C_GREY────$C_RESET  $name  $badge" "$address"
+        ui_line "      $C_BRAND└─────────┘$C_RESET      $C_GREY$subtitle$C_RESET" "$C_GREY$UI_SYSTEM$C_RESET"
+        return 0
+    fi
+    ui_line "$name  $badge" "$C_GREY$UI_SYSTEM$C_RESET"
+    ui_line "$C_GREY$subtitle$C_RESET"
+    # the name, cut to leave room for the address; on its own line when that
+    # room would be too small
+    room=$((UI_WIDTH - ${#UI_ADDRESS} - 2))
+    if [[ -n $UI_ADDRESS ]] && ((room >= 10)); then
+        ui_cut "$UI_SERVER" "$room"
+        ui_line "$C_GREY$UI_CUT$C_RESET" "$address"
     else
-        ui_line "$name  $badge" "$C_GREY$UI_CUT$C_RESET"
-        ui_line "$C_GREY$subtitle$C_RESET" "$C_GREY$UI_SYSTEM$C_RESET"
+        ui_cut "$UI_SERVER" "$UI_WIDTH"
+        ui_print "$C_GREY$UI_CUT$C_RESET"
+        if [[ -n $UI_ADDRESS ]]; then ui_print "$address"; fi
     fi
 }
 

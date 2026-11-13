@@ -60,6 +60,10 @@ EXAMPLE_FREE=73014444032
     SEEDBOX_DOMAIN=seed.example.net
     SEEDBOX_USER=lancelot
     SEEDBOX_CERTIFICATE=letsencrypt
+    # the address in the header: the one of the examples, never the real one
+    # (a capture of the preview shows no address of the server)
+    UI_ADDRESS=$VPN_PUBLIC_ADDRESS
+    UI_ADDRESS_READ=1
 }
 # SSH port of the examples (the menus ask sshd)
 ssh_first_port() { echo 22; }
@@ -665,13 +669,31 @@ screen_backups() {
     echo
     ui_field_add "$(t 'Space used')" "$(human_size_spaced 1143808) $C_GREY$(t 'in %s' "$BACKUP_DIR")$C_RESET"
     ui_field_add "$(t 'Disk')" "$(t '%s free%s of %s' "$C_GREEN$(human_size_spaced 73014444032)" "$C_RESET" "$(human_size_spaced 85899345920)")"
+    # the settings replaced by a restore, still kept
+    ui_field_add "$(t 'Old settings')" "$C_YELLOW$(t 'kept since the restore of %s' "2026-11-13 07:24")$C_RESET $C_GREY· $(t 'to delete once everything works')$C_RESET"
     ui_fields_show
     echo
     ui_menu_add 1 "$(t 'Download a backup (one-time link)')"
     ui_menu_add 2 "$(t 'Delete a backup')"
+    ui_menu_add 3 "$(t 'Delete the old settings')"
     ui_menu_show
     echo
     end_menu back
+}
+
+# My backups › Delete the old settings (restore_clean)
+screen_old_settings_delete() {
+    top settings-del
+    ui_crumbs "$(t 'Backup / restore')" "$(t 'My backups')"
+    echo
+    ui_box bad "$(t 'Delete the old settings')" \
+        "$(t 'The settings replaced by the restore of %s, kept in case it had to be undone: old keys of the VPN, passwords, passphrase.' "2026-11-13 07:24")" \
+        "$(t 'Once deleted, the settings from before the restore cannot come back.')"
+    echo
+    ui_print "$(t 'Delete them?') $(t '[y/N]') $(pv y o)"
+    step "$(t 'Deleting %s' "/etc/seedtunnel.before-restore-20261113-072400")"
+    said_ok 'Old settings deleted.'
+    end_action
 }
 
 # My backups › Delete a backup (backup_delete), the last one of the server
@@ -817,6 +839,7 @@ if ((ALL)); then
     screen_restore
     screen_backups
     screen_backup_delete
+    screen_old_settings_delete
     screen_terminal
     exit 0
 fi
@@ -830,7 +853,7 @@ ui_print "  $(pv 'Enter: next screen · Q: quit' 'Entrée : écran suivant · Q 
 echo
 IFS= read -r -p "  $(pv 'Press Enter to start…' 'Appuyez sur Entrée pour commencer…') " CHOICE || exit 130
 for screen in screen_home screen_home_narrow screen_home_manual screen_vpn screen_vpn_alone screen_link_offer screen_links screen_links_none screen_clients screen_dns screen_vpn_address screen_add \
-    screen_client_card screen_client_qr screen_client screen_danger screen_seedbox screen_credentials screen_sftp screen_keys screen_key_add screen_bans screen_rules screen_backup screen_weekly screen_restore screen_backups screen_backup_delete screen_terminal; do
+    screen_client_card screen_client_qr screen_client screen_danger screen_seedbox screen_credentials screen_sftp screen_keys screen_key_add screen_bans screen_rules screen_backup screen_weekly screen_restore screen_backups screen_backup_delete screen_old_settings_delete screen_terminal; do
     if [[ $screen == screen_home_narrow && -n ${UI_COLUMNS-} ]]; then continue; fi
     "$screen" || break
 done

@@ -1047,8 +1047,17 @@ public_ipv4() {
             return 0
         fi
     done
-    ip -4 route get 1.1.1.1 2>/dev/null \
-        | awk '!found { for (i = 1; i < NF; i++) if ($i == "src") { print $(i+1); found = 1 } }'
+    local_ipv4
+}
+
+# IPv4 address the server goes out with, read on the server itself (the
+# route to the Internet: nothing is sent): its public address on a VPS, its
+# local one behind a box. Empty if none, never a failure.
+local_ipv4() {
+    local ip
+    ip=$({ ip -4 route get 1.1.1.1 2>/dev/null || true; } \
+        | awk '!found { for (i = 1; i < NF; i++) if ($i == "src") { print $(i+1); found = 1 } }')
+    if is_ipv4 "$ip"; then printf '%s' "$ip"; fi
 }
 
 # Address the SSH session running seedtunnel comes from: SSH_CONNECTION, or

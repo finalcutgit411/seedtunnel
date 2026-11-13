@@ -428,9 +428,16 @@ restore_renamed_account_test() {
 
 # The settings replaced by the restores above are said by the diagnostics,
 # with the command to delete them; once deleted, no longer said
+# The settings replaced by the restores: said by the diagnostics with the
+# command; « seedtunnel restore clean » deletes them (--yes without a
+# terminal), only them, written in the log; then nothing more is said
 restore_leftovers_test() {
-    output_has "still kept (old keys, passwords, passphrase)" app doctor || return 1
-    rm -rf /etc/seedtunnel.before-restore-*
+    output_has "seedtunnel restore clean" app doctor && output_has "still kept" app doctor || return 1
+    compgen -G "/etc/seedtunnel.before-restore-*" >/dev/null || return 1
+    output_has "Old settings deleted." app restore clean --yes || return 1
+    ! compgen -G "/etc/seedtunnel.before-restore-*" >/dev/null && test -d /etc/seedtunnel || return 1
+    grep -q "· Deleting /etc/seedtunnel.before-restore-" /var/log/seedtunnel.log || return 1
+    output_has "nothing to delete" app restore clean --yes || return 1
     ! output_has "still kept" app doctor
 }
 
@@ -1303,7 +1310,7 @@ phase2() {
     check "restore without a file and without a terminal: the usage, nothing done" output_has "Usage: seedtunnel restore FILE" app restore
     check "magnet links of a backup: through watch/ (Transmission 4), to add by hand (Transmission 3)" restore_magnet_test
     check "SFTP account renamed since the backup: the restore gives it back its name, the other one gone" restore_renamed_account_test
-    check "doctor: settings replaced by a restore said, no longer once deleted" restore_leftovers_test
+    check "settings replaced by a restore: said by doctor, deleted by restore clean, no longer said" restore_leftovers_test
 
     step "Removal"
     check "seedbox" app seedbox uninstall --yes

@@ -870,7 +870,7 @@ backup_menu_create() {
 # The screen of the backups: the table (those of the server and those copied
 # into /root or a home folder), the room they take, then download or delete
 backup_menu_mine() {
-    local choice file total=0
+    local choice file total=0 leftovers
     local -a files
     while true; do
         mapfile -t files < <(backup_candidates)
@@ -888,16 +888,26 @@ backup_menu_mine() {
         done
         ui_field_add "$(t 'Space used')" "$(human_size_spaced "$total") $C_GREY$(t 'in %s' "$BACKUP_DIR")$C_RESET"
         ui_field_add "$(t 'Disk')" "$(disk_free_text "$BACKUP_DIR")"
+        # the settings replaced by a restore, while kept (never during a
+        # restore cut short: its way back)
+        leftovers=$(restore_leftovers_dates)
+        if [[ $leftovers == *", "* ]]; then
+            ui_field_add "$(t 'Old settings')" "$C_YELLOW$(t 'kept since the restores of %s' "$leftovers")$C_RESET $C_GREY· $(t 'to delete once everything works')$C_RESET"
+        elif [[ -n $leftovers ]]; then
+            ui_field_add "$(t 'Old settings')" "$C_YELLOW$(t 'kept since the restore of %s' "$leftovers")$C_RESET $C_GREY· $(t 'to delete once everything works')$C_RESET"
+        fi
         ui_fields_show
         echo
         ui_menu_add 1 "$(t 'Download a backup (one-time link)')"
         ui_menu_add 2 "$(t 'Delete a backup')"
+        if [[ -n $leftovers ]]; then ui_menu_add 3 "$(t 'Delete the old settings')"; fi
         ui_menu_show
         echo
         ui_menu_ask choice back
         case ${choice,,} in
             1) ui_action backup_menu_mine_share ;;
             2) ui_action backup_menu_mine_delete ;;
+            3) if [[ -n $leftovers ]]; then ui_action backup_menu_mine_clean; fi ;;
             "" | b) return 0 ;;
             q) ui_quit ;;
         esac
@@ -921,6 +931,11 @@ backup_menu_mine_delete() {
     ((${#files[@]})) || return 0
     backup_ask_number file 'Backup to delete (number)' "${files[@]}" || return 0
     backup_delete "$file"
+    if ((!WENT_BACK)); then pause; fi
+}
+
+backup_menu_mine_clean() {
+    restore_clean
     if ((!WENT_BACK)); then pause; fi
 }
 
@@ -1311,10 +1326,71 @@ restore_leftovers() {
     done
 }
 
-# restore_cli [FILE] — « seedtunnel restore »: without a file, the list of the
-# backups found, as in the menu (in a terminal only)
+# Date of the restore that left FOLDER (…before-restore-YYYYMMDD-HHMMSS), as in
+# the list of the backups: « 2026-11-13 07:24 »
+restore_leftover_date() {
+    local stamp=${1##*.before-restore-}
+    printf '%s-%s-%s %s:%s' "${stamp:0:4}" "${stamp:4:2}" "${stamp:6:2}" "${stamp:9:2}" "${stamp:11:2}"
+}
+
+# The dates of the restores whose settings are still kept, « 2026-11-13 06:05,
+# 2026-11-13 07:24 »; empty if none, or during a restore cut short (they are
+# its way back: not to be deleted then)
+restore_leftovers_dates() {
+    local folder dates=""
+    if restore_interrupted; then return 0; fi
+    while IFS= read -r folder; do
+        dates+="${dates:+, }$(restore_leftover_date "$folder")"
+    done < <(restore_leftovers)
+    printf '%s' "$dates"
+}
+
+# restore_clean — « seedtunnel restore clean », and My backups in the menu:
+# deletes the settings kept by finished restores (old keys, passwords,
+# passphrase), after a red frame, « no » by default. Only the folders
+# seedtunnel made (their exact name, no link); never during a restore cut
+# short.
+restore_clean() {
+    local folder dates
+    local -a kept
+    WENT_BACK=0
+    if restore_interrupted; then
+        die 'A restore did not finish: the settings it replaced are its way back, they stay. See  seedtunnel doctor'
+    fi
+    mapfile -t kept < <(restore_leftovers)
+    if ((!${#kept[@]})); then
+        ok 'No settings kept by a restore: nothing to delete.'
+        return 0
+    fi
+    dates=$(restore_leftovers_dates)
+    if ((${#kept[@]} == 1)); then
+        danger "$(t 'Delete the old settings')" \
+            "$(t 'The settings replaced by the restore of %s, kept in case it had to be undone: old keys of the VPN, passwords, passphrase.' "$dates")" \
+            "$(t 'Once deleted, the settings from before the restore cannot come back.')"
+    else
+        danger "$(t 'Delete the old settings')" \
+            "$(t 'The settings replaced by %s restores (%s), kept in case one had to be undone: old keys of the VPN, passwords, passphrase.' "${#kept[@]}" "$dates")" \
+            "$(t 'Once deleted, the settings from before the restores cannot come back.')"
+    fi
+    if ! confirm 'Delete them?' n; then
+        WENT_BACK=1
+        return 0
+    fi
+    for folder in "${kept[@]}"; do
+        run "$(t 'Deleting %s' "$folder")" rm -rf -- "$folder" "$folder.outside" "$folder.undo"
+    done
+    ok 'Old settings deleted.'
+}
+
+# restore_cli [FILE | clean] — « seedtunnel restore »: without a file, the
+# list of the backups found, as in the menu (in a terminal only); « clean »:
+# the settings kept by finished restores deleted
 restore_cli() {
     local file=${1-}
+    if [[ $file == clean ]]; then
+        restore_clean
+        return 0
+    fi
     if [[ -z $file ]]; then
         stdin_is_terminal || die 'Usage: seedtunnel restore FILE'
         # the list asks which backup, as in the menu (seen on a real server:
@@ -1557,8 +1633,8 @@ restore_main() {
     fi
     ok 'Restore finished.'
     if [[ -n $previous ]]; then
-        say 'The settings it replaced are kept in %s (old keys, passwords, passphrase). Once everything works, delete them:' "$previous"
-        printf '  rm -rf %s\n' "$previous"
+        say 'The settings it replaced are kept in %s (old keys, passwords, passphrase). Once everything works, delete them in Backup / restore › My backups, or:' "$previous"
+        printf '  seedtunnel restore clean\n'
     fi
     if seedbox_installed; then text restore_after; fi
 }

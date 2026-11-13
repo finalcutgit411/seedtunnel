@@ -50,6 +50,7 @@ Server
   backup auto on|off|status          weekly encrypted backup (off: --yes without a terminal)
   restore [FILE] [--passphrase-file FILE] [--yes]
                                      without FILE: the list of the backups found
+  restore clean [--yes]              delete the settings kept by finished restores
   update                             go to the latest published version
   update back [--yes]                back to the version before the last update
   apply                              apply the saved configuration again

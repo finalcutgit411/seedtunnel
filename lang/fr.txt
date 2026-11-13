@@ -2201,8 +2201,8 @@ fr: Liens magnet remis : %s (par %s) : Transmission demande leurs métadonnées 
 en: Magnet links to add again by hand in the web interface: %s (this Transmission does not read them in %s). They are in:
 fr: Liens magnet à ajouter à nouveau à la main dans l'interface web : %s (ce Transmission ne les lit pas dans %s). Ils sont dans :
 
-en: The settings it replaced are kept in %s (old keys, passwords, passphrase). Once everything works, delete them:
-fr: Les réglages qu'elle a remplacés sont gardés dans %s (anciennes clés, mots de passe, passphrase). Quand tout marche, supprimez-les :
+en: The settings it replaced are kept in %s (old keys, passwords, passphrase). Once everything works, delete them in Backup / restore › My backups, or:
+fr: Les réglages qu'elle a remplacés sont gardés dans %s (anciennes clés, mots de passe, passphrase). Quand tout marche, supprimez-les dans Sauvegarde / restauration › Mes sauvegardes, ou :
 
 en: The system disk is full (%s MB free on %s): nothing was changed. Free some space first, for example:  apt clean; journalctl --vacuum-size=100M
 fr: Le disque système est plein (%s Mo libres sur %s) : rien n'a été changé. Libérez d'abord de la place, par exemple :  apt clean; journalctl --vacuum-size=100M
@@ -2210,11 +2210,50 @@ fr: Le disque système est plein (%s Mo libres sur %s) : rien n'a été changé.
 en: Restart advised: a kernel installed since the server started is not used yet   → reboot
 fr: Redémarrage conseillé : un noyau installé depuis le démarrage du serveur n'est pas encore utilisé   → reboot
 
-en: Settings replaced by a restore still kept (old keys, passwords, passphrase). Once everything works:  rm -rf %s
-fr: Réglages remplacés par une restauration encore gardés (anciennes clés, mots de passe, passphrase). Quand tout marche :  rm -rf %s
+en: Settings replaced by a restore still kept in %s (old keys, passwords, passphrase). Once everything works:  seedtunnel restore clean
+fr: Réglages remplacés par une restauration encore gardés dans %s (anciennes clés, mots de passe, passphrase). Quand tout marche :  seedtunnel restore clean
 
-en: Settings replaced by %s restores still kept (old keys, passwords, passphrase). Once everything works:  rm -rf %s
-fr: Réglages remplacés par %s restaurations encore gardés (anciennes clés, mots de passe, passphrase). Quand tout marche :  rm -rf %s
+en: Settings replaced by %s restores still kept (old keys, passwords, passphrase). Once everything works:  seedtunnel restore clean
+fr: Réglages remplacés par %s restaurations encore gardés (anciennes clés, mots de passe, passphrase). Quand tout marche :  seedtunnel restore clean
+
+en: A restore did not finish: the settings it replaced are its way back, they stay. See  seedtunnel doctor
+fr: Une restauration n'est pas allée au bout : les réglages qu'elle a remplacés servent à revenir en arrière, ils restent. Voir  seedtunnel doctor
+
+en: No settings kept by a restore: nothing to delete.
+fr: Aucun réglage gardé par une restauration : rien à supprimer.
+
+en: Delete the old settings
+fr: Supprimer les anciens réglages
+
+en: The settings replaced by the restore of %s, kept in case it had to be undone: old keys of the VPN, passwords, passphrase.
+fr: Les réglages remplacés par la restauration du %s, gardés au cas où il faudrait l'annuler : anciennes clés du VPN, mots de passe, passphrase.
+
+en: Once deleted, the settings from before the restore cannot come back.
+fr: Une fois supprimés, les réglages d'avant la restauration ne pourront plus revenir.
+
+en: The settings replaced by %s restores (%s), kept in case one had to be undone: old keys of the VPN, passwords, passphrase.
+fr: Les réglages remplacés par %s restaurations (%s), gardés au cas où il faudrait en annuler une : anciennes clés du VPN, mots de passe, passphrase.
+
+en: Once deleted, the settings from before the restores cannot come back.
+fr: Une fois supprimés, les réglages d'avant les restaurations ne pourront plus revenir.
+
+en: Delete them?
+fr: Les supprimer ?
+
+en: Old settings deleted.
+fr: Anciens réglages supprimés.
+
+en: Old settings
+fr: Anciens réglages
+
+en: kept since the restore of %s
+fr: gardés depuis la restauration du %s
+
+en: kept since the restores of %s
+fr: gardés depuis les restaurations du %s
+
+en: to delete once everything works
+fr: à supprimer quand tout marche
 
 # --- QR code, seedbox installed with an IP address ----------------------------------
 

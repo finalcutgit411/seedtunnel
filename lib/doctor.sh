@@ -193,10 +193,9 @@ doctor_restore_leftovers() {
     mapfile -t kept < <(restore_leftovers)
     ((${#kept[@]})) || return 0
     if ((${#kept[@]} == 1)); then
-        doctor_warn 'Settings replaced by a restore still kept (old keys, passwords, passphrase). Once everything works:  rm -rf %s' "${kept[0]}"
+        doctor_warn 'Settings replaced by a restore still kept in %s (old keys, passwords, passphrase). Once everything works:  seedtunnel restore clean' "${kept[0]}"
     else
-        doctor_warn 'Settings replaced by %s restores still kept (old keys, passwords, passphrase). Once everything works:  rm -rf %s' \
-            "${#kept[@]}" "$APP_STATE_DIR.before-restore-*"
+        doctor_warn 'Settings replaced by %s restores still kept (old keys, passwords, passphrase). Once everything works:  seedtunnel restore clean' "${#kept[@]}"
     fi
 }
 

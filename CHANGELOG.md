@@ -5,7 +5,11 @@ versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 
 ## [1.0.3] - 2026-11-13
 
+### Added
+- Backup / restore › My backups: the settings a finished restore kept aside (old keys of the VPN, passwords, passphrase) are said on a line, with « Delete the old settings » (a red frame, « no » by default). By command: `seedtunnel restore clean` (`--yes` without a terminal). Never during a restore cut short, whose way back they are. `seedtunnel doctor` and the end of a restore point to it, instead of an `rm -rf` to type.
+
 ### Changed
+- Header of the screens: the full name of the server, its IPv4 address (read on the server itself: no outside site is asked) and its system. On a narrow screen (a phone), the system next to the version, the name and the address under the subtitle.
 - Site of the seedbox: any address that is neither the web interface nor a link (`/share` without its last `/`, a typo…) shows the page « Nothing here » once the password is given, instead of the « 404 Not Found » of nginx. The password is still asked first, and nothing of the default folder of nginx is served.
 - The log says when an update is installed (« Update: 1.0.2 → 1.0.3 installed ») and when `seedtunnel update back` goes back to the previous version. Written by the new version: from this update on.
 
