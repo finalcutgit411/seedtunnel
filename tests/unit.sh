@@ -2025,6 +2025,20 @@ sftp_keys_import_all_or_nothing() (
         && [[ $(stat -c %a "$SFTP_KEYS_DIR/lancelot") == 644 ]]
 )
 
+# A file that is not there (or a folder): « File not found », never an
+# unexpected error; nothing added
+sftp_keys_import_missing_file() (
+    sftp_keys_load missing
+    : >"$SFTP_KEYS_DIR/lancelot"
+    local source
+    for source in "$WORK/nope.pub" "$WORK"; do
+        if (sftp_keys_import "$source") &>"$WORK/keys.out"; then return 1; fi
+        cat "$WORK/keys.out"
+        grep -qF "File not found: $source" "$WORK/keys.out" && ! grep -qi "unexpected" "$WORK/keys.out" || return 1
+    done
+    [[ ! -s $SFTP_KEYS_DIR/lancelot ]]
+)
+
 sftp_keys_remove_failure_keeps_file() (
     sftp_keys_load remove
     printf '%s\n' "ssh-ed25519 AAAAone laptop" "ssh-ed25519 AAAAtwo phone" >"$SFTP_KEYS_DIR/lancelot"
@@ -2878,6 +2892,26 @@ vpn_enable_failure_said() (
     grep -q "could not be enabled at boot" "$WORK/vpn-enable.out"
 )
 
+# The guard writes what it does to the log of seedtunnel too (only the
+# journal had it): stopped, started again
+diskguard_written_to_log() (
+    load
+    DISKGUARD_MARKER="$WORK/diskguard.logged"
+    SEEDBOX_DATA_DIR=$WORK
+    APP_LOG="$WORK/diskguard.log"
+    rm -f "$DISKGUARD_MARKER" "$APP_LOG"
+    seedbox_installed() { return 0; }
+    logger() { :; }
+    systemctl() { return 0; }
+    disk_free_gb() { echo 1; }
+    diskguard_check >"$WORK/dg-log.out" 2>&1 || return 1
+    disk_free_gb() { echo 50; }
+    diskguard_check >>"$WORK/dg-log.out" 2>&1 || return 1
+    cat "$APP_LOG"
+    grep -q "· Transmission stopped: disk almost full (1 GB free)." "$APP_LOG" \
+        && grep -q "· Transmission started again: 50 GB free." "$APP_LOG"
+)
+
 diskguard_start_failure_said() (
     load
     DISKGUARD_MARKER="$WORK/diskguard.failed"
@@ -3204,6 +3238,76 @@ nginx_home_asks_password_first() (
     echo "$block"
     # « return » would answer before nginx asks for the password
     [[ -n $block ]] && ! grep -q return <<<"$block"
+)
+
+# nginx never tells its version, port 80 included (the 443 already did not);
+# one X-Frame-Options on the web interface: the one Transmission sends is
+# hidden, nginx sends its own
+nginx_hides_version_one_frame_header() (
+    load
+    SEEDBOX_DOMAIN=seedbox.example.org
+    SEEDBOX_CERTIFICATE=letsencrypt
+    local site generator servers tokens
+    for generator in nginx_generate_site links_generate_site; do
+        site=$($generator)
+        servers=$(grep -c '^server {' <<<"$site")
+        tokens=$(grep -c '^    server_tokens off;$' <<<"$site")
+        ((servers == 2 && tokens == 2)) || {
+            echo "$generator: $servers server(s), $tokens server_tokens off"
+            return 1
+        }
+    done
+    sed -n '/location \/transmission\/ {/,/^    }/p' <<<"$(nginx_generate_site)" | grep -qxF '        proxy_hide_header X-Frame-Options;' \
+        && grep -qxF '    add_header X-Frame-Options SAMEORIGIN always;' <<<"$(nginx_generate_site)"
+)
+
+# The help of a command says « Utilisation » in French, never « Usage »
+french_usage_word() (
+    load
+    ! grep -n '^fr: Usage :' "$ROOT/lang/fr.txt" && (($(grep -c '^en: Usage:' "$ROOT/lang/fr.txt") == $(grep -c '^fr: Utilisation :' "$ROOT/lang/fr.txt")))
+)
+
+# A subcommand given more arguments than it takes: refused before anything is
+# done, as « seedtunnel doctor extra » already was; what they take still goes
+# through (« vpn dns 9.9.9.9, 1.1.1.1 » arrives in two words)
+cli_refuses_extra_arguments() (
+    load
+    local taken extra
+    vpn_require_installed() { echo "called" >>"$WORK/extra-calls"; }
+    seedbox_require_installed() { echo "called" >>"$WORK/extra-calls"; }
+    firewall_status() { echo "called" >>"$WORK/extra-calls"; }
+    backup_list() { echo "called" >>"$WORK/extra-calls"; }
+    local line name
+    local -a words
+    : >"$WORK/extra-calls"
+    # « the command as said in the message | what it takes | the extra »
+    for line in "vpn list||extra" "vpn restart||x" "vpn add|a|b" "vpn uninstall||x" "seedbox bans||x" \
+        "seedbox unban|192.0.2.1|x" "seedbox sftp-key list||x" "seedbox sftp-key add|file.pub|x" "seedbox restart||now" \
+        "firewall status||x" "backup list||x" "backup delete|1|x" "backup auto on||x"; do
+        IFS='|' read -r name taken extra <<<"$line"
+        read -ra words <<<"$name $taken $extra"
+        if ("${words[0]}_cli" "${words[@]:1}") >"$WORK/extra.out" 2>&1; then
+            echo "accepted: $line"
+            return 1
+        fi
+        grep -qF "Too many arguments for « seedtunnel $name »: $extra" "$WORK/extra.out" || {
+            echo "$line:"
+            cat "$WORK/extra.out"
+            return 1
+        }
+    done
+    # refused before anything is done
+    [[ ! -s $WORK/extra-calls ]] || return 1
+    # what they take: not refused for that
+    vpn_set_dns() { echo "dns $1" >>"$WORK/extra-calls"; }
+    sftp_keys_import() { echo "import $1" >>"$WORK/extra-calls"; }
+    seedbox_apply_sftp() { :; }
+    vpn_cli dns 9.9.9.9, 1.1.1.1 >"$WORK/extra.out" 2>&1 || return 1
+    seedbox_cli sftp-key add file.pub >"$WORK/extra.out" 2>&1 || return 1
+    firewall_cli status >"$WORK/extra.out" 2>&1 || return 1
+    backup_cli list >"$WORK/extra.out" 2>&1 || return 1
+    cat "$WORK/extra-calls"
+    grep -qx "dns 9.9.9.9, 1.1.1.1" "$WORK/extra-calls" && grep -qx "import file.pub" "$WORK/extra-calls"
 )
 
 backup_dates_in_words() (
@@ -4116,7 +4220,8 @@ menus_fit_the_screen() (
 # -----------------------------------------------------------------------------------
 
 # The log is cut every month (it used to grow without end), from the
-# installation and from « apply » (so after an update too)
+# installation and from « apply » (so after an update too). « su root root »:
+# without it, logrotate skips it on Ubuntu (/var/log writable by syslog)
 log_rotation_rule() (
     load
     LOGROTATE_FILE="$WORK/logrotate-seedtunnel"
@@ -4128,7 +4233,7 @@ log_rotation_rule() (
     grep -qx "apt logrotate" "$WORK/logrotate-calls" || return 1
     grep -q "^$APP_LOG {" "$LOGROTATE_FILE" || return 1
     local word
-    for word in monthly 'rotate 6' compress 'create 0600 root root' missingok; do
+    for word in 'su root root' monthly 'rotate 6' compress 'create 0600 root root' missingok; do
         grep -q "^    $word\$" "$LOGROTATE_FILE" || {
             echo "missing: $word"
             return 1
@@ -4837,6 +4942,42 @@ changed_by_hand_copy_kept() (
     # put back: nothing more said
     V=4 out=$(write_if_changed "$WORK/wg0.conf" 600 "$ME" generate 2>&1)
     [[ -z $out && -z $(doctor_changed_by_hand) ]]
+)
+
+# « apply » writes nothing that did not change: a state file and the list of
+# fingerprints keep their date when their content is the same (they did not,
+# on Ubuntu 26.04: vpn.conf, seedbox.conf, written.sha256)
+same_content_not_rewritten() (
+    load
+    APP_STATE_DIR="$WORK/same-state"
+    rm -rf "$APP_STATE_DIR"
+    mkdir -p "$APP_STATE_DIR"
+    local file="$APP_STATE_DIR/test.conf" list A=1 B="two words"
+    state_write "$file" A B
+    chmod 644 "$file"
+    touch -d '2020-01-01 00:00' "$file"
+    state_write "$file" A B
+    [[ $(stat -c '%Y %a' "$file") == "$(date -d '2020-01-01 00:00' +%s) 600" ]] || {
+        stat -c '%y %a' "$file"
+        return 1
+    }
+    B="other"
+    state_write "$file" A B
+    grep -qx "B=other" "$file" && [[ $(stat -c %Y "$file") != "$(date -d '2020-01-01 00:00' +%s)" ]] || return 1
+    # the list of fingerprints
+    generate() { echo "$1"; }
+    write_if_changed "$WORK/same-b.conf" 600 "$ME" generate b
+    write_if_changed "$WORK/same-a.conf" 600 "$ME" generate a
+    list=$(written_list)
+    touch -d '2020-01-01 00:00' "$list"
+    write_if_changed "$WORK/same-b.conf" 600 "$ME" generate b || true
+    write_if_changed "$WORK/same-a.conf" 600 "$ME" generate a || true
+    [[ $(stat -c %Y "$list") == "$(date -d '2020-01-01 00:00' +%s)" ]] || {
+        cat "$list"
+        return 1
+    }
+    write_if_changed "$WORK/same-a.conf" 600 "$ME" generate changed
+    [[ $(stat -c %Y "$list") != "$(date -d '2020-01-01 00:00' +%s)" ]]
 )
 
 # A file deleted since it was written (removal of the seedbox…) leaves the
@@ -5623,7 +5764,7 @@ backup_list_download_delete() (
     backup_delete "$hand" >"$WORK/mine.out" 2>&1 || return 1
     cat "$WORK/mine.out"
     [[ -f $hand ]] && ((WENT_BACK == 1)) && grep -q "is deleted for good" "$WORK/mine.out" \
-        && ! grep -q "only backup on the server" "$WORK/mine.out" || return 1
+        && ! grep -q "only backup made by this server" "$WORK/mine.out" || return 1
     # « yes »: deleted
     confirm() { return 0; }
     backup_delete "$hand" >"$WORK/mine.out" 2>&1 || return 1
@@ -5631,7 +5772,7 @@ backup_list_download_delete() (
     # the last backup of the server: said in the red frame
     confirm() { return 1; }
     backup_delete "$auto" >"$WORK/mine.out" 2>&1 || return 1
-    grep -q "It is the only backup on the server" "$WORK/mine.out" && [[ -f $auto ]] || return 1
+    grep -q "It is the only backup made by this server" "$WORK/mine.out" && [[ -f $auto ]] || return 1
     # the menu: a number not in the list asked again; a copied backup: said
     # in the red frame, « no » keeps it, « yes » deletes it
     answers "9" "2"
@@ -5639,7 +5780,7 @@ backup_list_download_delete() (
     cat "$WORK/mine.out"
     grep -q "No backup number 9" "$WORK/mine.out" && grep -q "It was copied by hand into $WORK/mine/home/ubuntu" "$WORK/mine.out" \
         && grep -q "it may be your only copy" "$WORK/mine.out" \
-        && ! grep -q "only backup on the server" "$WORK/mine.out" && [[ -f $copied ]] || return 1
+        && ! grep -q "only backup made by this server" "$WORK/mine.out" && [[ -f $copied ]] || return 1
     confirm() { return 0; }
     answers "2"
     backup_menu_mine_delete >"$WORK/mine.out" 2>&1 || return 1
@@ -5818,7 +5959,9 @@ unban_checks_the_address() (
     cat "$WORK/unban.out"
     grep -q "1.2.3.4 is not banned right now: nothing to do." "$WORK/unban.out" && [[ ! -s $WORK/back-calls ]] || return 1
     fail2ban_unban 2001:db8::17 >"$WORK/unban.out" 2>&1 || return 1
-    grep -qx "unban 2001:db8::17" "$WORK/back-calls"
+    grep -qx "unban 2001:db8::17" "$WORK/back-calls" || return 1
+    # unban does not reset what fail2ban counted: said
+    grep -q "one more mistake bans 2001:db8::17 again" "$WORK/unban.out"
 )
 
 bans_none_or_fail2ban_stopped() (
@@ -8166,6 +8309,7 @@ check "restore stopped halfway: how to go back is said" restore_unfinished_says_
 check "SFTP: « keys only » checked (password, keyboard-interactive)" sftp_keys_only_checked
 check "SFTP: reactivation of the account checked" sftp_resume_checked
 check "SFTP: keys imported all or none" sftp_keys_import_all_or_nothing
+check "SFTP: sftp-key add of a missing file: « File not found », nothing added" sftp_keys_import_missing_file
 check "SFTP: removing a key that cannot be written → file kept" sftp_keys_remove_failure_keeps_file
 check "SFTP: rename undone, group not back → said, account suspended" rename_group_undo_checked
 check "restore: archive with a link (to /etc/shadow) refused" restore_refuses_links
@@ -8203,6 +8347,7 @@ check "diagnostics: update cut short (.previous left) → said" doctor_reports_u
 check "services: enabled at boot and running, nothing done when they are" services_put_right
 check "VPN: not enabled at boot → said" vpn_enable_failure_said
 check "full disk: Transmission that does not start again → kept, said" diskguard_start_failure_said
+check "full disk protection: stopped and started again written to the log of seedtunnel too" diskguard_written_to_log
 check "validation: IPv4 without leading zero, DNS, public address of the VPN" validators_stricter
 check "update (git): only vX.Y.Z tags whose code says that version" update_git_tag_checked
 check "language: asked until 1 or 2, saved file written aside" language_asked_again
@@ -8219,6 +8364,9 @@ check "firewall: the message says which new login counts" firewall_message_says_
 check "weekly backup: new passphrase → the older backups keep theirs (said)" backup_new_passphrase_warns
 check "translations: empty, or a stray %, refused" i18n_check_stricter
 check "seedbox: the home page asks for the password first" nginx_home_asks_password_first
+check "nginx: version never told (port 80 too), one X-Frame-Options on the web interface" nginx_hides_version_one_frame_header
+check "French: « Utilisation » for the help of every command, never « Usage »" french_usage_word
+check "commands: a subcommand given more arguments than it takes refused before anything is done" cli_refuses_extra_arguments
 check "dates: today, yesterday, N days ago (EN, FR)" backup_dates_in_words
 check "restore of an older backup: the weekly backup keeps its passphrase" restore_keeps_weekly_passphrase
 check "restore: weekly backup without any passphrase → turned off, said" restore_weekly_without_passphrase_off
@@ -8252,7 +8400,7 @@ check "menus: Q after an action of a submenu leaves seedtunnel" quit_from_an_act
 check "home screen: each state of VPN, seedbox, firewall, disk and backup" home_states
 check "home screen: every state fits its block (9 characters, EN/FR)" home_state_words_fit_blocks
 check "menus: the real screens fit the screen (EN/FR, 40 and 80 columns)" menus_fit_the_screen
-check "log: cut every month (logrotate), from the installation and apply" log_rotation_rule
+check "log: cut every month (logrotate, Ubuntu included), from the installation and apply" log_rotation_rule
 check "log: a service stopped writes its own title (never a failure)" log_titles_before_service_stops
 check "update: the version replaced is kept (one only)" update_keeps_previous_version
 check "update back: the version kept comes back and applies the settings" update_back_puts_previous_back
@@ -8282,6 +8430,7 @@ check "log: titles in the language of the messages, report still anonymous" log_
 check "restore: a decryption error under its own title in the log" decrypt_errors_under_their_title
 check "files changed by hand: a copy is kept and it is said" changed_by_hand_copy_kept
 check "fingerprints of the files written: a file deleted since leaves the list" written_list_drops_deleted_files
+check "apply: a state file or the list of fingerprints with the same content keeps its date" same_content_not_rewritten
 check "files changed by hand: nothing taken for a change after a restore or a return" fingerprints_forgotten_when_unknown
 check "nginx: the site « default » of the administrator stays on" nginx_default_site_kept_if_changed
 check "page « access denied »: colors of seedtunnel, without its name, only if the page is there" denied_page_discreet
@@ -8321,7 +8470,7 @@ check "VPN clients: since when the VPN runs, or that it is stopped" vpn_table_sa
 check "DNS: going back changes nothing, the same DNS applies nothing" vpn_dns_can_go_back
 check "DNS: Quad9, Cloudflare, DNS4EU, AdGuard or other, from the menu and by command" vpn_dns_changed
 check "bans: address, jail and end of the ban, the soonest first; unbanned by number" bans_listed_with_their_end
-check "seedbox unban: an invalid address refused, one not banned said, nothing done" unban_checks_the_address
+check "seedbox unban: an invalid address refused, one not banned said; once unbanned, the next mistake said to ban again" unban_checks_the_address
 check "bans: « no address banned », or fail2ban stopped" bans_none_or_fail2ban_stopped
 check "removing the seedbox: certificate, user and links under their own titles in the log" seedbox_removal_log_titles
 check "restore: torrents through watch/, whatever the version of Transmission (4.1 → 3 included)" restore_torrents_through_watch

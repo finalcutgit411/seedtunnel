@@ -48,7 +48,7 @@ Serveur
   backup delete NUMÉRO [--yes]       supprimer une sauvegarde de la liste
   backup auto on|off|status          sauvegarde chiffrée chaque semaine (off : --yes sans terminal)
   restore [FICHIER] [--passphrase-file FICHIER] [--yes]
-                                     sans FICHIER : la liste des sauvegardes trouvées
+                                     sans FICHIER, dans un terminal : la liste des sauvegardes trouvées
   restore clean [--yes]              supprimer les réglages gardés par les restaurations
   update                             passer à la dernière version publiée
   update back [--yes]                revenir à la version d'avant la dernière mise à jour

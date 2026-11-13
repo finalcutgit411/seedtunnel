@@ -277,6 +277,7 @@ $(share_generate_nginx_http)
 server {
     listen 80;$ipv6_80
     server_name $SEEDBOX_DOMAIN;
+    server_tokens off;
     # a link typed with http:// must not leave its token in the log either
     access_log /var/log/nginx/access.log seedtunnel_share;
 

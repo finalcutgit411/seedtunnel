@@ -612,7 +612,9 @@ backup_delete() {
     if [[ $file != "$BACKUP_DIR"/* ]]; then
         lines+=("$(t 'It was copied by hand into %s (WinSCP, scp): it may be your only copy.' "${file%/*}")")
     elif ((!others)); then
-        lines+=("$(t 'It is the only backup on the server: keep a copy of it on your computer first.')")
+        # the ones copied by hand (/root, /home) may be older, or of another
+        # server: only those of this folder are counted
+        lines+=("$(t 'It is the only backup made by this server: keep a copy of it on your computer first.')")
     fi
     danger "$(t 'Delete a backup')" "${lines[@]}"
     if ! confirm 'Delete this backup?' n; then
@@ -817,6 +819,11 @@ backup_status_fields() {
 # seedtunnel backup …
 backup_cli() {
     local file
+    case ${1-} in
+        list) cli_takes 1 "backup list" "$@" ;;
+        share | delete) cli_takes 2 "backup $1" "$@" ;;
+        auto) cli_takes 2 "backup auto${2:+ $2}" "$@" ;;
+    esac
     case ${1-} in
         "") backup_main ;;
         list) backup_list ;;

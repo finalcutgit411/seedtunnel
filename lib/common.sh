@@ -7,7 +7,7 @@
 # =============================================================================
 
 APP_NAME="seedtunnel"
-APP_VERSION="1.0.5"
+APP_VERSION="1.0.6"
 # Format of the settings in /etc/seedtunnel, and so of the backups that hold
 # them: 1 up to now. Raised by a version that writes its settings another
 # way; a backup of a format newer than this version knows is refused.
@@ -310,6 +310,17 @@ run() {
 # Local variables have unique prefixes: printf -v writes into the caller's
 # variable, and a local variable with the same name would hide it.
 
+# cli_takes NUMBER NAME ARGUMENTS… — what comes after the NUMBER arguments a
+# command takes is refused, before anything is done (« seedtunnel vpn list
+# extra »). NAME: the command, as in the message (« vpn list »).
+cli_takes() {
+    local max=$1 name=$2
+    shift 2
+    if (($# > max)); then
+        die 'Too many arguments for « seedtunnel %s »: %s   (help: seedtunnel help)' "$name" "${*:max+1}"
+    fi
+}
+
 require_terminal() {
     [[ -t 0 ]] || die 'This action is interactive: run it from a terminal, or use --config.'
     INTERACTIVE=1
@@ -438,7 +449,9 @@ state_file_is_safe() {
     ! LC_ALL=C grep -qvE "^(#.*|($names)=(''|([A-Za-z0-9_./:@,+=%-]|\\\\.)+))?$" "$1"
 }
 
-# state_write FILE VAR1 VAR2…  → writes VAR=value (escaped), mode 600
+# state_write FILE VAR1 VAR2…  → writes VAR=value (escaped), mode 600. The
+# same content: the file is left as it is (its date too: « apply » rewrites
+# nothing that did not change).
 state_write() {
     local file=$1 var
     shift
@@ -446,6 +459,11 @@ state_write() {
         printf '# %s\n' 'Written by seedtunnel — do not edit by hand'
         for var in "$@"; do printf '%s=%q\n' "$var" "${!var}"; done
     } >"$file.tmp" || die 'Cannot write %s (disk full?).' "$file"
+    if [[ -f $file && ! -L $file ]] && cmp -s "$file.tmp" "$file"; then
+        rm -f "$file.tmp"
+        chmod 600 "$file"
+        return 0
+    fi
     chmod 600 "$file.tmp"
     mv -f "$file.tmp" "$file"
 }
@@ -510,16 +528,21 @@ write_if_changed() {
 written_list() { printf '%s' "$APP_STATE_DIR/written.sha256"; }
 
 # written_remember FILE — the content of FILE is now the one seedtunnel wrote.
-# The files deleted since (removal of the seedbox…) leave the list.
+# The files deleted since (removal of the seedbox…) leave the list. Kept in
+# the order of the paths: nothing changed, nothing written (its date stays).
 written_remember() {
     local list sum tmp
     list=$(written_list)
     [[ -d ${list%/*} ]] || return 0
     sum=$(sha256sum <"$1") || return 0
     tmp=$(mktemp "$list.XXXXXX") || return 0
-    if { if [[ -f $list ]]; then written_others "$list" "$1"; fi && printf '%s %s\n' "${sum%% *}" "$1"; } >"$tmp" \
-        && chmod 600 "$tmp" && mv -f "$tmp" "$list"; then
-        return 0
+    if { if [[ -f $list ]]; then written_others "$list" "$1"; fi && printf '%s %s\n' "${sum%% *}" "$1"; } \
+        | LC_ALL=C sort -k 2 >"$tmp"; then
+        if [[ -f $list ]] && cmp -s "$tmp" "$list"; then
+            rm -f "$tmp"
+            return 0
+        fi
+        if chmod 600 "$tmp" && mv -f "$tmp" "$list"; then return 0; fi
     fi
     rm -f "$tmp"
 }
@@ -877,12 +900,17 @@ base_setup() {
 # --- Rotation of the log ----------------------------------------------------------
 # The log is cut every month by logrotate (run every day by Debian): the last
 # 6 months are kept, compressed. It no longer grows without end.
+#
+# « su root root »: on Ubuntu, /var/log can be written by the group syslog,
+# and logrotate then skips the files it holds unless it is told which account
+# cuts them (« parent directory has insecure permissions »).
 LOGROTATE_FILE="/etc/logrotate.d/seedtunnel"
 
 log_rotation_generate() {
     cat <<EOF
 # Written by seedtunnel — its log, cut every month, the last 6 months kept
 $APP_LOG {
+    su root root
     monthly
     rotate 6
     compress

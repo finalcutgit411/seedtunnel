@@ -3,6 +3,21 @@
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 
+## [1.0.6] - 2026-11-13
+
+### Fixed
+- Ubuntu: logrotate never cut `/var/log/seedtunnel.log` (« parent directory has insecure permissions »: there, `/var/log` can be written by the group syslog). The rule now says which account cuts it (`su root root`), and the log no longer grows without end.
+- `seedtunnel seedbox sftp-key add` of a file that is not there: « File not found », no longer « Unexpected error ».
+- `seedtunnel apply` with nothing to change rewrote `vpn.conf`, `seedbox.conf` and `written.sha256` with the same content. A file whose content does not change now keeps its date.
+
+### Changed
+- nginx no longer tells its version on port 80 either (`server_tokens off`, as on 443). The web interface gets one `X-Frame-Options` (Transmission sends its own: hidden).
+- A subcommand given more arguments than it takes (`seedtunnel vpn list extra`) is refused before anything is done, as the commands already were.
+- The full disk protection writes what it does (stopped, started again, not started) to `/var/log/seedtunnel.log` too, not only to the journal.
+- `seedtunnel seedbox unban` says that fail2ban still counts the failures of the last 10 minutes: one more mistake bans the address again.
+- Deleting the last backup made by the server says « the only backup made by this server » (one copied into a home folder may be older, or of another server).
+- French: « Utilisation » for the help of `seedtunnel firewall` (it said « Usage »). The help says that `restore` without a file lists the backups in a terminal only.
+
 ## [1.0.5] - 2026-11-13
 
 ### Security

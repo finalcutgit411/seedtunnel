@@ -834,6 +834,7 @@ $(share_generate_nginx_http)
 server {
     listen 80;$ipv6_80
     server_name $SEEDBOX_DOMAIN;
+    server_tokens off;
     # a link typed with http:// must not leave its token in the log either
     access_log /var/log/nginx/access.log seedtunnel_share;
 
@@ -878,6 +879,8 @@ $(share_generate_nginx "${hsts//$'\n    '/$'\n        '}")
     }$(nginx_generate_theme file)
     location /transmission/ {
         proxy_pass http://127.0.0.1:$TRANSMISSION_RPC_PORT;
+        # Transmission sends its own: one is enough (the one of nginx, above)
+        proxy_hide_header X-Frame-Options;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -1603,7 +1606,12 @@ sftp_keys_import() {
     install -d -m 755 "$SFTP_KEYS_DIR"
     if [[ ! -e $file ]]; then install -m 644 /dev/null "$file"; fi
     tmp=$(mktemp)
-    if [[ $source == - ]]; then cat >"$tmp"; else cat -- "$source" >"$tmp"; fi
+    if [[ $source == - ]]; then
+        cat >"$tmp"
+    elif ! cat -- "$source" >"$tmp" 2>/dev/null; then
+        rm -f "$tmp"
+        die 'File not found: %s' "$source"
+    fi
     while IFS= read -r line || [[ -n $line ]]; do
         line=${line%$'\r'}
         [[ -z $line || $line == \#* ]] && continue
@@ -2206,6 +2214,8 @@ fail2ban_unban() {
         return 0
     fi
     run "$(t 'Unbanning %s' "$ip")" fail2ban-client unban "$ip"
+    # fail2ban keeps counting the failures it saw (unban does not reset them)
+    say 'Careful: fail2ban still counts the failures of the last 10 minutes; one more mistake bans %s again.' "$ip"
 }
 
 fail2ban_bans_menu() {
@@ -2417,6 +2427,12 @@ seedbox_main() {
 seedbox_cli() {
     local command=${1-}
     if (($#)); then shift; fi
+    case "$command ${1-}" in
+        "sftp-key add" | "sftp-key remove") cli_takes 2 "seedbox $command ${1-}" "$@" ;;
+        "sftp-key "*) cli_takes 1 "seedbox $command${1:+ $1}" "$@" ;;
+        install\ * | password\ * | bans\ * | restart\ * | uninstall\ *) cli_takes 0 "seedbox $command" "$@" ;;
+        domain\ * | sftp-config\ * | sftp-password\ * | unban\ *) cli_takes 1 "seedbox $command" "$@" ;;
+    esac
     case $command in
         "")
             require_terminal

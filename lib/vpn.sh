@@ -1276,6 +1276,10 @@ vpn_cli() {
     local command=${1-} dns
     if (($#)); then shift; fi
     case $command in
+        install | list | restart | uninstall) cli_takes 0 "vpn $command" "$@" ;;
+        add | remove | show | share | links) cli_takes 1 "vpn $command" "$@" ;;
+    esac
+    case $command in
         "")
             require_terminal
             vpn_main

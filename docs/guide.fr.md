@@ -27,7 +27,7 @@ Connectez-vous en SSH, puis :
 ```bash
 sudo -i
 apt update && apt full-upgrade -y
-V=1.0.5
+V=1.0.6
 cd "$(mktemp -d)"
 curl -fLO https://github.com/finalcutgit411/seedtunnel/releases/download/v$V/seedtunnel-$V.tar.gz \
   && curl -fLO https://github.com/finalcutgit411/seedtunnel/releases/download/v$V/SHA256SUMS \

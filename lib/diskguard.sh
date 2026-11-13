@@ -97,6 +97,7 @@ diskguard_prestart() {
     if ((free < stop_below)); then
         date +%s >"$DISKGUARD_MARKER"
         logger -t seedtunnel "Transmission not started: disk almost full ($free GB free)" 2>/dev/null || true
+        log_title 'Transmission not started: disk almost full (%s GB free).' "$free"
         say 'Transmission not started: disk almost full (%s GB free).' "$free"
         return 1
     fi
@@ -105,6 +106,7 @@ diskguard_prestart() {
 
 # Run by the timer (« seedtunnel diskguard-check »). The thresholds can be
 # changed for the tests: SEEDTUNNEL_DISKGUARD_STOP_BELOW_GB, …_START_ABOVE_GB.
+# What it does is written to the journal and to the log of seedtunnel.
 diskguard_check() {
     local free stop_below=${SEEDTUNNEL_DISKGUARD_STOP_BELOW_GB:-$DISKGUARD_STOP_BELOW_GB}
     local start_above=${SEEDTUNNEL_DISKGUARD_START_ABOVE_GB:-$DISKGUARD_START_ABOVE_GB}
@@ -119,12 +121,14 @@ diskguard_check() {
             if systemctl start transmission-daemon; then
                 rm -f "$DISKGUARD_MARKER"
                 logger -t seedtunnel "Transmission started again: $free GB free"
+                log_title 'Transmission started again: %s GB free.' "$free"
                 say 'Transmission started again: %s GB free.' "$free"
             else
                 # still marked as stopped by the guard: tried again at the next
                 # check, and « seedtunnel doctor » says it does not start
                 printf '%s failed\n' "$(date +%s)" >"$DISKGUARD_MARKER"
                 logger -t seedtunnel "Transmission does not start again although there is room ($free GB free)" 2>/dev/null || true
+                log_title 'Transmission does not start again although there is room (%s GB free):  journalctl -u transmission-daemon -n 30' "$free"
                 warn 'Transmission does not start again although there is room (%s GB free):  journalctl -u transmission-daemon -n 30' "$free"
             fi
         fi
@@ -132,6 +136,7 @@ diskguard_check() {
         systemctl stop transmission-daemon
         date +%s >"$DISKGUARD_MARKER"
         logger -t seedtunnel "Transmission stopped: disk almost full ($free GB free)"
+        log_title 'Transmission stopped: disk almost full (%s GB free).' "$free"
         say 'Transmission stopped: disk almost full (%s GB free).' "$free"
     fi
 }

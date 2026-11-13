@@ -903,7 +903,7 @@ en: Without a terminal:  seedtunnel firewall enable --yes
 fr: Sans terminal :  seedtunnel firewall enable --yes
 
 en: Usage: seedtunnel firewall enable|disable|status|rules
-fr: Usage : seedtunnel firewall enable|disable|status|rules
+fr: Utilisation : seedtunnel firewall enable|disable|status|rules
 
 en: The automatic undo could not be cancelled: the previous rules are back, nothing was kept (details in %s).
 fr: Le retour arrière automatique n'a pas pu être annulé : les règles précédentes sont revenues, rien n'a été conservé (détails dans %s).
@@ -1296,6 +1296,9 @@ fr: Débannissement de %s
 
 en: %s is not banned right now: nothing to do.
 fr: %s n'est pas bannie en ce moment : rien à faire.
+
+en: Careful: fail2ban still counts the failures of the last 10 minutes; one more mistake bans %s again.
+fr: Attention : fail2ban compte encore les échecs des 10 dernières minutes ; une erreur de plus bannit de nouveau %s.
 
 en: fail2ban does not answer (details in %s)   → seedtunnel seedbox restart
 fr: fail2ban ne répond pas (détails dans %s)   → seedtunnel seedbox restart
@@ -2691,8 +2694,8 @@ fr: Sauvegarde à supprimer (numéro)
 en: The backup of %s (%s, %s) is deleted for good.
 fr: La sauvegarde du %s (%s, %s) est supprimée pour de bon.
 
-en: It is the only backup on the server: keep a copy of it on your computer first.
-fr: C'est la seule sauvegarde du serveur : gardez-en d'abord une copie sur votre ordinateur.
+en: It is the only backup made by this server: keep a copy of it on your computer first.
+fr: C'est la seule sauvegarde faite par ce serveur : gardez-en d'abord une copie sur votre ordinateur.
 
 en: Delete this backup?
 fr: Supprimer cette sauvegarde ?

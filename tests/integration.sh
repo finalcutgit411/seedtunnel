@@ -161,6 +161,16 @@ transmission_private_test() {
     [[ $(stat -c %a "$settings") == 600 ]] && (((8#$(stat -c %a "$state") & 8#7) == 0))
 }
 
+# logrotate takes the rule of seedtunnel and would cut its log: on Ubuntu,
+# /var/log can be written by the group syslog, and without « su » the log is
+# skipped (« parent directory has insecure permissions »)
+logrotate_test() {
+    local out
+    out=$(logrotate -d /etc/logrotate.d/seedtunnel 2>&1)
+    grep -iE 'error|insecure|seedtunnel.log' <<<"$out"
+    [[ $out == *"/var/log/seedtunnel.log"* && $out != *"insecure permissions"* && $out != *"error:"* ]]
+}
+
 # HTTP code returned by the seedbox (credentials optional)
 http_code() {
     local path=$1
@@ -344,6 +354,20 @@ nothing_changed() {
         return 1
     }
     ! grep -E 'Starting|Restarting|Reloading|Stopping|Applying|Installing|Creating|Enabling|Updating' <<<"$out"
+}
+
+# « apply » with nothing to change writes no file: the state files and the list
+# of fingerprints keep their date (on Ubuntu 26.04 they did not)
+apply_rewrites_nothing() {
+    local before after file
+    before=$(stat -c '%Y %n' /etc/seedtunnel/*.conf /etc/seedtunnel/written.sha256)
+    sleep 1
+    nothing_changed app apply || return 1
+    after=$(stat -c '%Y %n' /etc/seedtunnel/*.conf /etc/seedtunnel/written.sha256)
+    [[ $before == "$after" ]] || {
+        diff <(printf '%s\n' "$before") <(printf '%s\n' "$after")
+        return 1
+    }
 }
 
 # « seedtunnel firewall rules » reads the rules nftables really has: every
@@ -1040,6 +1064,12 @@ diskguard_test_steps() {
     output_has 'disk almost full' app doctor || return 1
     env SEEDTUNNEL_DISKGUARD_START_ABOVE_GB=0 PATH=/usr/local/bin:/usr/bin:/bin "$APP" diskguard-check </dev/null || return 1
     systemctl is-active --quiet transmission-daemon && [[ ! -e /run/seedtunnel-diskguard.stopped ]] || return 1
+    # written to the log of seedtunnel too, not only to the journal
+    grep -q "· Transmission stopped: disk almost full" /var/log/seedtunnel.log \
+        && grep -q "· Transmission started again:" /var/log/seedtunnel.log || {
+        echo "stop or start missing from /var/log/seedtunnel.log"
+        return 1
+    }
     # Transmission checks the disk before starting (boot included)
     systemctl show transmission-daemon -p ExecStartPre | grep -q diskguard-prestart || return 1
     if env SEEDTUNNEL_DISKGUARD_STOP_BELOW_GB=100000 PATH=/usr/local/bin:/usr/bin:/bin "$APP" diskguard-prestart </dev/null; then
@@ -1105,6 +1135,19 @@ denied_page_as_expected() {
     [[ $(curl -sk --max-time 10 -u "$SBU:wrong" -o "$W/denied.html" -w '%{http_code}' https://127.0.0.1/) == 401 ]] || return 1
     grep -q "Access denied" "$W/denied.html" || return 1
     [[ $(curl -sk --max-time 10 -o /dev/null -w '%{http_code}' https://127.0.0.1/seedtunnel/denied.html) == 404 ]]
+}
+
+# nginx never tells its version, port 80 included; the web interface gets one
+# X-Frame-Options (Transmission sends its own: hidden)
+nginx_headers_test() {
+    local headers frames
+    headers=$(curl -s --max-time 10 -D - -o /dev/null http://127.0.0.1/ | tr -d '\r') || return 1
+    grep -i '^server:' <<<"$headers"
+    grep -qix 'server: nginx' <<<"$headers" || return 1
+    headers=$(curl -sk --max-time 10 -u "$SBU:$PW1" -D - -o /dev/null https://127.0.0.1/transmission/web/ | tr -d '\r') || return 1
+    frames=$(grep -ci '^x-frame-options:' <<<"$headers" || true)
+    grep -i '^x-frame-options:\|^server:' <<<"$headers"
+    ((frames == 1)) && grep -qix 'server: nginx' <<<"$headers"
 }
 
 # Any other address of the site of the seedbox (/share, a typo…): without the
@@ -1196,6 +1239,7 @@ EOF
     check "system recognised (header, diagnostics)" system_named
     check "seedtunnel version" output_has "seedtunnel $(sed -n 's/^APP_VERSION="\(.*\)"$/\1/p' "${APP%/*}/lib/common.sh")" app version
     check "seedtunnel help" output_has "vpn add NAME" app help
+    check "log of seedtunnel cut by logrotate (Ubuntu: /var/log writable by syslog)" logrotate_test
     check "seedtunnel --version" output_has "seedtunnel $(sed -n 's/^APP_VERSION="\(.*\)"$/\1/p' "${APP%/*}/lib/common.sh")" app --version
     check "help: new commands" output_has "backup auto on|off|status" app help
     check "help in French" output_has "Utilisation : seedtunnel" env SEEDTUNNEL_LANG=fr "$APP" help
@@ -1248,6 +1292,7 @@ EOF
     check "vpn show phone: the QR code fits in 80 columns" vpn_qr_test
     check_fails "invalid client name refused" app vpn add "invalid name!"
     check_fails "a client name that differs from « phone » only by case refused" app vpn add PHONE
+    check_fails "vpn list: an extra argument refused" app vpn list extra
     check "vpn dns: Quad9 in use" output_has "DNS of the clients: Quad9 · 9.9.9.9, 149.112.112.112." app vpn dns
     check "vpn dns cloudflare: in the file of the clients" vpn_dns_test
 
@@ -1288,6 +1333,7 @@ EOF
     check "Transmission answers behind nginx (409)" http_is 409 /transmission/rpc -u "$SBU:$PW1"
     check "wrong password refused" http_is 401 /transmission/web/ -u "$SBU:wrong"
     check "page « access denied »: still a 401 asking for the password, nothing tells what is behind" denied_page_as_expected
+    check "nginx: version never told (port 80 too), one X-Frame-Options on the web interface" nginx_headers_test
     check "home page: the password first (401)" http_is 401 /
     check "home page with the password: to the web interface (302)" http_is 302 / -u "$SBU:$PW1"
     check "any other address: the password first, then the page « nothing here » (404)" seedbox_other_addresses_test
@@ -1311,6 +1357,7 @@ EOF
 
     step "Seedbox: same run again (idempotence)"
     check "no service restarted" nothing_changed app seedbox install --config "$W/ci.conf"
+    check "apply with nothing to change: no file of /etc/seedtunnel written again" apply_rewrites_nothing
 
     step "One-time download links"
     check "vpn share: page, single download, then the link is gone" share_test

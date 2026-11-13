@@ -713,6 +713,7 @@ firewall_menu() {
 
 # seedtunnel firewall <command>
 firewall_cli() {
+    cli_takes 1 "firewall${1:+ $1}" "$@"
     case ${1-} in
         "")
             require_terminal
