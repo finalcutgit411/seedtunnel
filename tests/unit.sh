@@ -2207,9 +2207,44 @@ backup_create_and_weekly_can_go_back() (
     backup_write() { echo "backup $1" >>"$WORK/back-calls"; }
     backup_auto_install_units() { echo "weekly on" >>"$WORK/back-calls"; }
     # « backup now », then « weekly backup on »: empty passphrase both times
-    answers "1" "3" "b"
+    answers "1" "2" "b"
     backup_menu >/dev/null 2>&1 <<<$'\n\n' || return 1
     back_nothing_done && [[ ! -e $BACKUP_PASSPHRASE_FILE ]]
+)
+
+# A backup made from the menu: its download offered right away (« yes » by
+# default); by command, the text with « seedtunnel backup share » as before
+backup_from_menu_offers_link() (
+    back_load
+    local out
+    BACKUP_DIR="$WORK/offer-backups"
+    mkdir -p "$BACKUP_DIR"
+    backup_require_something() { :; }
+    backup_read_passphrase() { :; }
+    backup_write() { : >"$1"; }
+    backup_share_file() { echo "link $1" >>"$WORK/offer-calls"; }
+    rm -f "$WORK/offer-calls"
+    confirm() {
+        echo "asked: $1"
+        return 0
+    }
+    out=$(backup_menu_create 2>&1) || return 1
+    [[ $out == *"Without the passphrase, it cannot be recovered."*"asked: Download it now (one-time link)?"* ]] || return 1
+    [[ $(<"$WORK/offer-calls") == "link $BACKUP_DIR/"*.tar.gz.enc ]] || return 1
+    # « no »: no link (a new name: the same second would be refused)
+    rm -f "$WORK/offer-calls" "$BACKUP_DIR"/*
+    confirm() { return 1; }
+    backup_menu_create >/dev/null 2>&1 || return 1
+    [[ ! -e $WORK/offer-calls ]] || return 1
+    # by command: no question
+    rm -f "$BACKUP_DIR"/*
+    BACKUP_FROM_MENU=0
+    confirm() {
+        echo asked
+        return 0
+    }
+    out=$(backup_main 2>&1) || return 1
+    [[ $out != *asked* && $out == *"seedtunnel backup share"* && ! -e $WORK/offer-calls ]]
 )
 
 backup_menu_can_go_back() (
@@ -2219,7 +2254,7 @@ backup_menu_can_go_back() (
     backup_latest() { echo "$WORK/none.enc"; }
     restore_main() { echo "restore $1" >>"$WORK/back-calls"; }
     # restore: a file that does not exist asked again, then empty
-    answers "4" "$WORK/none.enc" "" "b"
+    answers "3" "$WORK/none.enc" "" "b"
     backup_menu >/dev/null 2>&1 || return 1
     back_nothing_done
 )
@@ -6517,7 +6552,7 @@ language_back_after_restore() (
     backup_status_fields() { :; }
     ui_action() { [[ $1 != backup_menu_restore ]] || echo fr >"$APP_LANG_FILE"; }
     INTERACTIVE=1
-    backup_menu <<<$'4\nb' >/dev/null 2>&1 || return 1
+    backup_menu <<<$'3\nb' >/dev/null 2>&1 || return 1
     [[ $APP_LANG == fr && $(t 'Back') == Retour ]] || return 1
     # the home screen reloads it too (a restore run from there)
     echo en >"$APP_LANG_FILE"
@@ -7377,5 +7412,6 @@ check "restore: the settings of the site of the links checked like the others" r
 check "restore: the site of the links of the backup put back, the one of this server kept, ports used refused first" restore_and_the_links_site
 check "site of the links: applied again by apply and a new address, removed with the VPN, replaced by a seedbox" links_site_wired_in
 check "menus: with a key [10], the texts stay aligned (one or two columns)" ui_menu_two_digit_keys
+check "backup from the menu: its download offered right away; by command, no question" backup_from_menu_offers_link
 printf '\n\033[1m%s passed, %s failed\033[0m\n' "$PASS" "$FAIL"
 ((FAIL == 0))

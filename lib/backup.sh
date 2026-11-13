@@ -28,6 +28,8 @@
 BACKUP_DIR="/var/backups/seedtunnel"
 # Where a backup copied onto the server is looked for too (WinSCP, scp)
 BACKUP_COPIED=('/root/*.tar.gz.enc' '/home/*/*.tar.gz.enc')
+# 1 while the backup is made from the menu: its download is offered after it
+BACKUP_FROM_MENU=0
 BACKUP_KEEP=4
 BACKUP_PASSPHRASE_FILE="$APP_STATE_DIR/backup.passphrase"
 # System the backup was made on (« ubuntu 24.04 »): a restore on another one is said
@@ -442,7 +444,23 @@ backup_main() {
     backup_write "$out"
     echo
     ok 'Backup: %s' "$out"
+    # from the menu: its download offered right away
+    if ((BACKUP_FROM_MENU)); then
+        backup_offer_link "$out"
+        return 0
+    fi
     text backup_after
+    pause
+}
+
+# backup_offer_link FILE — after a backup made from the menu, the one-time
+# link to it, if wanted (otherwise: My backups, later)
+backup_offer_link() {
+    say 'Without the passphrase, it cannot be recovered.'
+    echo
+    if confirm 'Download it now (one-time link)?' y; then
+        backup_share_file "$1" 'Download a backup (one-time link)'
+    fi
     pause
 }
 
@@ -843,9 +861,10 @@ backup_pick_file() {
     printf -v "$_bp_var" '%s' "$_bp_answer"
 }
 
-backup_menu_share() {
-    backup_share
-    pause
+# [1] of the menu: the backup, then its download offered
+backup_menu_create() {
+    BACKUP_FROM_MENU=1
+    backup_main
 }
 
 # The screen of the backups: the table (those of the server and those copied
@@ -933,23 +952,21 @@ backup_menu() {
         backup_status_fields
         echo
         ui_menu_add 1 "$(t 'Create an encrypted backup now')"
-        ui_menu_add 2 "$(t 'Download the latest backup (one-time link)')"
-        ui_menu_add 3 "$(t 'Turn the weekly backup on / off')"
-        ui_menu_add 4 "$(t 'Restore a backup')"
-        ui_menu_add 5 "$(t 'My backups (list, download, delete)')"
+        ui_menu_add 2 "$(t 'Turn the weekly backup on / off')"
+        ui_menu_add 3 "$(t 'Restore a backup')"
+        ui_menu_add 4 "$(t 'My backups (list, download, delete)')"
         ui_menu_show
         echo
         ui_menu_ask choice back
         case ${choice,,} in
-            1) ui_action backup_main ;;
-            2) ui_action backup_menu_share ;;
-            3) ui_action backup_menu_weekly ;;
-            4)
+            1) ui_action backup_menu_create ;;
+            2) ui_action backup_menu_weekly ;;
+            3)
                 ui_action backup_menu_restore
                 # the menus go on in the language of the backup restored
                 language_reload
                 ;;
-            5) backup_menu_mine ;;
+            4) backup_menu_mine ;;
             "" | b) return 0 ;;
             q) ui_quit ;;
         esac

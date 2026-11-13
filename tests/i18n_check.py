@@ -30,6 +30,8 @@ LITERAL = r"""('[^']*'|"(?:[^"\\]|\\.)*")"""
 # lookahead: calls inside other calls are found too
 CALL = re.compile(r"(?<![\w-])" + FUNCTIONS + r"\s+(?=" + LITERAL + ")")
 ASK = re.compile(r"(?<![\w-])(?:ask(?:_back)?|backup_ask_number)\s+[A-Za-z_]+\s+(?=" + LITERAL + ")")
+# backup_share_file FILE TITLE: the title is translated by section
+TITLE = re.compile(r"(?<![\w-])backup_share_file\s+\"\$\w+\"\s+(?=" + LITERAL + ")")
 TEXT_CALL = re.compile(r"(?<![\w-])text\s+([a-z_]+)")
 PLACEHOLDER = re.compile(r"%[-0-9.]*[sd]")
 # every « % » and what follows it: allowed if group 1 matched
@@ -65,7 +67,7 @@ def code_lines():
 def code_messages():
     messages = {}
     for path, number, line in code_lines():
-        for regex in (CALL, ASK):
+        for regex in (CALL, ASK, TITLE):
             for match in regex.finditer(line):
                 text = unquote(match.group(1))
                 if text:

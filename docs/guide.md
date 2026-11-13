@@ -214,7 +214,7 @@ If a setting changes while the archive is written (renewal of a certificate, for
 
 `seedtunnel backup auto on` makes an encrypted backup **every week** and keeps the last 4. Its passphrase is saved on the server (readable by root only) so that it can run alone: write it down somewhere else too. Turning it off (`seedtunnel backup auto off`, or the menu) asks first: the saved passphrase is deleted.
 
-A backup that stays on the server disappears with it: `seedtunnel backup share` gives a one-time link to download the latest one onto your computer. `seedtunnel doctor` reminds you when the weekly backup is off or fails, and when no backup was downloaded for a month.
+A backup that stays on the server disappears with it: `seedtunnel backup share` gives a one-time link to download the latest one onto your computer. In the menu, the download is offered right after a backup is made. `seedtunnel doctor` reminds you when the weekly backup is off or fails, and when no backup was downloaded for a month.
 
 In the menu, Backup / restore → « My backups » lists them all, numbered (those of the server and those copied into `/root` or a home folder), with the room they take and the free space of the disk. From there, any of them can be downloaded through a one-time link or deleted: the date, the size and the kind are shown in red first, and the question waits for « no » by default (said too when it is the last backup of the server, or a backup you copied by hand: perhaps your only copy). By command: `seedtunnel backup list` (numbered), `seedtunnel backup share NUMBER`, `seedtunnel backup delete NUMBER` (`--yes` without a terminal).
 

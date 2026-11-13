@@ -643,10 +643,9 @@ screen_backup() {
     ui_fields_show
     echo
     ui_menu_add 1 "$(t 'Create an encrypted backup now')"
-    ui_menu_add 2 "$(t 'Download the latest backup (one-time link)')"
-    ui_menu_add 3 "$(t 'Turn the weekly backup on / off')"
-    ui_menu_add 4 "$(t 'Restore a backup')"
-    ui_menu_add 5 "$(t 'My backups (list, download, delete)')"
+    ui_menu_add 2 "$(t 'Turn the weekly backup on / off')"
+    ui_menu_add 3 "$(t 'Restore a backup')"
+    ui_menu_add 4 "$(t 'My backups (list, download, delete)')"
     ui_menu_show
     echo
     end_menu back

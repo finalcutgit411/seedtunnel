@@ -2761,3 +2761,11 @@ fr: Pour un lien à la place :  seedtunnel vpn links on  puis  seedtunnel doctor
 
 en: site of the links (80, 443/tcp)
 fr: site des liens (80, 443/tcp)
+
+# --- Sauvegarde : téléchargement proposé après la création ----------------------------
+
+en: Without the passphrase, it cannot be recovered.
+fr: Sans la passphrase, elle est irrécupérable.
+
+en: Download it now (one-time link)?
+fr: La télécharger maintenant (lien à usage unique) ?
