@@ -10,6 +10,7 @@ versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 
 ### Changed
 - Header of the screens: the full name of the server, its IPv4 address (read on the server itself: no outside site is asked) and its system. On a narrow screen (a phone), the system next to the version, the name and the address under the subtitle.
+- Documentation: the README and the guide rewritten step by step for beginners, in English and in French, with new captures (backups, firewall rules).
 - Site of the seedbox: any address that is neither the web interface nor a link (`/share` without its last `/`, a typo…) shows the page « Nothing here » once the password is given, instead of the « 404 Not Found » of nginx. The password is still asked first, and nothing of the default folder of nginx is served.
 - The log says when an update is installed (« Update: 1.0.2 → 1.0.3 installed ») and when `seedtunnel update back` goes back to the previous version. Written by the new version: from this update on.
 
