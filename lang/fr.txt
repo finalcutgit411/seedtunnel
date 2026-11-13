@@ -243,6 +243,9 @@ fr: Archive refusée : « %s » est un lien, un programme ou un fichier spécial
 en: Archive refused: unexpected value of %s in %s
 fr: Archive refusée : valeur inattendue de %s dans %s
 
+en: This backup was made by a newer version of seedtunnel (settings format %s, this version reads up to %s). Update seedtunnel (seedtunnel update), then restore again.
+fr: Cette sauvegarde a été faite par une version plus récente de seedtunnel (format des réglages %s, cette version lit jusqu'au %s). Mettez seedtunnel à jour (seedtunnel update), puis recommencez la restauration.
+
 en: This backup could not be restored: %s holds something else than settings. Run « seedtunnel doctor ».
 fr: Cette sauvegarde ne pourrait pas être restaurée : %s contient autre chose que des réglages. Lancez « seedtunnel doctor ».
 
@@ -1197,6 +1200,9 @@ fr: « %s » existe déjà sur ce système.
 
 en: Account %s renamed to %s
 fr: Compte %s renommé en %s
+
+en: SFTP account %s renamed to %s
+fr: Compte SFTP %s renommé en %s
 
 en: Cannot suspend %s before renaming it (details in %s): nothing was changed.
 fr: Impossible de suspendre %s avant de le renommer (détails dans %s) : rien n'a été changé.

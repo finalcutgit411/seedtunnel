@@ -896,6 +896,37 @@ update_failed_keeps_previous_version() (
     grep -q "echo old" "$APP_DIR/seedtunnel.sh" && [[ $(<"$WORK/app/applied") == old ]]
 )
 
+# The lock goes over to the new version without ever being free: a command
+# started meanwhile is refused. A version that does not know this (before
+# 1.0.4) gets it let go just before, as it expects.
+update_hands_the_lock_over() (
+    load
+    APP_LOCK="$WORK/lock-update"
+    APP_DIR="$WORK/app/seedtunnel"
+    rm -rf "$WORK/app" "$APP_LOCK"
+    mkdir -p "$APP_DIR/lib"
+    echo 'SEEDTUNNEL_LOCK_HANDED_OVER' >"$APP_DIR/lib/common.sh"
+    # the new version takes the lock with the real take_lock, then a command
+    # started meanwhile tries to take it
+    printf '#!/bin/bash\n. "%s/lib/common.sh"\nAPP_LOCK="%s"\ntake_lock\nif flock -n "$APP_LOCK" true; then echo free; else echo held; fi\n' \
+        "$ROOT" "$APP_LOCK" >"$APP_DIR/seedtunnel.sh"
+    chmod +x "$APP_DIR/seedtunnel.sh"
+    exec 9<>"$APP_LOCK"
+    flock -n 9 || return 1
+    local out
+    out=$(update_run_apply 2>&1)
+    [[ $out == held ]] || {
+        echo "$out"
+        return 1
+    }
+    # still held by this version once the new one is done
+    if flock -n "$APP_LOCK" true; then return 1; fi
+    # a version before 1.0.4: the lock is let go, it takes it as usual
+    : >"$APP_DIR/lib/common.sh"
+    update_run_apply >"$WORK/lock-update.out" 2>&1
+    [[ $(<"$WORK/lock-update.out") == held && ! /proc/self/fd/9 -ef $APP_LOCK ]] && flock -n "$APP_LOCK" true
+)
+
 # The latest version read without jq (installed with the VPN or the seedbox
 # only): seedtunnel updates before them
 update_without_jq() (
@@ -1887,6 +1918,69 @@ restore_refuses_code_in_settings() (
     if (restore_main "$WORK/code.enc") >"$WORK/code.out" 2>&1; then return 1; fi
     cat "$WORK/code.out"
     grep -q "could run commands" "$WORK/code.out" && [[ ! -e $WORK/pwned ]]
+)
+
+# Format of the settings: a backup made by a newer version (format 2) is
+# refused first, with what to do, before anything changes; format 1 and a
+# backup without it (before 1.0.4) go as far as the last question
+restore_checks_settings_format() (
+    restore_archive_load format
+    local out
+    # before 1.0.4: no format
+    restore_archive_make format
+    (restore_main "$WORK/format.enc") >"$WORK/format.out" 2>&1
+    grep -q "The backup contains" "$WORK/format.out" || {
+        cat "$WORK/format.out"
+        return 1
+    }
+    echo 1 >"$RESTORE_ROOT/etc/seedtunnel/format"
+    restore_archive_make format
+    (restore_main "$WORK/format.enc") >"$WORK/format.out" 2>&1
+    grep -q "The backup contains" "$WORK/format.out" || {
+        cat "$WORK/format.out"
+        return 1
+    }
+    # newer: refused, nothing asked, nothing left in the temporary folder
+    echo 2 >"$RESTORE_ROOT/etc/seedtunnel/format"
+    restore_archive_make format
+    confirm() {
+        echo asked
+        return 1
+    }
+    if (restore_main "$WORK/format.enc") >"$WORK/format.out" 2>&1; then return 1; fi
+    out=$(<"$WORK/format.out")
+    [[ $out == *"made by a newer version of seedtunnel (settings format 2, this version reads up to 1)"* ]] \
+        && [[ $out == *"seedtunnel update"* && $out != *"The backup contains"* && $out != *asked* ]] || {
+        echo "$out"
+        return 1
+    }
+    # not a number: refused as an unexpected value
+    echo 'x;touch' >"$RESTORE_ROOT/etc/seedtunnel/format"
+    restore_archive_make format
+    if (restore_main "$WORK/format.enc") >"$WORK/format.out" 2>&1; then return 1; fi
+    grep -q "unexpected value of format in etc/seedtunnel/format" "$WORK/format.out" || {
+        cat "$WORK/format.out"
+        return 1
+    }
+)
+
+# Each backup holds the format of the settings; a server that only has it
+# (with its language, packages, system) has nothing to keep aside
+backup_notes_settings_format() (
+    load
+    APP_OS_ID=debian APP_OS_VERSION=13
+    BACKUP_SYSTEM_FILE="$APP_STATE_DIR/system"
+    BACKUP_FORMAT_FILE="$APP_STATE_DIR/format"
+    rm -f "$BACKUP_FORMAT_FILE"
+    sleep() { :; }
+    backup_note_system
+    [[ $(<"$BACKUP_FORMAT_FILE") == "$SETTINGS_FORMAT" && $(stat -c %a "$BACKUP_FORMAT_FILE") == 600 ]] || return 1
+    [[ $(restore_bad_format "$WORK/no-such-folder") == "" ]] || return 1
+    rm -rf "$WORK/fresh"
+    mkdir -p "$WORK/fresh"
+    echo 1 >"$WORK/fresh/format"
+    echo debian >"$WORK/fresh/system"
+    ! restore_has_settings "$WORK/fresh"
 )
 
 state_files_round_trip_safe() (
@@ -4559,6 +4653,36 @@ denied_page_discreet() (
     grep -q "Accès refusé" "$page" && grep -q "Access denied" "$page" && ! grep -qE '^web( |/)' "$ROOT/.gitattributes"
 )
 
+# Transmission stopped (disk almost full) or starting again: a page in the
+# colors of seedtunnel instead of the grey « 502 Bad Gateway » of nginx. For
+# the whole site (an error_page in /transmission/ would make the page of the
+# refused password forgotten there), only if the page is there; the page
+# stands alone and says what to do
+stopped_page_instead_of_502() (
+    load
+    SEEDBOX_CERTIFICATE=letsencrypt
+    SEEDBOX_DOMAIN=seed.example.net
+    TRANSMISSION_RPC_PORT=9091
+    dpkg-query() { echo "1:4.0.6-1"; }
+    nginx_generate_site >"$WORK/site-stopped"
+    grep -qx "    error_page 502 504 /seedtunnel/transmission-stopped.html;" "$WORK/site-stopped" \
+        && grep -A5 "location = /seedtunnel/transmission-stopped.html {" "$WORK/site-stopped" | grep -qF "auth_basic off;" \
+        && grep -A5 "location = /seedtunnel/transmission-stopped.html {" "$WORK/site-stopped" | grep -qF "internal;" \
+        && grep -qF "alias $ROOT/web/transmission-stopped.html;" "$WORK/site-stopped" || {
+        cat "$WORK/site-stopped"
+        return 1
+    }
+    # no error_page of its own in /transmission/: the page of the refused
+    # password stays there
+    [[ -z $(sed -n '/location \/transmission\/ {/,/^    }/p' "$WORK/site-stopped" | grep error_page) ]] || return 1
+    # page missing: nginx as before
+    if (APP_DIR=$WORK/elsewhere nginx_generate_site | grep -q "error_page 502"); then return 1; fi
+    local page=$ROOT/web/transmission-stopped.html
+    if grep -qiE 'https?:|src=|href=|<script' "$page"; then return 1; fi
+    grep -q "Transmission ne répond pas" "$page" && grep -q "Transmission is not responding" "$page" \
+        && grep -q "sudo seedtunnel doctor" "$page" && ! grep -qE '^web( |/)' "$ROOT/.gitattributes"
+)
+
 # --- pages of the one-time links ----------------------------------------------
 
 # The page of a link, in the colors of seedtunnel: the button, single use, the
@@ -4936,21 +5060,21 @@ packages_without_candidate_stop() (
 
 apt_never_lets_needrestart_restart() (
     packages_load
-    apt-get() { echo "NEEDRESTART_MODE=${NEEDRESTART_MODE-} DEBIAN_FRONTEND=${DEBIAN_FRONTEND-} $*" >>"$WORK/apt-calls"; }
+    apt-get() { echo "NEEDRESTART_SUSPEND=${NEEDRESTART_SUSPEND-} NEEDRESTART_MODE=${NEEDRESTART_MODE-} DEBIAN_FRONTEND=${DEBIAN_FRONTEND-} $*" >>"$WORK/apt-calls"; }
     apt_install fail2ban &>/dev/null || return 1
     cat "$WORK/apt-calls"
-    grep -q "^NEEDRESTART_MODE=l DEBIAN_FRONTEND=noninteractive .* install " "$WORK/apt-calls" || return 1
+    grep -q "^NEEDRESTART_SUSPEND=1 NEEDRESTART_MODE=l DEBIAN_FRONTEND=noninteractive .* install " "$WORK/apt-calls" || return 1
     # removals too
     rm -f "$WORK/apt-calls"
     printf '%s\n' certbot >>"$WORK/installed"
     printf '%s\n' certbot >"$APP_STATE_DIR/packages"
     apt-get() {
-        echo "NEEDRESTART_MODE=${NEEDRESTART_MODE-} $*" >>"$WORK/apt-calls"
+        echo "NEEDRESTART_SUSPEND=${NEEDRESTART_SUSPEND-} NEEDRESTART_MODE=${NEEDRESTART_MODE-} $*" >>"$WORK/apt-calls"
         if [[ $1 == -s && $* == *" purge "* ]]; then echo "Purg certbot [1.0]"; fi
     }
     apt_purge certbot &>/dev/null || return 1
     cat "$WORK/apt-calls"
-    grep -q "^NEEDRESTART_MODE=l .* purge -y certbot" "$WORK/apt-calls"
+    grep -q "^NEEDRESTART_SUSPEND=1 NEEDRESTART_MODE=l .* purge -y certbot" "$WORK/apt-calls"
 )
 
 ssh_socket_ports_kept_open() (
@@ -6044,6 +6168,32 @@ EOF
         && grep -qF "AdGuard · 94.140.14.14, 94.140.15.15" "$WORK/report.txt" \
         && grep -qF "clients: 1.1.1.1, 86.54.11.201" "$WORK/report.txt" \
         && grep -qF "clients: <ip>" "$WORK/report.txt"
+)
+
+# The SFTP account renamed (a restore, new credentials) is written in the log;
+# the report hides both names, in English and in French
+sftp_rename_in_log_hidden_in_report() (
+    report_load
+    seedbox_user_suspend() { :; }
+    usermod() { :; }
+    getent() { return 1; }
+    SFTP_KEYS_DIR="$WORK/rename-keys"
+    mkdir -p "$SFTP_KEYS_DIR"
+    : >"$APP_LOG"
+    seedbox_rename_account arthur lancelot >/dev/null || return 1
+    grep -q " · SFTP account arthur renamed to lancelot$" "$APP_LOG" || {
+        cat "$APP_LOG"
+        return 1
+    }
+    cat "$APP_LOG" >>"$WORK/report.txt"
+    echo "=== 2026-11-13 08:00:00 · Compte SFTP gauvain-dupont renommé en arthur" >>"$WORK/report.txt"
+    SUDO_USER=perceval
+    who() { :; }
+    report_anonymize "$WORK/report.txt"
+    cat "$WORK/report.txt"
+    ! grep -q 'arthur\|lancelot\|gauvain' "$WORK/report.txt" || return 1
+    grep -qF "SFTP account <former-sftp-user> renamed to <sftp-user>" "$WORK/report.txt" \
+        && grep -qF "Compte SFTP <former-sftp-user> renommé en <former-sftp-user>" "$WORK/report.txt"
 )
 
 # --- Restore cut short: the way back puts back what it replaced -------------------
@@ -7559,6 +7709,7 @@ check "diagnostics: no automatic backup since it was turned on → warning" doct
 check "restore: decrypted files deleted after a failure" restore_cleans_up_after_failure
 check "full disk: Transmission refused to start, allowed again with room" diskguard_refuses_start_on_full_disk
 check "update: new version failing → previous version back" update_failed_keeps_previous_version
+check "update: the lock goes over to the new version, never free in between" update_hands_the_lock_over
 check "update: the latest version read without jq (before the VPN or the seedbox are installed)" update_without_jq
 check "update: interrupted earlier (.previous left) → refused, nothing touched" update_refused_when_previous_left
 check "update: new version cannot be put in place → previous one back at once" update_second_rename_failure_puts_back
@@ -7602,6 +7753,8 @@ check "SFTP: rename undone, group not back → said, account suspended" rename_g
 check "restore: archive with a link (to /etc/shadow) refused" restore_refuses_links
 check "restore: links of Let's Encrypt to its certificates accepted" restore_accepts_letsencrypt_links
 check "restore: settings that could run a command refused" restore_refuses_code_in_settings
+check "restore: a backup of a newer settings format refused first, with what to do" restore_checks_settings_format
+check "backup: the format of the settings noted with the system" backup_notes_settings_format
 check "restore: a client's settings that could run a command refused" restore_refuses_code_in_client
 check "restore: real backup (WireGuard files of the clients) accepted" restore_accepts_real_backup
 check "settings files: what state_write writes is accepted, code is not" state_files_round_trip_safe
@@ -7711,6 +7864,7 @@ check "files changed by hand: a copy is kept and it is said" changed_by_hand_cop
 check "files changed by hand: nothing taken for a change after a restore or a return" fingerprints_forgotten_when_unknown
 check "nginx: the site « default » of the administrator stays on" nginx_default_site_kept_if_changed
 check "page « access denied »: colors of seedtunnel, without its name, only if the page is there" denied_page_discreet
+check "web interface: Transmission stopped, a page instead of « 502 Bad Gateway »" stopped_page_instead_of_502
 check "page of a link: colors of seedtunnel, single use, numbered steps, nothing fetched elsewhere" share_page_in_colors
 check "link used or expired: a page that says so, token still hidden in the log" share_gone_page
 check "folder of the links (/share/): page « nothing here », no password, on both sites" share_folder_nothing_here
@@ -7721,7 +7875,7 @@ check "systems: Debian 11 refused with the way up (Debian 12, then 13)" debian11
 check "header: « Ubuntu 26.04 », as « Debian 13 »" header_names_ubuntu
 check "header: full name, IPv4 address read on the server, system; narrow screens too" header_name_address_system
 check "packages: one APT does not know stops before anything is installed (« universe » on Ubuntu)" packages_without_candidate_stop
-check "packages: needrestart never restarts services during APT" apt_never_lets_needrestart_restart
+check "packages: needrestart quiet during APT, never restarts services" apt_never_lets_needrestart_restart
 check "firewall: the ports of ssh.socket stay open" ssh_socket_ports_kept_open
 check "doctor: SSH started by ssh.socket is not an error" doctor_ssh_waiting_on_socket
 check "SSH started on demand: its configuration read and checked before anyone connects" sshd_checked_before_any_connection
@@ -7774,6 +7928,7 @@ check "firewall: rules loaded older than their file are loaded again (restore on
 check "restore: the last download of a backup and the start of the weekly backup are those of this server" restore_leaves_the_marks_of_the_other_server
 check "report: domains and SFTP accounts used before, administrators (also needrestart of Ubuntu 26.04), backups of another server replaced" report_replaces_former_names
 check "report: the SFTP account logged in is not an administrator, the DNS of the menu kept" report_sftp_account_and_dns
+check "report: the SFTP account renamed is in the log, both names hidden" sftp_rename_in_log_hidden_in_report
 check "restore cut short: the way back puts back settings, SSH keys, certificate and torrents" restore_undo_puts_everything_back
 check "restore: the SFTP account renamed since the backup takes back its name, never another account, back on the way back" restore_takes_back_account_name
 check "restore: the settings replaced kept aside only if there is something to go back to, how to delete them said" restore_keeps_aside_only_settings

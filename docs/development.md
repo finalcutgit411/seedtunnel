@@ -20,7 +20,7 @@
 | `lib/update.sh` | update, applying the configuration again |
 | `lib/doctor.sh` | diagnostics |
 | `lang/` | French messages (`fr.txt`) and long texts (`en.sh`, `fr.sh`) |
-| `web/` | web pages (links, access denied, « Nothing here ») and the theme of Transmission |
+| `web/` | web pages (links, access denied, « Nothing here », Transmission not responding) and the theme of Transmission |
 | `tests/` | unit tests, translation check, test image, integration tests |
 | `tools/preview.sh` | the screens of the menus with example data |
 | `docs/` | this documentation and its captures (left out of the published archives) |

@@ -34,6 +34,7 @@ BACKUP_KEEP=4
 BACKUP_PASSPHRASE_FILE="$APP_STATE_DIR/backup.passphrase"
 # System the backup was made on (« ubuntu 24.04 »): a restore on another one is said
 BACKUP_SYSTEM_FILE="$APP_STATE_DIR/system"
+BACKUP_FORMAT_FILE="$APP_STATE_DIR/format"
 # date of the last download of a backup (see backup_share)
 BACKUP_DOWNLOADED_MARK="$APP_STATE_DIR/backup.downloaded"
 # written while a restore replaces the settings, removed at its end: left
@@ -368,16 +369,23 @@ backup_check_folder() {
     fi
 }
 
-# backup_note_system — the system of this server, written only if it changed
+# backup_note_system — the system of this server and the format of its
+# settings (SETTINGS_FORMAT), each written only if it changed
 backup_note_system() {
-    local system="$APP_OS_ID $APP_OS_VERSION"
-    [[ -n $APP_OS_ID ]] || return 0
-    [[ $(cat "$BACKUP_SYSTEM_FILE" 2>/dev/null) != "$system" ]] || return 0
-    printf '%s\n' "$system" >"$BACKUP_SYSTEM_FILE"
-    chmod 600 "$BACKUP_SYSTEM_FILE"
+    local system="$APP_OS_ID $APP_OS_VERSION" changed=0
+    if [[ -n $APP_OS_ID && $(cat "$BACKUP_SYSTEM_FILE" 2>/dev/null) != "$system" ]]; then
+        printf '%s\n' "$system" >"$BACKUP_SYSTEM_FILE"
+        chmod 600 "$BACKUP_SYSTEM_FILE"
+        changed=1
+    fi
+    if [[ $(cat "$BACKUP_FORMAT_FILE" 2>/dev/null) != "$SETTINGS_FORMAT" ]]; then
+        printf '%s\n' "$SETTINGS_FORMAT" >"$BACKUP_FORMAT_FILE"
+        chmod 600 "$BACKUP_FORMAT_FILE"
+        changed=1
+    fi
     # the archive is made again when a setting changed less than a second
     # before it starts (backup_create_archive): this change must be older
-    sleep 2
+    if ((changed)); then sleep 2; fi
 }
 
 # backup_write FILE — encrypted archive with BACKUP_PASSPHRASE
@@ -1294,6 +1302,19 @@ restore_letsencrypt() {
     done
 }
 
+# restore_bad_format FOLDER — the format of the settings of the backup
+# (FOLDER: where it was extracted), when this version cannot read it: newer
+# than SETTINGS_FORMAT (made by a newer version), or not a number. A backup
+# without it was made before 1.0.4: format 1. Nothing: all fine.
+restore_bad_format() {
+    local file="$1/etc/seedtunnel/format" format=1
+    if [[ -e $file || -L $file ]]; then
+        format=""
+        if [[ -f $file && ! -L $file ]]; then IFS= read -r -n 8 format <"$file" || true; fi
+    fi
+    if [[ ! $format =~ ^[1-9][0-9]{0,5}$ ]] || ((format > SETTINGS_FORMAT)); then printf '%s' "${format:-?}"; fi
+}
+
 # restore_check_system FOLDER — a backup made on another system (Debian ↔
 # Ubuntu, another version) is said, nothing more: the paths are the same, and
 # a restore from each of the 4 systems to the others was done on real
@@ -1308,11 +1329,12 @@ restore_check_system() {
 }
 
 # restore_has_settings FOLDER — the settings in place hold something to go
-# back to. A new server only has its language, its list of packages and its
-# system: replaced by those of the backup, they are not kept aside.
+# back to. A new server only has its language, its list of packages, its
+# system and the format of its settings: replaced by those of the backup,
+# they are not kept aside.
 restore_has_settings() {
     [[ -n $(find "$1" -mindepth 1 -maxdepth 1 ! -name packages ! -name language ! -name system \
-        ! -name backup.downloaded 2>/dev/null || true) ]]
+        ! -name format ! -name backup.downloaded 2>/dev/null || true) ]]
 }
 
 # The settings a finished restore replaced, still kept in /etc (old keys,
@@ -1472,6 +1494,16 @@ restore_main() {
     # every file to root: an account of this server must not get a file of
     # seedtunnel because the archive says so
     run 'Extracting the archive' tar -xzf "$BACKUP_TMP_DIR/backup.tar.gz" --no-same-owner -C "$BACKUP_TMP_DIR/x"
+    # Made by a newer version, whose settings this one may not understand:
+    # said first, before the checks below refuse it less clearly
+    bad=$(restore_bad_format "$BACKUP_TMP_DIR/x")
+    if [[ $bad =~ ^[0-9]+$ ]]; then
+        backup_cleanup
+        die 'This backup was made by a newer version of seedtunnel (settings format %s, this version reads up to %s). Update seedtunnel (seedtunnel update), then restore again.' "$bad" "$SETTINGS_FORMAT"
+    elif [[ -n $bad ]]; then
+        backup_cleanup
+        die 'Archive refused: unexpected value of %s in %s' format etc/seedtunnel/format
+    fi
     # The names of the clients of the VPN go into wg0.conf: only the names
     # seedtunnel gives
     bad=$(restore_bad_name "$BACKUP_TMP_DIR/x/etc/seedtunnel")

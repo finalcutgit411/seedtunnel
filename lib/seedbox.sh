@@ -804,7 +804,7 @@ $(nginx_generate_tls)
     # the name sent with the request for the password, to anyone (robots
     # included): it tells nothing of what is behind
     auth_basic "Restricted";
-    auth_basic_user_file $NGINX_HTPASSWD;$(nginx_generate_denied_page)$(share_generate_nothing_error)
+    auth_basic_user_file $NGINX_HTPASSWD;$(nginx_generate_denied_page)$(share_generate_nothing_error)$(nginx_generate_stopped_page)
 
     # Adding .torrent files from the web interface
     client_max_body_size 32m;
@@ -855,6 +855,28 @@ nginx_generate_denied_page() {
         auth_basic off;
         internal;
         alias $APP_DIR/$NGINX_DENIED_PAGE;
+        default_type text/html;
+    }
+EOF
+}
+
+NGINX_STOPPED_PAGE="web/transmission-stopped.html"
+
+# The page shown instead of the « 502 Bad Gateway » of nginx when Transmission
+# does not answer: stopped because the disk is almost full (diskguard), or
+# starting again. Set for the whole site, as the page of the refused password:
+# an error_page in /transmission/ would make that one forgotten there. Only
+# reached through /transmission/, so after the password; the answer stays a
+# 502 (or 504). Only if the page is there.
+nginx_generate_stopped_page() {
+    [[ -r $APP_DIR/$NGINX_STOPPED_PAGE ]] || return 0
+    cat <<EOF
+
+    error_page 502 504 /seedtunnel/transmission-stopped.html;
+    location = /seedtunnel/transmission-stopped.html {
+        auth_basic off;
+        internal;
+        alias $APP_DIR/$NGINX_STOPPED_PAGE;
         default_type text/html;
     }
 EOF
@@ -1035,6 +1057,8 @@ seedbox_rename_account() {
     if [[ -e $SFTP_KEYS_DIR/$old ]]; then
         mv -f "$SFTP_KEYS_DIR/$old" "$SFTP_KEYS_DIR/$new" || seedbox_rename_undo "$old" "$new" 1 "$group"
     fi
+    # in the log (a restore, new credentials): the report hides both names
+    log_title 'SFTP account %s renamed to %s' "$old" "$new"
     ok 'Account %s renamed to %s' "$old" "$new"
 }
 

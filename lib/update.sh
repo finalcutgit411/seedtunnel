@@ -93,18 +93,31 @@ update_switch() {
 }
 
 # The new version applies the configuration, so that its fixes take effect. It
-# runs as a process of its own: the lock is handed over to it.
+# runs as a process of its own.
 update_apply_new() {
     echo
-    exec 9>&-
-    "$APP_DIR/seedtunnel.sh" apply
+    update_run_apply
+}
+
+# update_run_apply — « apply » of the version now in APP_DIR, as a process of
+# its own. The lock goes over to it without ever being free (see take_lock):
+# a command started meanwhile in another window is refused, instead of taking
+# the lock and making the update go back for nothing. A version that does not
+# know this (before 1.0.4) gets the lock let go just before, as it expects.
+update_run_apply() {
+    if [[ /proc/self/fd/9 -ef $APP_LOCK ]] && grep -q 'SEEDTUNNEL_LOCK_HANDED_OVER' "$APP_DIR/lib/common.sh" 2>/dev/null; then
+        SEEDTUNNEL_LOCK_HANDED_OVER=1 "$APP_DIR/seedtunnel.sh" apply
+    else
+        exec 9>&-
+        "$APP_DIR/seedtunnel.sh" apply
+    fi
 }
 
 # After a failed update (or a failed way back: « back »): the installed
 # version applies its configuration again
 update_back_to_previous() {
     warn 'Version %s could not apply the configuration: back to version %s.' "$1" "$APP_VERSION"
-    if ! "$APP_DIR/seedtunnel.sh" apply >>"$APP_LOG" 2>&1; then
+    if ! update_run_apply >>"$APP_LOG" 2>&1; then
         die 'Update cancelled: the files of version %s are back, but putting the configuration back into service failed too (details in %s). Run « seedtunnel doctor », then « seedtunnel apply ».' "$APP_VERSION" "$APP_LOG"
     fi
     if [[ ${2-} == back ]]; then die 'Going back cancelled, version %s kept (details in %s).' "$APP_VERSION" "$APP_LOG"; fi

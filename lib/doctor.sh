@@ -783,7 +783,8 @@ report_known_values() {
         if [[ $name != "${SEEDBOX_USER-}" ]] && ! report_common_word "$name"; then
             report_known "$name" "$(t '<former-sftp-user>')"
         fi
-    done < <(sed -nE "s/.*(Creating the user|Deleting the user|Création de l'utilisateur|Suppression de l'utilisateur) ([a-z_][a-z0-9_-]*).*/\2/p; s/^\\\$ useradd .* ([a-z_][a-z0-9_-]*)$/\1/p" "$file" | sort -u || true)
+    done < <(sed -nE "s/.*(Creating the user|Deleting the user|Création de l'utilisateur|Suppression de l'utilisateur) ([a-z_][a-z0-9_-]*).*/\2/p; s/^\\\$ useradd .* ([a-z_][a-z0-9_-]*)$/\1/p
+        s/.*(SFTP account|Compte SFTP) ([a-z_][a-z0-9_-]*) (renamed to|renommé en) ([a-z_][a-z0-9_-]*).*/\2\n\4/p" "$file" | sort -u || true)
     # the accounts of the administrators: the one that ran sudo, those logged
     # in. Not the SFTP account: « who » can list it too while WinSCP is
     # connected (Debian 13 counts the SFTP sessions), and it has its own name

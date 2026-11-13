@@ -7,7 +7,11 @@
 # =============================================================================
 
 APP_NAME="seedtunnel"
-APP_VERSION="1.0.3"
+APP_VERSION="1.0.4"
+# Format of the settings in /etc/seedtunnel, and so of the backups that hold
+# them: 1 up to now. Raised by a version that writes its settings another
+# way; a backup of a format newer than this version knows is refused.
+SETTINGS_FORMAT=1
 # GitHub repository used by « seedtunnel update » (owner/project)
 APP_REPO="finalcutgit411/seedtunnel"
 # Server state and secrets (readable by root only)
@@ -654,20 +658,28 @@ install_shortcut() {
 
 # Only one copy at a time may change the server. The lock file says who holds
 # the lock, so the message can tell which process to stop if it was forgotten.
+# The version that updates seedtunnel hands its lock over to the version it
+# runs (update_run_apply): file 9 is the lock file, already locked, and
+# SEEDTUNNEL_LOCK_HANDED_OVER=1. The lock is never free in between.
 take_lock() {
     local pid="" since="" tty="" stop
-    exec 9<>"$APP_LOCK"
-    if ! flock -n 9; then
-        read -r pid since tty <"$APP_LOCK" || true
-        if [[ $pid =~ ^[0-9]+$ && $since =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
-            # the process belongs to root: someone who came in by sudo needs
-            # sudo to stop it too
-            stop="kill $pid"
-            if [[ -n ${SUDO_USER-} ]]; then stop="sudo $stop"; fi
-            die 'seedtunnel is already running (process %s, started %s min ago, terminal %s).\n  If that window is gone, stop it with:  %s' \
-                "$pid" "$((($(date +%s) - since) / 60))" "${tty:--}" "$stop"
+    if [[ ${SEEDTUNNEL_LOCK_HANDED_OVER-} == 1 && /proc/self/fd/9 -ef $APP_LOCK ]] && flock -n 9; then
+        unset SEEDTUNNEL_LOCK_HANDED_OVER
+    else
+        unset SEEDTUNNEL_LOCK_HANDED_OVER
+        exec 9<>"$APP_LOCK"
+        if ! flock -n 9; then
+            read -r pid since tty <"$APP_LOCK" || true
+            if [[ $pid =~ ^[0-9]+$ && $since =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+                # the process belongs to root: someone who came in by sudo
+                # needs sudo to stop it too
+                stop="kill $pid"
+                if [[ -n ${SUDO_USER-} ]]; then stop="sudo $stop"; fi
+                die 'seedtunnel is already running (process %s, started %s min ago, terminal %s).\n  If that window is gone, stop it with:  %s' \
+                    "$pid" "$((($(date +%s) - since) / 60))" "${tty:--}" "$stop"
+            fi
+            die 'seedtunnel is already running in another terminal.'
         fi
-        die 'seedtunnel is already running in another terminal.'
     fi
     if [[ -t 0 ]]; then tty=$(tty); fi
     printf '%s %s %s\n' "$$" "$(date +%s)" "${tty#/dev/}" >"$APP_LOCK"
@@ -719,10 +731,13 @@ sshd_settings() {
     sshd -T "$@" 2>/dev/null || true
 }
 
-# For APT: never a question. needrestart (Ubuntu) only lists the services to
-# restart: left to itself, it could restart SSH in the middle of an installation.
+# For APT: never a question. needrestart (Ubuntu) does not run during the
+# installations of seedtunnel: left to itself, it could restart SSH in the
+# middle of one, and it filled the log with long lists of services. If it ran
+# anyway (a version that ignores SUSPEND), it would only list them. A new
+# kernel waiting is said by « seedtunnel doctor » (Restart advised).
 apt_environment() {
-    export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l
+    export DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1 NEEDRESTART_MODE=l
 }
 
 # apt_check_candidates PACKAGE… → stops before installing anything if APT has

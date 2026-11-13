@@ -27,7 +27,7 @@ Log in with SSH, then:
 ```bash
 sudo -i
 apt update && apt full-upgrade -y
-V=1.0.3
+V=1.0.4
 cd "$(mktemp -d)"
 curl -fLO https://github.com/finalcutgit411/seedtunnel/releases/download/v$V/seedtunnel-$V.tar.gz \
   && curl -fLO https://github.com/finalcutgit411/seedtunnel/releases/download/v$V/SHA256SUMS \
@@ -196,7 +196,7 @@ Always start with the diagnostic: `sudo seedtunnel doctor`.
 | The VPN connects, but no Internet | The diagnostic sees it. Most of the time, Docker on the same server (see the [reference](#known-limits)). |
 | The BitTorrent port is closed | Open it in the firewall of the provider. |
 | The browser warns about HTTPS | Self-signed certificate: compare the SHA-256 fingerprint, or use a domain name. |
-| Downloads stop | The disk is almost full: free some space. |
+| Downloads stop, or the web interface says « Transmission is not responding » | The disk is almost full: free some space. Transmission starts again on its own. |
 | The restore refuses the backup | Read the message: it says what to do. A wrong passphrase 3 times stops everything, with nothing changed. |
 
 ### Banned from SSH? Come back through the VPN

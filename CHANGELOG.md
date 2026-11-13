@@ -3,6 +3,20 @@
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 
+## [1.0.4] - 2026-11-13
+
+### Added
+- Web interface: when Transmission does not answer (stopped because the disk is almost full, or starting again), a page « Transmission is not responding » in the colors of SeedTunnel, with what to do, instead of the « 502 Bad Gateway » of nginx. Shown only once the password is given.
+- Backups: each one notes the format of the settings (format 1). A backup made by a newer version, in a format this one does not know, is refused before anything changes, with what to do: update seedtunnel first. Backups made before 1.0.4 count as format 1.
+- The log says when the SFTP account is renamed (by a restore, or with new credentials); the report of `seedtunnel doctor --link` hides both names.
+
+### Changed
+- needrestart (Ubuntu) no longer runs during the installations of seedtunnel: a much shorter log. A new kernel waiting is still said by `seedtunnel doctor`.
+- Tests: shellcheck looks for variables used but never set in the integration tests.
+
+### Fixed
+- Update: the lock goes straight to the new version. A seedtunnel command started at that very moment in another window could take it, and the update went back to the previous version for nothing. The installed version hands the lock over: from the next update on.
+
 ## [1.0.3] - 2026-11-13
 
 ### Added

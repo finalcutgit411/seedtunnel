@@ -34,7 +34,7 @@ step() { printf '\n\033[1m=== %s\033[0m\n' "$*"; }
 # summary of the run, with the end of the output of the command.
 annotate() {
     local title body
-    title="$(. /etc/os-release && printf '%s' "$VERSION_CODENAME") — $1"
+    title="$(. /etc/os-release && printf '%s' "${VERSION_CODENAME-}") — $1"
     title=${title//'%'/'%25'}
     title=${title//:/%3A}
     title=${title//,/%2C}
@@ -166,7 +166,10 @@ rename_test() {
         -oUserKnownHostsFile=/dev/null -oPubkeyAuthentication=no -b - "$new@127.0.0.1" >"$W/rename.out" || return 1
     grep -q watch "$W/rename.out" || return 1
     printf '%s\n' "$PW2" | env PATH=/usr/local/bin:/usr/bin:/bin "$APP" seedbox password --user "$SBU" || return 1
-    id "$SBU" &>/dev/null && ! id "$new" &>/dev/null && [[ -z $(getent shadow "$SBU" | cut -d: -f8) ]]
+    id "$SBU" &>/dev/null && ! id "$new" &>/dev/null && [[ -z $(getent shadow "$SBU" | cut -d: -f8) ]] || return 1
+    # both renamings in the log
+    grep -q "· SFTP account $SBU renamed to $new$" /var/log/seedtunnel.log \
+        && grep -q "· SFTP account $new renamed to $SBU$" /var/log/seedtunnel.log
 }
 # Runs one function of seedtunnel, its libraries and settings loaded (for a
 # check that the commands only use in a terminal)
@@ -185,6 +188,7 @@ seedtunnel_function() {
 # The system of the test server: accepted, and named in the header as « Ubuntu 24.04 »
 system_named() {
     local want got
+    # shellcheck disable=SC2154 # NAME and VERSION_ID come from /etc/os-release
     want=$(. /etc/os-release && printf '%s %s' "${NAME%% *}" "$VERSION_ID")
     got=$(seedtunnel_function eval 'os_check && ui_server_names && printf "%s" "$UI_SYSTEM"') || return 1
     echo "header: $got, expected: $want"
@@ -937,6 +941,7 @@ diskguard_test_steps() {
         return 1
     fi
     [[ -e /run/seedtunnel-diskguard.stopped ]] || return 1
+    stopped_page_as_expected || return 1
     output_has 'disk almost full' app doctor || return 1
     env SEEDTUNNEL_DISKGUARD_START_ABOVE_GB=0 PATH=/usr/local/bin:/usr/bin:/bin "$APP" diskguard-check </dev/null || return 1
     systemctl is-active --quiet transmission-daemon && [[ ! -e /run/seedtunnel-diskguard.stopped ]] || return 1
@@ -947,6 +952,26 @@ diskguard_test_steps() {
         return 1
     fi
     rm -f /run/seedtunnel-diskguard.stopped
+}
+
+# Transmission stopped: with the password, the page « Transmission is not
+# responding » instead of the one of nginx, still a 502; without it, the
+# request for the password as everywhere; never served on its own
+stopped_page_as_expected() {
+    local code password
+    password=$(<"$W/password")
+    code=$(curl -sk --max-time 10 -u "$SBU:$password" -o "$W/stopped.html" -w '%{http_code}' https://127.0.0.1/transmission/web/)
+    [[ $code == 502 ]] && grep -q "Transmission is not responding" "$W/stopped.html" && ! grep -qi "nginx" "$W/stopped.html" || {
+        echo "with the password: $code"
+        cat "$W/stopped.html"
+        return 1
+    }
+    code=$(curl -sk --max-time 10 -o "$W/stopped.html" -w '%{http_code}' https://127.0.0.1/transmission/web/)
+    [[ $code == 401 ]] && grep -q "Access denied" "$W/stopped.html" || {
+        echo "without the password: $code"
+        return 1
+    }
+    [[ $(curl -sk --max-time 10 -u "$SBU:$password" -o /dev/null -w '%{http_code}' https://127.0.0.1/seedtunnel/transmission-stopped.html) == 404 ]]
 }
 
 # « seedtunnel apply » puts back in order a file changed by hand, says it and
@@ -1072,7 +1097,7 @@ SEEDBOX_LETSENCRYPT=no
 EOF
     chmod 600 "$W/ci.conf" "$W/password"
 
-    step "General ($(. /etc/os-release && printf '%s' "$PRETTY_NAME"))"
+    step "General ($(. /etc/os-release && printf '%s' "${PRETTY_NAME-}"))"
     check "system recognised (header, diagnostics)" system_named
     check "seedtunnel version" output_has "seedtunnel $(sed -n 's/^APP_VERSION="\(.*\)"$/\1/p' "${APP%/*}/lib/common.sh")" app version
     check "seedtunnel help" output_has "vpn add NAME" app help
@@ -1224,7 +1249,7 @@ EOF
     check "old password refused" http_is 401 /transmission/web/ -u "$SBU:$PW1"
     check "SFTP with the new password" output_has "watch" sftp_password "$PW2" "ls"
     printf '%s\n' "$PW2" >"$W/password"
-    check "account renamed, works, then back to its name (never left suspended)" rename_test
+    check "account renamed, works, then back to its name (never left suspended, written in the log)" rename_test
 
     step "Torrents"
     check "a .torrent dropped into watch/ is added, its progress saved" torrent_test
@@ -1252,7 +1277,7 @@ EOF
     check "confirmation: real SSH login recognised, fake message refused" firewall_proof_test
 
     step "Full disk protection"
-    check "Transmission stopped under the threshold, started again above" diskguard_test
+    check "Transmission stopped under the threshold (page « Transmission is not responding »), started again above" diskguard_test
 
     step "Applying the configuration again (seedtunnel apply)"
     check "puts back in order a change made by hand" apply_test
