@@ -8,6 +8,9 @@ versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 ### Security
 - Restore: a backup holding a VPN client file with a name SeedTunnel never gives (a line break, a space, more than 15 characters…), or any file whose name holds a control character, is refused before anything changes. The name of a client goes into `wg0.conf`, where a line break could add a command run as root when the VPN starts. Backups made by SeedTunnel always pass: the names of the clients follow the same rule since 0.9.0. A file of this kind put there by hand is ignored: no client, nothing of it in `wg0.conf` nor in the NAT rules.
 
+### Changed
+- The folder of the links itself (`https://ADDRESS/share/`, on the site of the seedbox as on the site of the links) shows the page « Nothing here » too, without asking for a password, instead of the « 403 Forbidden » of nginx. The links keep their page « Link already used or expired ».
+
 ### Fixed
 - `seedtunnel update` on a server where nothing is installed yet: the latest version is read without `jq`, which comes with the VPN or the seedbox. It said « Cannot find the latest version published ».
 

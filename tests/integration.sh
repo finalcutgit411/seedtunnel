@@ -486,6 +486,23 @@ link_gone() {
     return 1
 }
 
+# The folder of the links (/share/) is never listed: a 404 with the page
+# « nothing here », without asking for a password, with the headers of the
+# links; the page is never served on its own
+share_folder_test() {
+    local headers
+    headers=$(curl -sk --max-time 10 -D - -o "$W/share-folder.html" https://127.0.0.1/share/) || return 1
+    grep -qiE '^HTTP/[0-9.]+ 404' <<<"$headers" && ! grep -qi '^www-authenticate' <<<"$headers" \
+        && grep -qi "^content-security-policy: default-src 'none'" <<<"$headers" \
+        && grep -qi '^x-robots-tag: noindex, nofollow' <<<"$headers" \
+        && grep -q "Nothing here" "$W/share-folder.html" && ! grep -qi "transmission\|seedtunnel" "$W/share-folder.html" || {
+        printf '%s\n' "$headers"
+        cat "$W/share-folder.html"
+        return 1
+    }
+    [[ $(http_code /seedtunnel/nothing-here.html) == 404 ]]
+}
+
 # One-time link: the page opens (several times), the file downloads once,
 # then the link is gone
 share_test() {
@@ -545,8 +562,9 @@ links_site_test() {
     [[ $(curl -sk --max-time 10 "https://127.0.0.1${path}phone.conf") == *"Link already used or expired"* ]] || return 1
     # nothing else: 404 with the page « nothing here », no password asked; http
     # goes to https
-    [[ $(http_code /) == 404 && $(http_code /transmission/web/) == 404 && $(http_code /share/) == 403 ]] || return 1
+    [[ $(http_code /) == 404 && $(http_code /transmission/web/) == 404 ]] || return 1
     [[ $(curl -sk --max-time 10 "https://127.0.0.1/") == *"Nothing here"* ]] || return 1
+    share_folder_test || return 1
     [[ $(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "http://127.0.0.1/share/x") == 301 ]] || return 1
     ! grep -qE 'proxy_pass|auth_basic "' /etc/nginx/sites-available/seedtunnel
 }
@@ -1146,7 +1164,7 @@ EOF
     check "watcher killed: the link is deleted anyway" share_watcher_killed_test
     check "tokens of the links hidden in the access log of nginx" share_log_test
     check "seedbox sftp-config: WinSCP address with fingerprint, FileZilla and WinSCP files" sftp_config_test
-    check "list of links impossible" http_is 403 /share/
+    check "list of links impossible: page « nothing here », no password" share_folder_test
     check "unknown token: 404" http_is 404 /share/0123456789abcdef0123456789abcdef/
     check "unknown token: the page « link already used or expired »" output_has "Link already used or expired" \
         curl -sk --max-time 10 https://127.0.0.1/share/0123456789abcdef0123456789abcdef/

@@ -4554,6 +4554,45 @@ share_gone_page() (
         && (($(grep -c "pendant $((SHARE_LIFETIME / 60))&nbsp;minutes\|for $((SHARE_LIFETIME / 60))&nbsp;minutes" "$page") == 2))
 )
 
+# The folder of the links (/share/) was the grey 403 of nginx: now a 404 with
+# the page « nothing here », on the site of the seedbox (no password) as on the
+# site of the links, the page given once; only if the page is there
+share_folder_nothing_here() (
+    load
+    SEEDBOX_CERTIFICATE=letsencrypt
+    SEEDBOX_DOMAIN=seed.example.net
+    TRANSMISSION_RPC_PORT=9091
+    dpkg-query() { echo "4.1.0~beta2+dfsg-3+deb13u1"; }
+    local site folder nothing
+    nginx_generate_site >"$WORK/site-folder"
+    site=$(<"$WORK/site-folder")
+    folder=$(sed -n '/location = \/share\/ {/,/^    }/p' <<<"$site")
+    nothing=$(sed -n '/location = \/seedtunnel\/nothing-here.html {/,/^    }/p' <<<"$site")
+    [[ $folder == $'    location = /share/ {\n        auth_basic off;\n        error_page 404 /seedtunnel/nothing-here.html;\n        return 404;\n    }' ]] \
+        && grep -qF "internal;" <<<"$nothing" && grep -qF "auth_basic off;" <<<"$nothing" \
+        && grep -qF "alias $ROOT/web/nothing-here.html;" <<<"$nothing" \
+        && grep -qF "Content-Security-Policy \"default-src 'none'" <<<"$nothing" \
+        && grep -qF 'X-Robots-Tag "noindex, nofollow"' <<<"$nothing" \
+        && grep -qF 'Strict-Transport-Security' <<<"$nothing" || {
+        printf '%s\n' "$site"
+        return 1
+    }
+    # the seedbox: the page for this folder only, not for the whole site
+    (($(grep -c "error_page 404 /seedtunnel/nothing-here.html;" <<<"$site") == 1)) || return 1
+    # the site of the links: the same folder, the page given once
+    VPN_PUBLIC_ADDRESS=203.0.113.7
+    LINKS_CERTIFICATE=selfsigned
+    site=$(links_run links_generate_site)
+    [[ $(sed -n '/location = \/share\/ {/,/^    }/p' <<<"$site") == "$folder" ]] \
+        && (($(grep -c "location = /seedtunnel/nothing-here.html {" <<<"$site") == 1)) || {
+        printf '%s\n' "$site"
+        return 1
+    }
+    # page missing: the 403 of nginx, as before
+    if (APP_DIR=$WORK/elsewhere nginx_generate_site | grep -qF "location = /share/"); then return 1; fi
+    if (APP_DIR=$WORK/elsewhere links_run links_generate_site | grep -qF "location = /share/"); then return 1; fi
+)
+
 # The request for the password names nothing: « Seedbox » went to anyone,
 # robots included (header WWW-Authenticate), before any password
 password_request_names_nothing() (
@@ -7417,6 +7456,7 @@ check "nginx: the site « default » of the administrator stays on" nginx_defaul
 check "page « access denied »: colors of seedtunnel, without its name, only if the page is there" denied_page_discreet
 check "page of a link: colors of seedtunnel, single use, numbered steps, nothing fetched elsewhere" share_page_in_colors
 check "link used or expired: a page that says so, token still hidden in the log" share_gone_page
+check "folder of the links (/share/): page « nothing here », no password, on both sites" share_folder_nothing_here
 check "web interface: style of seedtunnel on Transmission 3 too (Debian 12)" web_interface_style_transmission3
 check "systems: Debian 12/13 and Ubuntu 24.04/26.04, the others refused with the list" systems_supported
 check "systems: Debian 11 refused with the way up (Debian 12, then 13)" debian11_refused_with_the_way_up
