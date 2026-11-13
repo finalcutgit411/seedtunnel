@@ -4300,6 +4300,20 @@ web_interface_style() (
         && ! grep -qE '^web( |/)' "$ROOT/.gitattributes"
 )
 
+# Web interface: the colors of the bars are plain colors. Transmission 4.0
+# (Ubuntu 24.04) puts them inside its own gradient: with a gradient there, the
+# bar of a download stayed empty. The pink gradient is kept for 4.1 and later,
+# in a rule of its own.
+web_interface_bars_plain_colors() (
+    local theme=$ROOT/web/transmission-theme.css
+    grep -q -- "--color-progressbar-leech:" "$theme" || return 1
+    ! grep -qE -- "--color-progressbar-[a-z0-9-]+:[^;]*gradient" "$theme" || {
+        grep -nE -- "--color-progressbar-[a-z0-9-]+:[^;]*gradient" "$theme"
+        return 1
+    }
+    grep -qF ".torrent-progress-bar.leech:not(.paused):not(.queued)::before" "$theme"
+)
+
 # --- what the screens and the log say -------------------------------------
 
 # Menu of the seedbox: the line of the services shows the 3 names and their
@@ -7685,6 +7699,7 @@ check "restore: the file refused is named as in the archive" restore_names_refus
 check "home screen: « clients connectés : 1 sur 1 » in French" home_clients_in_french
 check "sizes: « 36 GB » in the sentences, « 36GB » in the tables" sizes_with_a_space
 check "web interface: style of seedtunnel on Transmission 4 and later" web_interface_style
+check "web interface: plain colors for the bars, gradient for 4.1 only" web_interface_bars_plain_colors
 check "seedbox menu: services with full names and colored dots, never cut" services_line_never_cut
 check "dates: « today », « yesterday » on the days of the calendar" ages_in_calendar_days
 check "sizes: free space rounded down, as in the diagnostic" free_space_rounded_down

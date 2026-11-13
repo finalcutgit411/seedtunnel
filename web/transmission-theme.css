@@ -46,7 +46,9 @@ html:root {
   --color-fg-error: #ff6b81;
   --color-fg-port-open: var(--st-green);
   --color-fg-port-closed: #ff6b81;
-  --color-progressbar-leech: linear-gradient(90deg, #c21fc2, var(--st-pink));
+  /* plain colors only: Transmission 4.0 puts these variables inside its own
+     gradient, and a gradient there makes the whole bar empty */
+  --color-progressbar-leech: var(--st-pink);
   --color-progressbar-queued: var(--st-magenta);
   --color-progressbar-paused: #3a3646;
   --color-progressbar-seed-1: #2ea660;
@@ -96,6 +98,12 @@ html:root {
 #torrent-list .torrent-progress-bar {
   border-radius: 5px;
   overflow: hidden;
+}
+/* Transmission 4.1 and later draw the part done in a ::before: there the
+   pink can be a gradient. Transmission 4.0 has no ::before, so this rule does
+   nothing there. Paused and queued keep their own colors. */
+#torrent-list .torrent-progress-bar.leech:not(.paused):not(.queued)::before {
+  background: linear-gradient(90deg, #c21fc2, var(--st-pink));
 }
 #torrent-list .torrent-name {
   font-weight: 600;

@@ -14,6 +14,9 @@ versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 - Site of the seedbox: any address that is neither the web interface nor a link (`/share` without its last `/`, a typo…) shows the page « Nothing here » once the password is given, instead of the « 404 Not Found » of nginx. The password is still asked first, and nothing of the default folder of nginx is served.
 - The log says when an update is installed (« Update: 1.0.2 → 1.0.3 installed ») and when `seedtunnel update back` goes back to the previous version. Written by the new version: from this update on.
 
+### Fixed
+- Web interface on Transmission 4.0 (Ubuntu 24.04): the bars of the downloads stayed empty, the percentage done was not drawn. The pink is now a plain color there; Transmission 4.1 and later (Debian 13) keep the pink gradient. New capture of the web interface, with example torrents.
+
 ## [1.0.2] - 2026-11-13
 
 ### Security
