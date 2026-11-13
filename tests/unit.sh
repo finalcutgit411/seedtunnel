@@ -4863,16 +4863,17 @@ header_name_address_system() (
     UI_COLUMNS=80
     ui_width
     header=$(ui_header)
-    [[ $(sed -n 1p <<<"$header") == *" vps-1234.example.net" && $(sed -n 2p <<<"$header") == *"  203.0.113.10" \
-        && $(sed -n 3p <<<"$header") == *"  Debian 12" ]] || {
+    [[ $(sed -n 1p <<<"$header") == *" vps-1234.example.net" ]] \
+        && [[ $(sed -n 2p <<<"$header") == *"  203.0.113.10" ]] \
+        && [[ $(sed -n 3p <<<"$header") == *"  Debian 12" ]] || {
         printf '%s\n' "$header"
         return 1
     }
     UI_COLUMNS=40
     ui_width
     header=$(ui_header)
-    [[ $(sed -n 1p <<<"$header") == "SeedTunnel  v$APP_VERSION"*"  Debian 12" \
-        && $(sed -n 3p <<<"$header") == "vps-1234.example.net  "*"203.0.113.10" ]] || {
+    [[ $(sed -n 1p <<<"$header") == "SeedTunnel  v$APP_VERSION"*"  Debian 12" ]] \
+        && [[ $(sed -n 3p <<<"$header") == "vps-1234.example.net  "*"203.0.113.10" ]] || {
         printf '%s\n' "$header"
         return 1
     }
@@ -6267,8 +6268,9 @@ restore_clean_deletes_old_settings() (
     }
     out=$(restore_clean 2>&1) || return 1
     printf '%s\n' "$out"
-    [[ -d $APP_STATE_DIR.before-restore-20261113-062400 && $out == *"restore of 2026-11-13 06:24"* \
-        && $out == *"old keys of the VPN, passwords, passphrase"* && $(<"$WORK/clean-asked") == "Delete them? n" ]] || return 1
+    [[ -d $APP_STATE_DIR.before-restore-20261113-062400 && $out == *"restore of 2026-11-13 06:24"* ]] \
+        && [[ $out == *"old keys of the VPN, passwords, passphrase"* ]] \
+        && [[ $(<"$WORK/clean-asked") == "Delete them? n" ]] || return 1
     # « yes »: only the folder made by seedtunnel goes (with what is beside
     # it), never a link nor another name; written in the log
     confirm() { return 0; }
@@ -6277,9 +6279,9 @@ restore_clean_deletes_old_settings() (
         printf '%s\n' "$out"
         return 1
     }
-    [[ ! -e $APP_STATE_DIR.before-restore-20261113-062400 && ! -e $APP_STATE_DIR.before-restore-20261113-062400.undo \
-        && -d $APP_STATE_DIR.before-restore-mine && -L $APP_STATE_DIR.before-restore-20261113-070000 \
-        && -d $WORK/clean/elsewhere && $out == *"Old settings deleted."* ]] || return 1
+    [[ ! -e $APP_STATE_DIR.before-restore-20261113-062400 && ! -e $APP_STATE_DIR.before-restore-20261113-062400.undo ]] \
+        && [[ -d $APP_STATE_DIR.before-restore-mine && -L $APP_STATE_DIR.before-restore-20261113-070000 ]] \
+        && [[ -d $WORK/clean/elsewhere && $out == *"Old settings deleted."* ]] || return 1
     grep -qF "· Deleting $APP_STATE_DIR.before-restore-20261113-062400" "$APP_LOG" || return 1
     # two restores: both said, both deleted
     mkdir "$APP_STATE_DIR.before-restore-20261112-180000" "$APP_STATE_DIR.before-restore-20261113-080000"
