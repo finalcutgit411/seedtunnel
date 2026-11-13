@@ -167,7 +167,7 @@ transmission_private_test() {
 logrotate_test() {
     local out
     out=$(logrotate -d /etc/logrotate.d/seedtunnel 2>&1)
-    grep -iE 'error|insecure|seedtunnel.log' <<<"$out"
+    grep -iE 'error|insecure|seedtunnel.log|not found' <<<"$out"
     [[ $out == *"/var/log/seedtunnel.log"* && $out != *"insecure permissions"* && $out != *"error:"* ]]
 }
 
@@ -1239,7 +1239,6 @@ EOF
     check "system recognised (header, diagnostics)" system_named
     check "seedtunnel version" output_has "seedtunnel $(sed -n 's/^APP_VERSION="\(.*\)"$/\1/p' "${APP%/*}/lib/common.sh")" app version
     check "seedtunnel help" output_has "vpn add NAME" app help
-    check "log of seedtunnel cut by logrotate (Ubuntu: /var/log writable by syslog)" logrotate_test
     check "seedtunnel --version" output_has "seedtunnel $(sed -n 's/^APP_VERSION="\(.*\)"$/\1/p' "${APP%/*}/lib/common.sh")" app --version
     check "help: new commands" output_has "backup auto on|off|status" app help
     check "help in French" output_has "Utilisation : seedtunnel" env SEEDTUNNEL_LANG=fr "$APP" help
@@ -1279,6 +1278,8 @@ EOF
     step "VPN: same run again (idempotence)"
     md5sum /etc/seedtunnel/vpn/server.key /etc/wireguard/wg0.conf >"$W/vpn.md5"
     check "no change when run again" nothing_changed app vpn install --config "$W/ci.conf"
+    # the rule comes with the installation (base packages)
+    check "log of seedtunnel cut by logrotate (Ubuntu: /var/log writable by syslog)" logrotate_test
     check "keys and configuration unchanged" md5sum -c --quiet "$W/vpn.md5"
 
     step "VPN: commands"
