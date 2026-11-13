@@ -1412,6 +1412,9 @@ fr: Contrôle de la syntaxe
 en: seedtunnel updated to version %s (see %s).
 fr: seedtunnel mis à jour en version %s (voir %s).
 
+en: Update: %s → %s installed
+fr: Mise à jour : %s → %s installée
+
 en: The folder %s has local changes: update cancelled.
 fr: Le dossier %s contient des modifications locales : mise à jour annulée.
 
@@ -2040,6 +2043,9 @@ fr: La version %s n'a pas pu être mise en place, ni la version %s remise (déta
 
 en: Back to version %s (version %s comes back with  seedtunnel update).
 fr: Retour à la version %s (la version %s revient avec  seedtunnel update).
+
+en: Back to version %s (version %s removed)
+fr: Retour à la version %s (version %s retirée)
 
 en: Version %s could not apply the configuration, and version %s could not be put back (details in %s). By hand:  mv %s %s.old ; mv %s %s ; seedtunnel apply
 fr: La version %s n'a pas pu appliquer la configuration, et la version %s n'a pas pu être remise (détails dans %s). À la main :  mv %s %s.old ; mv %s %s ; seedtunnel apply

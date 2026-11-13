@@ -142,6 +142,18 @@ update_save_previous() {
     fi
 }
 
+# An update that worked, written in the log by the new version at the end of
+# its « apply » (the version it replaces, older, waits in APP_DIR.previous):
+# the version replaced runs the update but may not write it. Run by « apply ».
+update_log_installed() {
+    local version
+    [[ -f $APP_DIR.previous/seedtunnel.sh ]] || return 0
+    version=$(update_dir_version "$APP_DIR.previous")
+    if [[ -n $version ]] && version_greater "$APP_VERSION" "$version"; then
+        log_title 'Update: %s → %s installed' "$version" "$APP_VERSION"
+    fi
+}
+
 # Version kept to go back to: empty if there is none, or if it is not older
 update_old_version() {
     local version
@@ -179,6 +191,7 @@ update_back() {
     written_forget
     if update_apply_new; then
         rm -rf "$previous"
+        log_title 'Back to version %s (version %s removed)' "$version" "$newer"
         ok 'Back to version %s (version %s comes back with  seedtunnel update).' "$version" "$newer"
         exit 0
     fi
@@ -266,6 +279,7 @@ update_from_git() {
     previous=$(git -C "$APP_DIR" rev-parse HEAD)
     run "$(t 'Switching to version %s' "${tag#v}")" git -C "$APP_DIR" -c advice.detachedHead=false checkout --quiet "$tag"
     if update_apply_new; then
+        log_title 'Update: %s → %s installed' "$APP_VERSION" "${tag#v}"
         ok 'seedtunnel updated to version %s (see %s).' "${tag#v}" "$APP_DIR/CHANGELOG.md"
         exit 0
     fi
@@ -315,4 +329,5 @@ apply_main() {
     else
         say 'Nothing to apply: neither VPN, nor seedbox, nor firewall.'
     fi
+    update_log_installed
 }

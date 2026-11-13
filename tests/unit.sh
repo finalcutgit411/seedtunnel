@@ -970,7 +970,7 @@ update_old_apply_failure_reported() (
 # v9.9.9, whose seedtunnel.sh ends with status 7). As in the real repository,
 # lib/common.sh says the version of each.
 update_git_make() {
-    update_versions_make 7
+    update_versions_make "${UPDATE_NEW_STATUS:-7}"
     APP_VERSION=1.0.0
     confirm() { return 0; }
     mkdir -p "$APP_DIR/lib"
@@ -3838,12 +3838,18 @@ update_back_puts_previous_back() (
     fake_version_make "$APP_DIR.old" 2.0.0 old
     OPT_YES=1
     [[ $(update_old_version) == 2.0.0 ]] || return 1
+    : >"$APP_LOG"
     (update_back) &>"$WORK/back.out" || {
         cat "$WORK/back.out"
         return 1
     }
     grep -q 'APP_VERSION="2.0.0"' "$APP_DIR/lib/common.sh" && [[ $(<"$WORK/app/applied") == old ]] \
-        && [[ ! -e $APP_DIR.old && ! -e $APP_DIR.previous ]]
+        && [[ ! -e $APP_DIR.old && ! -e $APP_DIR.previous ]] || return 1
+    # written in the log, which said nothing of it
+    grep -qE '^=== [0-9-]+ [0-9:]+ · Back to version 2\.0\.0 \(version 2\.1\.0 removed\)$' "$APP_LOG" || {
+        cat "$APP_LOG"
+        return 1
+    }
 )
 
 # The older version cannot apply the settings: the newer one comes back,
@@ -3856,13 +3862,67 @@ update_back_failure_puts_newer_back() (
     fake_version_make "$APP_DIR" 2.1.0 new
     fake_version_make "$APP_DIR.old" 2.0.0 old 7
     OPT_YES=1
+    : >"$APP_LOG"
     if (update_back) &>"$WORK/back.out"; then return 1; fi
-    grep -q "Going back cancelled" "$WORK/back.out" || {
+    grep -q "Going back cancelled" "$WORK/back.out" && ! grep -q "version 2.1.0 removed" "$APP_LOG" || {
         cat "$WORK/back.out"
         return 1
     }
     grep -q 'APP_VERSION="2.1.0"' "$APP_DIR/lib/common.sh" && grep -q 'APP_VERSION="2.0.0"' "$APP_DIR.old/lib/common.sh" \
         && [[ $(tr '\n' ' ' <"$WORK/app/applied") == "old new " && ! -e $APP_DIR.previous ]]
+)
+
+# The end of an update is written in the log by the new version, at the end of
+# its « apply » (the version replaced, older, waits in APP_DIR.previous): the
+# version replaced, which runs the update, may not know how. Not for a version
+# that is not older, nor without one.
+update_logs_the_version_installed() (
+    load
+    APP_DIR="$WORK/app/seedtunnel"
+    rm -rf "$WORK/app"
+    APP_VERSION=2.1.0
+    : >"$APP_LOG"
+    update_log_installed
+    fake_version_make "$APP_DIR.previous" 2.2.0 newer
+    update_log_installed
+    [[ ! -s $APP_LOG ]] || {
+        cat "$APP_LOG"
+        return 1
+    }
+    rm -rf "$APP_DIR.previous"
+    fake_version_make "$APP_DIR.previous" 2.0.0 old
+    update_log_installed
+    grep -qE '^=== [0-9-]+ [0-9:]+ · Update: 2\.0\.0 → 2\.1\.0 installed$' "$APP_LOG" || {
+        cat "$APP_LOG"
+        return 1
+    }
+    # in French on a French server
+    : >"$APP_LOG"
+    APP_DIR=$ROOT i18n_load fr
+    update_log_installed
+    grep -qE '· Mise à jour : 2\.0\.0 → 2\.1\.0 installée$' "$APP_LOG" || return 1
+    # at the very end of « apply », once everything worked
+    [[ $(declare -f apply_main | grep -vx ' *}' | tail -n 1) == *update_log_installed* ]]
+)
+
+# An update by git that worked: written in the log too
+update_git_logs_the_version_installed() (
+    load
+    UPDATE_NEW_STATUS=0
+    update_git_make
+    git() {
+        if fetch_stub "$@"; then return 0; fi
+        command git "$@"
+    }
+    : >"$APP_LOG"
+    (update_from_git) &>"$WORK/update.out" || {
+        cat "$WORK/update.out"
+        return 1
+    }
+    grep -qE '^=== [0-9-]+ [0-9:]+ · Update: 1\.0\.0 → 9\.9\.9 installed$' "$APP_LOG" || {
+        cat "$APP_LOG"
+        return 1
+    }
 )
 
 # Nothing to go back to: no version kept, or not an older one, or a git
@@ -4577,8 +4637,6 @@ share_folder_nothing_here() (
         printf '%s\n' "$site"
         return 1
     }
-    # the seedbox: the page for this folder only, not for the whole site
-    (($(grep -c "error_page 404 /seedtunnel/nothing-here.html;" <<<"$site") == 1)) || return 1
     # the site of the links: the same folder, the page given once
     VPN_PUBLIC_ADDRESS=203.0.113.7
     LINKS_CERTIFICATE=selfsigned
@@ -4591,6 +4649,33 @@ share_folder_nothing_here() (
     # page missing: the 403 of nginx, as before
     if (APP_DIR=$WORK/elsewhere nginx_generate_site | grep -qF "location = /share/"); then return 1; fi
     if (APP_DIR=$WORK/elsewhere links_run links_generate_site | grep -qF "location = /share/"); then return 1; fi
+)
+
+# Any other address of the site of the seedbox (/share, a typo…): once the
+# password is given, a 404 with the page « nothing here » instead of the grey
+# one of nginx, and nothing of its default folder. The password first:
+# try_files, never a « return » (it would answer before the password is
+# asked). Without the page, the 404 of nginx.
+seedbox_other_addresses_nothing_here() (
+    load
+    SEEDBOX_CERTIFICATE=letsencrypt
+    SEEDBOX_DOMAIN=seed.example.net
+    TRANSMISSION_RPC_PORT=9091
+    dpkg-query() { echo "4.1.0~beta2+dfsg-3+deb13u1"; }
+    local site https last=$'    location / {\n        try_files /.seedtunnel-no-such-file =404;\n    }\n}'
+    site=$(nginx_generate_site)
+    https=$(sed -n '/listen 443 ssl;/,$p' <<<"$site")
+    grep -qx "    error_page 404 /seedtunnel/nothing-here.html;" <<<"$https" \
+        && grep -qx "    error_page 401 /seedtunnel/denied.html;" <<<"$https" \
+        && [[ $https == *"$last" ]] || {
+        printf '%s\n' "$site"
+        return 1
+    }
+    # the page itself needs no password (asked before it)
+    grep -A2 "location = /seedtunnel/nothing-here.html {" <<<"$https" | grep -qF "auth_basic off;" || return 1
+    # page missing: the 404 of nginx, still nothing of its default folder
+    site=$(APP_DIR=$WORK/elsewhere nginx_generate_site)
+    [[ $site != *nothing-here* && $site == *"$last" ]]
 )
 
 # The request for the password names nothing: « Seedbox » went to anyone,
@@ -7429,6 +7514,8 @@ check "log: cut every month (logrotate), from the installation and apply" log_ro
 check "log: a service stopped writes its own title (never a failure)" log_titles_before_service_stops
 check "update: the version replaced is kept (one only)" update_keeps_previous_version
 check "update back: the version kept comes back and applies the settings" update_back_puts_previous_back
+check "update: the version installed written in the log by the new version, at the end of apply" update_logs_the_version_installed
+check "update by git: the version installed written in the log" update_git_logs_the_version_installed
 check "update back: older version failing → the newer one comes back" update_back_failure_puts_newer_back
 check "update back: nothing kept, not older, « no », git → nothing changed" update_back_refused_when_nothing_to_go_back_to
 check "update from 2.0: apply keeps a copy of the version replaced" apply_saves_previous_for_back
@@ -7457,6 +7544,7 @@ check "page « access denied »: colors of seedtunnel, without its name, only if
 check "page of a link: colors of seedtunnel, single use, numbered steps, nothing fetched elsewhere" share_page_in_colors
 check "link used or expired: a page that says so, token still hidden in the log" share_gone_page
 check "folder of the links (/share/): page « nothing here », no password, on both sites" share_folder_nothing_here
+check "site of the seedbox, any other address: the password first, then the page « nothing here »" seedbox_other_addresses_nothing_here
 check "web interface: style of seedtunnel on Transmission 3 too (Debian 12)" web_interface_style_transmission3
 check "systems: Debian 12/13 and Ubuntu 24.04/26.04, the others refused with the list" systems_supported
 check "systems: Debian 11 refused with the way up (Debian 12, then 13)" debian11_refused_with_the_way_up

@@ -980,6 +980,28 @@ denied_page_as_expected() {
     [[ $(curl -sk --max-time 10 -o /dev/null -w '%{http_code}' https://127.0.0.1/seedtunnel/denied.html) == 404 ]]
 }
 
+# Any other address of the site of the seedbox (/share, a typo…): without the
+# password, the request for it with the page « access denied »; with it, a 404
+# with the page « nothing here », never a page of nginx; the web interface
+# unchanged
+seedbox_other_addresses_test() {
+    local path code
+    for path in /share /abc /index.html; do
+        code=$(curl -sk --max-time 10 -o "$W/other.html" -w '%{http_code}' "https://127.0.0.1$path")
+        [[ $code == 401 ]] && grep -q "Access denied" "$W/other.html" || {
+            echo "$path without the password: $code"
+            return 1
+        }
+        code=$(curl -sk --max-time 10 -u "$SBU:$PW1" -o "$W/other.html" -w '%{http_code}' "https://127.0.0.1$path")
+        [[ $code == 404 ]] && grep -q "Nothing here" "$W/other.html" && ! grep -qi "nginx" "$W/other.html" || {
+            echo "$path with the password: $code"
+            cat "$W/other.html"
+            return 1
+        }
+    done
+    http_is 200 /transmission/web/ -u "$SBU:$PW1"
+}
+
 # Download of the latest backup by a one-time link, then decryption
 backup_share_test() {
     local out path name
@@ -1136,6 +1158,7 @@ EOF
     check "page « access denied »: still a 401 asking for the password, nothing tells what is behind" denied_page_as_expected
     check "home page: the password first (401)" http_is 401 /
     check "home page with the password: to the web interface (302)" http_is 302 / -u "$SBU:$PW1"
+    check "any other address: the password first, then the page « nothing here » (404)" seedbox_other_addresses_test
     check "web interface: style of seedtunnel on Transmission 3 and 4" web_style_as_expected
     dpkg-query -W -f='    ${Package} ${Version}\n' transmission-daemon nginx openssh-server fail2ban 2>/dev/null || true
     check "no password in clear in the configuration" bash -c "! grep -rqF -- '$PW1' /etc/seedtunnel /etc/nginx /etc/transmission-daemon"

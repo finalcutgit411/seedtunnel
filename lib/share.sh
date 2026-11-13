@@ -77,8 +77,9 @@ EOF
 }
 
 SHARE_GONE_PAGE="web/link-gone.html"
-# An address that is no link: the folder of the links (on both sites), any
-# other address of the site of the links
+# An address that is no link: the folder of the links, any other address of
+# the site of the links, and of the site of the seedbox once the password is
+# given
 LINKS_NOTHING_PAGE="web/nothing-here.html"
 
 # A link used or expired (or a wrong token) answers 404 with a page that says
@@ -110,10 +111,10 @@ EOF
 # The folder of the links itself (/share/) is never listed: a 404 with the
 # page « nothing here » instead of the grey 403 of nginx, on the site of the
 # seedbox as on the site of the links, with no password (the links keep their
-# page « already used »). The same page serves the other addresses of the site
-# of the links (see links_generate_nothing_page). Only if the page is there:
-# otherwise the 403 of nginx, as before. $1: HSTS header, if any, already
-# formatted.
+# page « already used »). The same page serves any other address that is no
+# link, on both sites (see share_generate_nothing_error). Only if the page is
+# there: otherwise the 403 of nginx, as before. $1: HSTS header, if any,
+# already formatted.
 share_generate_nothing_page() {
     [[ -r $APP_DIR/$LINKS_NOTHING_PAGE ]] || return 0
     cat <<EOF
@@ -135,6 +136,18 @@ share_generate_nothing_page() {
         add_header X-Robots-Tag "noindex, nofollow" always;
         add_header Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'" always;${1-}
     }
+EOF
+}
+
+# Any other address of a site that is no link: the page « nothing here » (see
+# above), still a 404. Server level, for the site of the links and for the
+# site of the seedbox (where the password is asked first). Only if the page is
+# there: otherwise the 404 of nginx.
+share_generate_nothing_error() {
+    [[ -r $APP_DIR/$LINKS_NOTHING_PAGE ]] || return 0
+    cat <<'EOF'
+
+    error_page 404 /seedtunnel/nothing-here.html;
 EOF
 }
 
@@ -284,25 +297,13 @@ $(nginx_generate_tls)
     add_header X-Content-Type-Options nosniff always;
     add_header Referrer-Policy no-referrer always;$hsts
 $(share_generate_nginx "${hsts//$'\n    '/$'\n        '}")
-$(links_generate_nothing_page)
+$(share_generate_nothing_error)
 
     # nothing else here
     location / {
         return 404;
     }
 }
-EOF
-}
-
-# Any other address of the site of the links: a page « nothing here », in the
-# colors of seedtunnel but without its name (anyone can open it), still a 404.
-# The page itself comes with the links (share_generate_nothing_page). Only if
-# the page is there: otherwise the 404 of nginx.
-links_generate_nothing_page() {
-    [[ -r $APP_DIR/$LINKS_NOTHING_PAGE ]] || return 0
-    cat <<'EOF'
-
-    error_page 404 /seedtunnel/nothing-here.html;
 EOF
 }
 

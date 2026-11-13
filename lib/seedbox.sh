@@ -804,7 +804,7 @@ $(nginx_generate_tls)
     # the name sent with the request for the password, to anyone (robots
     # included): it tells nothing of what is behind
     auth_basic "Restricted";
-    auth_basic_user_file $NGINX_HTPASSWD;$(nginx_generate_denied_page)
+    auth_basic_user_file $NGINX_HTPASSWD;$(nginx_generate_denied_page)$(share_generate_nothing_error)
 
     # Adding .torrent files from the web interface
     client_max_body_size 32m;
@@ -826,6 +826,13 @@ $(share_generate_nginx "${hsts//$'\n    '/$'\n        '}")
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
         proxy_read_timeout 300s;$(nginx_generate_theme page)
+    }
+
+    # Any other address: the password first (try_files runs after it, as for
+    # the home page), then a 404 with the page « nothing here » instead of the
+    # one of nginx. Nothing of the default folder of nginx is served.
+    location / {
+        try_files /.seedtunnel-no-such-file =404;
     }
 }
 EOF
