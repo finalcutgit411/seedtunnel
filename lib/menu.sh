@@ -27,7 +27,7 @@ home_seedbox() {
     elif ! systemctl is-active --quiet transmission-daemon 2>/dev/null; then
         ui_status_add bad Seedbox "$(t 'halted')"
     elif ! systemctl is-active --quiet nginx 2>/dev/null; then
-        ui_status_add bad Seedbox "$(t 'problem')" "$(t 'nginx stopped')"
+        ui_status_add bad Seedbox "$(t 'alert!')" "$(t 'nginx stopped')"
     else
         ui_status_add ok Seedbox "$(t 'running')"
     fi
@@ -53,7 +53,7 @@ home_firewall() {
         fi
     done
     if [[ $level == bad ]]; then
-        ui_status_add bad "$name" "$(t 'problem')" "$(t 'firewall: %s' "$short")" "$short"
+        ui_status_add bad "$name" "$(t 'alert!')" "$(t 'firewall: %s' "$short")" "$short"
     elif ! firewall_enabled; then
         ui_status_add warn "$name" "$(t 'off')" "${short:+$(t 'firewall: %s' "$short")}" "$short"
     elif [[ $level == warn ]]; then

@@ -31,7 +31,8 @@ versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 - Menu, firewall on trial: what to do is in a frame, said more clearly (a connection through the public address of the server is always enough; through the VPN, only if this window goes through the VPN too). « yes » before any new SSH connection: a red frame, with the time left.
 - Menu, « Domain name and HTTPS certificate »: the address now, its certificate, when it ends and the public IP in a frame, then the two kinds of name and their certificate (also when the seedbox is installed).
 - Frames: a line is no longer cut before « : » or inside « … » (French). The questions in French end with « : ».
-- Menu, home screen: the block Firewall also turns yellow (« warning ») or red (« problem ») when something around it goes wrong: Docker or another program that blocks the VPN clients, rules for Docker that a restart removes, nftables that empties the rules at boot, ufw on. The reason is below the blocks.
+- Menu, home screen: the block Firewall also turns yellow (« warning ») or red (« alert! ») when something around it goes wrong: Docker or another program that blocks the VPN clients, rules for Docker that a restart removes, nftables that empties the rules at boot, ufw on. The reason is below the blocks.
+- Menu, home screen: a red block without a more precise word says « alert! » instead of « problem » (Firewall; Seedbox when nginx is stopped).
 - Menu, screen Firewall, and `seedtunnel firewall status`: what is wrong is said in full, in a frame, with what to do. The line « Firewall on — open: … » is cut between words.
 - Deleting the last backup made by the server says « the only backup made by this server » (one copied into a home folder may be older, or of another server).
 - French: « Utilisation » for the help of `seedtunnel firewall` (it said « Usage »). The help says that `restore` without a file lists the backups in a terminal only.

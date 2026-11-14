@@ -4263,7 +4263,7 @@ home_states() (
         echo "${UI_STATUS_LEVELS[*]} / ${UI_STATUS_STATES[*]}"
         return 1
     }
-    [[ ${UI_STATUS_STATES[*]} == "stopped halted problem halted halted running running" && ${UI_STATUS_DETAILS[5]} == "1 of 2 clients connected" ]] || return 1
+    [[ ${UI_STATUS_STATES[*]} == "stopped halted alert! halted halted running running" && ${UI_STATUS_DETAILS[5]} == "1 of 2 clients connected" ]] || return 1
     # firewall: off, on, rules missing, rules that refuse nothing by default
     ui_status_reset
     ufw_active() { return 1; }
@@ -4281,7 +4281,7 @@ home_states() (
     home_firewall
     nft() { :; }
     home_firewall
-    [[ ${UI_STATUS_LEVELS[*]} == "warn ok bad bad bad" && ${UI_STATUS_STATES[*]} == "off on problem problem problem" ]] || {
+    [[ ${UI_STATUS_LEVELS[*]} == "warn ok bad bad bad" && ${UI_STATUS_STATES[*]} == "off on alert! alert! alert!" ]] || {
         echo "${UI_STATUS_LEVELS[*]} / ${UI_STATUS_STATES[*]}"
         return 1
     }
@@ -4339,7 +4339,7 @@ home_state_words_fit_blocks() (
     local language word
     for language in en fr; do
         i18n_load "$language"
-        for word in missing running stopped absent halted problem on off failed 'none yet' recent old manual; do
+        for word in missing running stopped absent halted 'alert!' on off failed 'none yet' recent old manual; do
             ui_len "$(t "$word")"
             if ((UI_LEN > 9)); then
                 echo "$language: « $(t "$word") » is $UI_LEN characters long"
@@ -4719,7 +4719,7 @@ firewall_findings_cases() (
         && ((FW_DOCKER == 1)) && ! grep -q "iptables" "$WORK/findings.out" || return 1
     ui_status_reset
     home_firewall
-    [[ ${UI_STATUS_LEVELS[*]} == bad && ${UI_STATUS_STATES[*]} == problem && ${UI_STATUS_DETAILS[*]} == "firewall: Docker blocks the VPN" && ${UI_STATUS_SHORT[*]} == "Docker blocks the VPN" ]] || {
+    [[ ${UI_STATUS_LEVELS[*]} == bad && ${UI_STATUS_STATES[*]} == "alert!" && ${UI_STATUS_DETAILS[*]} == "firewall: Docker blocks the VPN" && ${UI_STATUS_SHORT[*]} == "Docker blocks the VPN" ]] || {
         echo "${UI_STATUS_LEVELS[*]} / ${UI_STATUS_STATES[*]} / ${UI_STATUS_DETAILS[*]}"
         return 1
     }

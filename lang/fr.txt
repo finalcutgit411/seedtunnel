@@ -1832,8 +1832,8 @@ fr: arrêtée
 en: disk almost full
 fr: disque presque plein
 
-en: problem
-fr: problème
+en: alert!
+fr: alerte !
 
 en: %s free
 fr: %s libres
