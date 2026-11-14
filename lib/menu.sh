@@ -34,19 +34,32 @@ home_seedbox() {
 }
 
 # On: the rules are loaded, refuse by default, and nothing the settings need is
-# missing (what « seedtunnel firewall rules » checks)
+# missing; nothing else blocks the VPN (firewall_findings, said in full on the
+# screen Firewall). An error: red; a warning, or off: yellow. The worst finding
+# below the blocks.
 home_firewall() {
-    local name rules
+    local name i level="" short=""
     name=$(t 'Firewall')
-    if ! firewall_enabled; then
-        ui_status_add warn "$name" "$(t 'off')"
-        return 0
-    fi
-    rules=$(nft list table inet "$FIREWALL_TABLE" 2>/dev/null || true)
-    if [[ -n $rules ]] && firewall_refuses_by_default <<<"$rules" && [[ -z $(firewall_rules_missing "$rules" 2>&1) ]]; then
-        ui_status_add ok "$name" "$(t 'on')"
+    firewall_findings
+    for i in "${!FW_LEVELS[@]}"; do
+        if [[ ${FW_LEVELS[i]} == bad ]]; then
+            level=bad
+            short=${FW_SHORTS[i]}
+            break
+        fi
+        if [[ -z $level ]]; then
+            level=warn
+            short=${FW_SHORTS[i]}
+        fi
+    done
+    if [[ $level == bad ]]; then
+        ui_status_add bad "$name" "$(t 'problem')" "$(t 'firewall: %s' "$short")" "$short"
+    elif ! firewall_enabled; then
+        ui_status_add warn "$name" "$(t 'off')" "${short:+$(t 'firewall: %s' "$short")}" "$short"
+    elif [[ $level == warn ]]; then
+        ui_status_add warn "$name" "$(t 'warning')" "$(t 'firewall: %s' "$short")" "$short"
     else
-        ui_status_add bad "$name" "$(t 'problem')" "$(t 'firewall: see its rules')"
+        ui_status_add ok "$name" "$(t 'on')"
     fi
 }
 

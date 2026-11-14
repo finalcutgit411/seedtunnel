@@ -717,8 +717,8 @@ fr: SSH utilise le port %s, fermé par le pare-feu : risque de rester dehors   �
 en: seedtunnel firewall off   → seedtunnel firewall enable
 fr: Pare-feu seedtunnel désactivé   → seedtunnel firewall enable
 
-en: nftables.service is enabled and empties all the rules at boot (/etc/nftables.conf)
-fr: nftables.service est activé et vide toutes les règles au démarrage (/etc/nftables.conf)
+en: nftables.service is enabled and empties all the rules at boot (%s)   → sudo systemctl disable nftables, if you do not use it yourself
+fr: nftables.service est activé et vide toutes les règles au démarrage (%s)   → sudo systemctl disable nftables, si vous ne l'utilisez pas vous-même
 
 en: Backups
 fr: Sauvegardes
@@ -829,9 +829,6 @@ fr: Ports redirigés vers les clients du VPN (joignables depuis Internet, le par
 
 en: Raw rules:  nft list table inet %s ; nft list table ip seedtunnel
 fr: Règles brutes :  nft list table inet %s ; nft list table ip seedtunnel
-
-en: Firewall rules loaded, but they do not refuse what is not allowed:  seedtunnel firewall enable --yes
-fr: Règles du pare-feu chargées, mais elles ne refusent pas ce qui n'est pas autorisé :  seedtunnel firewall enable --yes
 
 en: web (80, 443/tcp), BitTorrent (%s)
 fr: web (80, 443/tcp), BitTorrent (%s)
@@ -1838,9 +1835,6 @@ fr: disque presque plein
 en: problem
 fr: problème
 
-en: firewall: see its rules
-fr: pare-feu : voir ses règles
-
 en: %s free
 fr: %s libres
 
@@ -2091,8 +2085,8 @@ fr: Rechercher une mise à jour et l'installer
 en: IPv4 routing off for %s: the clients will have no Internet   → sysctl -w %s=1
 fr: Routage IPv4 désactivé pour %s : les clients n'auront pas Internet   → sysctl -w %s=1
 
-en: Docker blocks the traffic that crosses the server; rules let the clients through for now, but those added by hand disappear at the next restart   → add  "ip-forward-no-drop": true  to %s
-fr: Docker bloque le trafic qui traverse le serveur ; des règles laissent passer les clients pour l'instant, mais celles ajoutées à la main disparaissent au prochain redémarrage   → ajoutez  "ip-forward-no-drop": true  dans %s
+en: Docker blocks the traffic that crosses the server; rules let the clients through for now, but those added by hand disappear at the next restart   → Docker 28 or later: add  "ip-forward-no-drop": true  to %s
+fr: Docker bloque le trafic qui traverse le serveur ; des règles laissent passer les clients pour l'instant, mais celles ajoutées à la main disparaissent au prochain redémarrage   → Docker 28 ou plus récent : ajoutez  "ip-forward-no-drop": true  dans %s
 
 en: Docker blocks the traffic of the clients: they connect, but have no Internet
 fr: Docker bloque le trafic des clients : ils se connectent, mais n'ont pas Internet
@@ -2103,8 +2097,8 @@ fr:   Tout de suite (jusqu'au prochain redémarrage) :
 en:   Already in %s: Docker no longer blocks after the next restart of the server.
 fr:   Déjà dans %s : Docker ne bloquera plus après le prochain redémarrage du serveur.
 
-en:   For good: add  "ip-forward-no-drop": true  to %s (read when Docker starts)
-fr:   Pour de bon : ajoutez  "ip-forward-no-drop": true  dans %s (lu au démarrage de Docker)
+en:   For good (Docker 28 or later): add  "ip-forward-no-drop": true  to %s (read when Docker starts)
+fr:   Pour de bon (Docker 28 ou plus récent) : ajoutez  "ip-forward-no-drop": true  dans %s (lu au démarrage de Docker)
 
 en: The firewall rules of another program (table %s) block the traffic of the clients: they connect, but have no Internet. They must accept what comes in by %s and what goes back to it.
 fr: Les règles de pare-feu d'un autre programme (table %s) bloquent le trafic des clients : ils se connectent, mais n'ont pas Internet. Elles doivent accepter ce qui entre par %s et ce qui y retourne.
@@ -2931,3 +2925,110 @@ fr: un nom de domaine (le vôtre, ou celui donné par l'hébergeur, ex. vps-1234
 
 en: or the IP address of the server: self-signed certificate (the browser shows a warning to accept).
 fr: ou l'adresse IP du serveur : certificat auto-signé (le navigateur affiche une alerte à accepter).
+
+# --- 1.0.6 : ce qui ne va pas autour du pare-feu (accueil, écran Pare-feu) -------
+
+en: warning
+fr: attention
+
+en: firewall: %s
+fr: pare-feu : %s
+
+en: [1] Enable / update the firewall
+fr: [1] Activer / mettre à jour le pare-feu
+
+en: ufw is on
+fr: ufw est actif
+
+en: The firewall of Ubuntu blocks the VPN and the seedbox.
+fr: Le pare-feu d'Ubuntu bloque le VPN et la seedbox.
+
+en: sudo ufw disable, then %s.
+fr: sudo ufw disable, puis %s.
+
+en: see its rules
+fr: voir ses règles
+
+en: Rules of the firewall missing
+fr: Règles du pare-feu absentes
+
+en: The firewall is on in the settings, but its rules are not loaded: nothing is refused.
+fr: Le pare-feu est activé dans les réglages, mais ses règles ne sont pas chargées : rien n'est refusé.
+
+en: %s loads them again.
+fr: %s les recharge.
+
+en: Rules that refuse nothing
+fr: Règles qui ne refusent rien
+
+en: The rules loaded do not refuse what is not allowed.
+fr: Les règles chargées ne refusent pas ce qui n'est pas autorisé.
+
+en: SSH port closed
+fr: port SSH fermé
+
+en: SSH listens on a port that the rules loaded do not open (%s): risk of being locked out at the next connection.
+fr: SSH écoute sur un port que les règles chargées n'ouvrent pas (%s) : risque d'être enfermé dehors à la prochaine connexion.
+
+en: %s opens it (on trial).
+fr: %s l'ouvre (à l'essai).
+
+en: Rules incomplete
+fr: Règles incomplètes
+
+en: Missing from the rules loaded, although the settings need it: %s.
+fr: Absent des règles chargées, alors que les réglages en ont besoin : %s.
+
+en: %s puts them in place.
+fr: %s les met en place.
+
+en: rules for Docker temporary
+fr: règles pour Docker provisoires
+
+en: Rules added by hand let the VPN through, but they disappear at the next restart of Docker or of the server.
+fr: Des règles ajoutées à la main laissent passer le VPN, mais elles disparaîtront au prochain redémarrage de Docker ou du serveur.
+
+en: For good (Docker 28 or later): add  "ip-forward-no-drop": true  to %s, then restart the server.
+fr: Pour de bon (Docker 28 ou plus récent) : ajoutez  "ip-forward-no-drop": true  dans %s, puis redémarrez le serveur.
+
+en: Docker blocks the VPN
+fr: Docker bloque le VPN
+
+en: The devices connect to the VPN, but have no Internet: Docker, installed on this server, refuses by default the traffic that crosses it.
+fr: Les appareils se connectent au VPN, mais n'ont pas Internet : Docker, installé sur ce serveur, refuse par défaut le trafic qui le traverse.
+
+en: Already in %s: Docker no longer blocks after the next restart of the server. Right now (until then), the commands below.
+fr: Déjà dans %s : Docker ne bloquera plus après le prochain redémarrage du serveur. Tout de suite (d'ici là), les commandes ci-dessous.
+
+en: Right now (until the next restart): the commands below.
+fr: Tout de suite (jusqu'au prochain redémarrage) : les commandes ci-dessous.
+
+en: another program blocks the VPN
+fr: un autre programme bloque le VPN
+
+en: The rules of another program (table %s) refuse the traffic that crosses the server: the devices connect to the VPN, but have no Internet.
+fr: Les règles d'un autre programme (table %s) refusent le trafic qui traverse le serveur : les appareils se connectent au VPN, mais n'ont pas Internet.
+
+en: They must accept what comes in by %s and what goes back to it. seedtunnel does not touch the rules of other programs.
+fr: Elles doivent accepter ce qui entre par %s et ce qui y retourne. seedtunnel ne touche pas aux règles des autres programmes.
+
+en: nftables empties the rules at boot
+fr: nftables vide les règles au démarrage
+
+en: nftables.service is on, and its file %s deletes every rule when the server starts: those of seedtunnel can disappear.
+fr: nftables.service est activé, et son fichier %s efface toutes les règles quand le serveur démarre : celles de seedtunnel peuvent disparaître.
+
+en: If you do not use it yourself:  sudo systemctl disable nftables
+fr: Si vous ne l'utilisez pas vous-même :  sudo systemctl disable nftables
+
+en: The SSH port is closed
+fr: Le port SSH est fermé
+
+en: Temporary rules for Docker
+fr: Règles Docker provisoires
+
+en: Another program blocks the VPN
+fr: Un programme bloque le VPN
+
+en: nftables empties the rules
+fr: nftables vide les règles

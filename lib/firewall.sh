@@ -183,6 +183,16 @@ firewall_rules_in_words() {
 
 # Ports the settings want open but that the loaded rules ($1) do not have
 firewall_rules_missing() {
+    local missing
+    missing=$(firewall_rules_missing_list "$1")
+    if [[ -n $missing ]]; then
+        err 'Missing from the rules loaded, although the settings need it: %s   → seedtunnel apply' "$missing"
+    fi
+}
+
+# firewall_rules_missing_list RULES — what the settings need and the rules
+# loaded do not open (« SSH 22/tcp, web 443/tcp »), nothing if all is there
+firewall_rules_missing_list() {
     local rules=$1 port missing="" open
     open=" $(firewall_open_tcp_ports <<<"$rules" | paste -sd' ' -) "
     for port in $(firewall_ssh_ports | tr -d ','); do
@@ -197,9 +207,7 @@ firewall_rules_missing() {
     if seedbox_installed && ! grep -qE "th dport $TORRENT_PORT accept" <<<"$rules"; then
         missing+="${missing:+, }BitTorrent $TORRENT_PORT"
     fi
-    if [[ -n $missing ]]; then
-        err 'Missing from the rules loaded, although the settings need it: %s   → seedtunnel apply' "$missing"
-    fi
+    printf '%s' "$missing"
 }
 
 # Ports forwarded to the clients of the VPN (NAT of the VPN, loaded right now):
@@ -706,19 +714,145 @@ firewall_refresh() {
     unit_ensure_on 'Enabling at boot' seedtunnel-firewall.service
 }
 
-firewall_status() {
-    local rules
+# --- What is wrong with the firewall, or around it ------------------------------
+# The same findings for the block of the home screen, the screen Firewall and
+# « seedtunnel firewall status »: the rules of seedtunnel, and what another
+# program does to the traffic of the VPN (Docker most of all).
+
+# File of nftables.service (Debian): « flush ruleset » there empties every
+# rule at boot
+NFTABLES_CONF="/etc/nftables.conf"
+
+# fw_finding LEVEL SHORT TITLE LINE… — one finding: bad or warn, a few words
+# for the home screen (« Docker blocks the VPN »), the title of its frame and
+# its lines (texts already translated). FW_COMMANDS: commands to show under
+# the frame, set just before (one per line).
+fw_finding() {
+    local text
+    FW_LEVELS+=("$1")
+    FW_SHORTS+=("$2")
+    FW_TITLES+=("$3")
+    shift 3
+    printf -v text '%s\n' "$@"
+    FW_TEXTS+=("${text%$'\n'}")
+    FW_CMDS+=("$FW_COMMANDS")
+    FW_COMMANDS=""
+}
+
+# firewall_findings — FW_LEVELS, FW_SHORTS, FW_TITLES, FW_TEXTS, FW_CMDS: what
+# is wrong, the worst first in its kind (nothing: all is right)
+firewall_findings() {
+    local rules missing ruleset family name allowed docker interface fix
+    FW_LEVELS=() FW_SHORTS=() FW_TITLES=() FW_TEXTS=() FW_CMDS=()
+    FW_COMMANDS=""
+    # what puts the rules in place again: the menu, or the command
+    if ((INTERACTIVE)); then fix=$(t '[1] Enable / update the firewall'); else fix="seedtunnel firewall enable"; fi
+    if { vpn_installed || seedbox_installed; } && ufw_active; then
+        fw_finding bad "$(t 'ufw is on')" "$(t 'ufw is on')" \
+            "$(t 'The firewall of Ubuntu blocks the VPN and the seedbox.')" \
+            "$(t 'sudo ufw disable, then %s.' "$fix")"
+    fi
     if firewall_enabled; then
         rules=$(nft list table inet "$FIREWALL_TABLE" 2>/dev/null || true)
         if [[ -z $rules ]]; then
-            warn 'Firewall enabled but rules missing:  seedtunnel firewall enable --yes'
+            fw_finding bad "$(t 'see its rules')" "$(t 'Rules of the firewall missing')" \
+                "$(t 'The firewall is on in the settings, but its rules are not loaded: nothing is refused.')" \
+                "$(t '%s loads them again.' "$fix")"
         elif ! firewall_refuses_by_default <<<"$rules"; then
-            warn 'Firewall rules loaded, but they do not refuse what is not allowed:  seedtunnel firewall enable --yes'
+            fw_finding bad "$(t 'see its rules')" "$(t 'Rules that refuse nothing')" \
+                "$(t 'The rules loaded do not refuse what is not allowed.')" \
+                "$(t '%s loads them again.' "$fix")"
         else
-            ok 'Firewall on — open: %s' "$(firewall_summary)"
+            missing=$(firewall_rules_missing_list "$rules")
+            if [[ $missing == *SSH* ]]; then
+                fw_finding bad "$(t 'SSH port closed')" "$(t 'The SSH port is closed')" \
+                    "$(t 'SSH listens on a port that the rules loaded do not open (%s): risk of being locked out at the next connection.' "$missing")" \
+                    "$(t '%s opens it (on trial).' "$fix")"
+            elif [[ -n $missing ]]; then
+                fw_finding bad "$(t 'see its rules')" "$(t 'Rules incomplete')" \
+                    "$(t 'Missing from the rules loaded, although the settings need it: %s.' "$missing")" \
+                    "$(t '%s puts them in place.' "$fix")"
+            fi
+        fi
+    fi
+    # the traffic of the clients crosses the server: another program may
+    # refuse it (doctor_vpn_forward)
+    if vpn_installed && ruleset=$(nft list ruleset 2>/dev/null); then
+        interface=$(default_interface || true)
+        while read -r family name allowed docker; do
+            [[ -n $family ]] || continue
+            if ((allowed)) && { ((docker == 0)) || docker_forward_drop_off; }; then continue; fi
+            if ((docker && allowed)); then
+                fw_finding warn "$(t 'rules for Docker temporary')" "$(t 'Temporary rules for Docker')" \
+                    "$(t 'Rules added by hand let the VPN through, but they disappear at the next restart of Docker or of the server.')" \
+                    "$(t 'For good (Docker 28 or later): add  "ip-forward-no-drop": true  to %s, then restart the server.' "$DOCKER_DAEMON_CONFIG")"
+            elif ((docker)); then
+                FW_COMMANDS="iptables -I DOCKER-USER -i $VPN_INTERFACE -o ${interface:-?} -j ACCEPT"$'\n'
+                FW_COMMANDS+="iptables -I DOCKER-USER -i ${interface:-?} -o $VPN_INTERFACE -m conntrack --ctstate RELATED,ESTABLISHED,DNAT -j ACCEPT"
+                if docker_forward_drop_off; then
+                    fw_finding bad "$(t 'Docker blocks the VPN')" "$(t 'Docker blocks the VPN')" \
+                        "$(t 'The devices connect to the VPN, but have no Internet: Docker, installed on this server, refuses by default the traffic that crosses it.')" \
+                        "$(t 'Already in %s: Docker no longer blocks after the next restart of the server. Right now (until then), the commands below.' "$DOCKER_DAEMON_CONFIG")"
+                else
+                    fw_finding bad "$(t 'Docker blocks the VPN')" "$(t 'Docker blocks the VPN')" \
+                        "$(t 'The devices connect to the VPN, but have no Internet: Docker, installed on this server, refuses by default the traffic that crosses it.')" \
+                        "$(t 'Right now (until the next restart): the commands below.')" \
+                        "$(t 'For good (Docker 28 or later): add  "ip-forward-no-drop": true  to %s, then restart the server.' "$DOCKER_DAEMON_CONFIG")"
+                fi
+            else
+                fw_finding bad "$(t 'another program blocks the VPN')" "$(t 'Another program blocks the VPN')" \
+                    "$(t 'The rules of another program (table %s) refuse the traffic that crosses the server: the devices connect to the VPN, but have no Internet.' "$family $name")" \
+                    "$(t 'They must accept what comes in by %s and what goes back to it. seedtunnel does not touch the rules of other programs.' "$VPN_INTERFACE")"
+            fi
+        done < <(forward_drop_tables "$VPN_INTERFACE" <<<"$ruleset")
+    fi
+    if systemctl is-enabled --quiet nftables.service 2>/dev/null && grep -qs 'flush ruleset' "$NFTABLES_CONF"; then
+        fw_finding warn "$(t 'nftables empties the rules at boot')" "$(t 'nftables empties the rules')" \
+            "$(t 'nftables.service is on, and its file %s deletes every rule when the server starts: those of seedtunnel can disappear.' "$NFTABLES_CONF")" \
+            "$(t 'If you do not use it yourself:  sudo systemctl disable nftables')"
+    fi
+}
+
+# The findings: in frames in the menus, as lines for the commands; the
+# commands to type under them
+firewall_findings_show() {
+    local i line
+    local -a lines
+    for i in "${!FW_LEVELS[@]}"; do
+        if ((i > 0)); then echo; fi
+        if ((INTERACTIVE)); then
+            mapfile -t lines <<<"${FW_TEXTS[i]}"
+            ui_box "${FW_LEVELS[i]}" "${FW_TITLES[i]}" "${lines[@]}"
+        else
+            if [[ ${FW_LEVELS[i]} == bad ]]; then
+                printf '%s✘ %s%s\n' "$C_RED" "${FW_TITLES[i]}" "$C_RESET"
+            else
+                printf '%s!%s %s\n' "$C_YELLOW" "$C_RESET" "${FW_TITLES[i]}"
+            fi
+            while IFS= read -r line; do printf '  %s\n' "$line"; done <<<"${FW_TEXTS[i]}"
+        fi
+        if [[ -n ${FW_CMDS[i]} ]]; then
+            while IFS= read -r line; do printf '    %s\n' "$line"; done <<<"${FW_CMDS[i]}"
+        fi
+    done
+}
+
+# The state of the firewall at the top of its screen and for « seedtunnel
+# firewall status », then what is wrong
+firewall_status() {
+    local rules
+    firewall_findings
+    if firewall_enabled; then
+        rules=$(nft list table inet "$FIREWALL_TABLE" 2>/dev/null || true)
+        if [[ -n $rules ]] && firewall_refuses_by_default <<<"$rules"; then
+            ui_print_wrapped "$C_GREEN✔$C_RESET " "  " "$(t 'Firewall on — open: %s' "$(firewall_summary)")"
         fi
     else
         say 'seedtunnel firewall off (everything is open, apart from the fail2ban rules).'
+    fi
+    if ((${#FW_LEVELS[@]})); then
+        echo
+        firewall_findings_show
     fi
 }
 

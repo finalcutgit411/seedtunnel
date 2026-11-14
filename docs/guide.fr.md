@@ -273,7 +273,7 @@ Relancée, l'installation ne change que ce qui doit l'être. Un fichier modifié
 - **Le VPN est en IPv4.** L'IPv6 des appareils est bloquée dans le tunnel plutôt que de fuiter.
 - **Les appareils du VPN ne se voient pas entre eux** : un ordinateur ne peut pas joindre un téléphone par le tunnel. Chacun joint le serveur et Internet.
 - **Une seule personne par seedbox.**
-- **Docker sur le même serveur** peut couper le VPN d'Internet : les appareils se connectent, mais rien ne revient. Le diagnostic le voit. La correction : ajoutez `"ip-forward-no-drop": true` dans `/etc/docker/daemon.json` (le fichier entier, s'il n'existe pas : `{ "ip-forward-no-drop": true }`), puis redémarrez le serveur. SeedTunnel ne touche jamais aux règles de Docker.
+- **Docker sur le même serveur** peut couper le VPN d'Internet : les appareils se connectent, mais rien ne revient. Le diagnostic le voit, l'accueil aussi (bloc Pare-feu en rouge), et l'écran Pare-feu donne les deux commandes qui le règlent tout de suite. Pour de bon, avec Docker 28 ou plus récent : ajoutez `"ip-forward-no-drop": true` dans `/etc/docker/daemon.json` (le fichier entier, s'il n'existe pas : `{ "ip-forward-no-drop": true }`), puis redémarrez le serveur. Une version plus ancienne de Docker ne connaît pas ce réglage et refuserait de démarrer. SeedTunnel ne touche jamais aux règles de Docker.
 
 ### Autres façons d'installer
 

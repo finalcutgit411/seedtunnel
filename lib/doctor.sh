@@ -289,7 +289,7 @@ doctor_vpn_forward() {
         if ((allowed)) && { ((docker == 0)) || docker_forward_drop_off; }; then continue; fi
         blocked=1
         if ((allowed)); then
-            doctor_warn 'Docker blocks the traffic that crosses the server; rules let the clients through for now, but those added by hand disappear at the next restart   → add  "ip-forward-no-drop": true  to %s' "$DOCKER_DAEMON_CONFIG"
+            doctor_warn 'Docker blocks the traffic that crosses the server; rules let the clients through for now, but those added by hand disappear at the next restart   → Docker 28 or later: add  "ip-forward-no-drop": true  to %s' "$DOCKER_DAEMON_CONFIG"
         elif ((docker)); then
             doctor_error 'Docker blocks the traffic of the clients: they connect, but have no Internet'
             say '  Right now (until the next restart):'
@@ -298,7 +298,7 @@ doctor_vpn_forward() {
             if docker_forward_drop_off; then
                 say '  Already in %s: Docker no longer blocks after the next restart of the server.' "$DOCKER_DAEMON_CONFIG"
             else
-                say '  For good: add  "ip-forward-no-drop": true  to %s (read when Docker starts)' "$DOCKER_DAEMON_CONFIG"
+                say '  For good (Docker 28 or later): add  "ip-forward-no-drop": true  to %s (read when Docker starts)' "$DOCKER_DAEMON_CONFIG"
             fi
         else
             doctor_error 'The firewall rules of another program (table %s) block the traffic of the clients: they connect, but have no Internet. They must accept what comes in by %s and what goes back to it.' "$family $name" "$VPN_INTERFACE"
@@ -640,8 +640,8 @@ doctor_firewall() {
         doctor_warn 'seedtunnel firewall off   → seedtunnel firewall enable'
     fi
     if systemctl is-enabled --quiet nftables.service 2>/dev/null \
-        && grep -qs 'flush ruleset' /etc/nftables.conf; then
-        doctor_warn 'nftables.service is enabled and empties all the rules at boot (/etc/nftables.conf)'
+        && grep -qs 'flush ruleset' "$NFTABLES_CONF"; then
+        doctor_warn 'nftables.service is enabled and empties all the rules at boot (%s)   → sudo systemctl disable nftables, if you do not use it yourself' "$NFTABLES_CONF"
     fi
 }
 

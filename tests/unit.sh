@@ -4263,15 +4263,17 @@ home_states() (
     [[ ${UI_STATUS_STATES[*]} == "stopped halted problem halted halted running running" && ${UI_STATUS_DETAILS[5]} == "1 of 2 clients connected" ]] || return 1
     # firewall: off, on, rules missing, rules that refuse nothing by default
     ui_status_reset
+    ufw_active() { return 1; }
+    NFTABLES_CONF="$WORK/no-nftables.conf"
     firewall_enabled() { return 1; }
     home_firewall
     firewall_enabled() { return 0; }
-    firewall_rules_missing() { :; }
+    firewall_rules_missing_list() { :; }
     nft() { printf 'type filter hook input priority 0; policy drop;\n'; }
     home_firewall
-    firewall_rules_missing() { echo "SSH 22/tcp" >&2; }
+    firewall_rules_missing_list() { printf 'SSH 22/tcp'; }
     home_firewall
-    firewall_rules_missing() { :; }
+    firewall_rules_missing_list() { :; }
     nft() { printf 'type filter hook input priority 0; policy accept;\n'; }
     home_firewall
     nft() { :; }
@@ -4670,6 +4672,103 @@ docker_ruleset() {
     printf '%s\n' '	}' '}' 'table ip seedtunnel {' '	chain postrouting {' '		type nat hook postrouting priority srcnat; policy accept;' \
         '		ip saddr 10.8.0.0/24 oifname "ens3" masquerade' '	}' '}'
 }
+
+# What is wrong around the firewall, for the home screen and the screen
+# Firewall: Docker that blocks the clients (red, with the commands), rules for
+# Docker that a restart removes (yellow), another program (red, its table),
+# nftables that empties the rules at boot (yellow), ufw (red)
+firewall_findings_cases() (
+    load
+    colors_init off
+    UI_COLUMNS=80
+    ui_width
+    INTERACTIVE=1
+    default_interface() { echo ens3; }
+    vpn_installed() { return 0; }
+    seedbox_installed() { return 1; }
+    ufw_active() { return 1; }
+    firewall_enabled() { return 0; }
+    firewall_summary() { echo "SSH (22/tcp), VPN (51820/udp)"; }
+    firewall_rules_missing_list() { :; }
+    systemctl() { return 1; }
+    NFTABLES_CONF="$WORK/nftables.conf"
+    rm -f "$NFTABLES_CONF"
+    DOCKER_DAEMON_CONFIG="$WORK/daemon-findings.json"
+    rm -f "$DOCKER_DAEMON_CONFIG"
+    nft() { if [[ $* == "list ruleset" ]]; then docker_ruleset; else printf 'type filter hook input priority 0; policy drop;\n'; fi; }
+    # nothing wrong: green, nothing said
+    DOCKER_USER_RULES=yes
+    printf '{ "ip-forward-no-drop": true }\n' >"$DOCKER_DAEMON_CONFIG"
+    firewall_findings
+    ((${#FW_LEVELS[@]} == 0)) || return 1
+    ui_status_reset
+    home_firewall
+    [[ ${UI_STATUS_LEVELS[*]} == ok && ${UI_STATUS_STATES[*]} == on ]] || return 1
+    # Docker blocks: red, the commands of this server under the frame
+    DOCKER_USER_RULES=no
+    rm -f "$DOCKER_DAEMON_CONFIG"
+    firewall_status >"$WORK/findings.out" 2>&1
+    cat "$WORK/findings.out"
+    grep -q "✔ Firewall on — open: SSH (22/tcp), VPN (51820/udp)" "$WORK/findings.out" \
+        && grep -q "┌─ ! Docker blocks the VPN ─" "$WORK/findings.out" \
+        && grep -q "Docker 28 or later" "$WORK/findings.out" \
+        && grep -qxF '    iptables -I DOCKER-USER -i wg0 -o ens3 -j ACCEPT' "$WORK/findings.out" \
+        && grep -qxF '    iptables -I DOCKER-USER -i ens3 -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED,DNAT -j ACCEPT' "$WORK/findings.out" || return 1
+    ui_status_reset
+    home_firewall
+    [[ ${UI_STATUS_LEVELS[*]} == bad && ${UI_STATUS_STATES[*]} == problem && ${UI_STATUS_DETAILS[*]} == "firewall: Docker blocks the VPN" && ${UI_STATUS_SHORT[*]} == "Docker blocks the VPN" ]] || {
+        echo "${UI_STATUS_LEVELS[*]} / ${UI_STATUS_STATES[*]} / ${UI_STATUS_DETAILS[*]}"
+        return 1
+    }
+    # let through by rules typed by hand: yellow « warning »
+    DOCKER_USER_RULES=yes
+    ui_status_reset
+    home_firewall
+    [[ ${UI_STATUS_LEVELS[*]} == warn && ${UI_STATUS_STATES[*]} == warning && ${UI_STATUS_DETAILS[*]} == "firewall: rules for Docker temporary" ]] || return 1
+    # the firewall of seedtunnel off: yellow « off », with the reason
+    firewall_enabled() { return 1; }
+    ui_status_reset
+    home_firewall
+    [[ ${UI_STATUS_LEVELS[*]} == warn && ${UI_STATUS_STATES[*]} == off && ${UI_STATUS_DETAILS[*]} == "firewall: rules for Docker temporary" ]] || return 1
+    firewall_enabled() { return 0; }
+    # another program: red, its table named
+    nft() { if [[ $* == "list ruleset" ]]; then printf '%s\n' 'table inet other {' '	chain forward {' '		type filter hook forward priority 0; policy drop;' '	}' '}'; else printf 'type filter hook input priority 0; policy drop;\n'; fi; }
+    firewall_status >"$WORK/findings.out" 2>&1
+    grep -q "┌─ ! Another program blocks the VPN ─" "$WORK/findings.out" && grep -q "(table inet other)" "$WORK/findings.out" || {
+        cat "$WORK/findings.out"
+        return 1
+    }
+    # nftables that empties the rules at boot, and ufw on: both said, the
+    # worst on the home screen
+    nft() { printf 'type filter hook input priority 0; policy drop;\n'; }
+    systemctl() { [[ $* == "is-enabled --quiet nftables.service" ]]; }
+    printf 'flush ruleset\n' >"$NFTABLES_CONF"
+    ufw_active() { return 0; }
+    firewall_findings
+    [[ ${FW_LEVELS[*]} == "bad warn" && ${FW_TITLES[0]} == "ufw is on" && ${FW_TITLES[1]} == "nftables empties the rules" ]] || {
+        echo "${FW_LEVELS[*]} / ${FW_TITLES[*]}"
+        return 1
+    }
+    ui_status_reset
+    home_firewall
+    [[ ${UI_STATUS_LEVELS[*]} == bad && ${UI_STATUS_DETAILS[*]} == "firewall: ufw is on" ]] || return 1
+    # the SSH port missing from the rules: red, said as such
+    ufw_active() { return 1; }
+    rm -f "$NFTABLES_CONF"
+    firewall_rules_missing_list() { printf 'SSH 2222/tcp'; }
+    firewall_status >"$WORK/findings.out" 2>&1
+    grep -q "┌─ ! The SSH port is closed" "$WORK/findings.out" && grep -q "(SSH 2222/tcp)" "$WORK/findings.out" \
+        && grep -q "\[1\] Enable / update the firewall opens it (on trial)." "$WORK/findings.out" || {
+        cat "$WORK/findings.out"
+        return 1
+    }
+    # for the command: lines, and the command instead of the menu
+    INTERACTIVE=0
+    firewall_status >"$WORK/findings.out" 2>&1
+    cat "$WORK/findings.out"
+    grep -qx "✘ The SSH port is closed" "$WORK/findings.out" && grep -q "seedtunnel firewall enable opens it" "$WORK/findings.out" \
+        && ! grep -q "┌─" "$WORK/findings.out"
+)
 
 doctor_sees_vpn_traffic_blocked() (
     load
@@ -8690,6 +8789,7 @@ check "diagnostics: BitTorrent port open, closed (warning) or not tested" doctor
 check "SFTP password: warning once there is a key, yellow in the menus" sftp_password_warning
 
 check "diagnostics: traffic of the VPN blocked by Docker or another firewall" doctor_sees_vpn_traffic_blocked
+check "firewall: what is wrong around it (Docker, another program, nftables, ufw, SSH port) on the home screen and in frames" firewall_findings_cases
 check "diagnostics: IPv4 routing off for the VPN or the way out" doctor_sees_routing_off_for_an_interface
 check "lock: « sudo kill » for whoever came in by sudo" lock_message_says_sudo_kill
 check "firewall: rules gone (or refusing nothing) → apply loads them again" firewall_rules_put_back_when_gone
