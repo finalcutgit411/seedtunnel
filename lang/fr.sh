@@ -90,14 +90,6 @@ text_fr_share_steps_vpn() {
 EOF
 }
 
-text_fr_seedbox_domain_help() {
-    cat <<'EOF'
-Nom de domaine de la seedbox. Sans domaine à vous, l'hébergeur en fournit
-souvent un (ex. vps-1234abcd.vps.ovh.net). À défaut, entrez l'adresse IP :
-un certificat auto-signé sera utilisé (alerte du navigateur à accepter).
-EOF
-}
-
 text_fr_letsencrypt_failed_help() {
     cat <<EOF
   Causes fréquentes : port 80 bloqué par le pare-feu de l'hébergeur, DNS pas

@@ -218,8 +218,9 @@ vpn_generate_client_conf() {
     address=$VPN_PUBLIC_ADDRESS
     # IPv6 address → between brackets
     if [[ $address == *:* ]]; then address="[$address]"; fi
+    # the comments in the language of seedtunnel (the file is for its user)
     cat <<EOF
-# seedtunnel — client "$name" — IP $VPN_SUBNET.$((CLIENT_NUMBER + 1)) — open port $((VPN_FORWARDED_PORT_BASE + CLIENT_NUMBER))
+$(t '# seedtunnel — client "%s" — IP %s — open port %s' "$name" "$VPN_SUBNET.$((CLIENT_NUMBER + 1))" "$((VPN_FORWARDED_PORT_BASE + CLIENT_NUMBER))")
 [Interface]
 PrivateKey = $CLIENT_PRIVATE_KEY
 Address = $VPN_SUBNET.$((CLIENT_NUMBER + 1))/32
@@ -229,9 +230,9 @@ DNS = $VPN_DNS
 PublicKey = $(<"$VPN_STATE_DIR/server.pub")
 PresharedKey = $CLIENT_PRESHARED_KEY
 Endpoint = $address:$VPN_PORT
-# ::/0 also sends IPv6 into the tunnel (where it is blocked): no IPv6 leak
+$(t '# ::/0 also sends IPv6 into the tunnel (where it is blocked): no IPv6 leak')
 AllowedIPs = 0.0.0.0/0, ::/0
-# Keeps the tunnel open behind a home router: needed for the open port
+$(t '# Keeps the tunnel open behind a home router: needed for the open port')
 PersistentKeepalive = 25
 EOF
 }

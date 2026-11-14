@@ -209,6 +209,8 @@ After 5 failed logins in 10 minutes, fail2ban bans your address for 1 hour (1 we
 
 Your address is not there? Look for an IPv6 address: many home connections go through IPv6.
 
+Before removing the seedbox or restoring a backup, close WinSCP and FileZilla: meanwhile the SFTP account goes away, their automatic reconnections count as failures, and your address can be banned.
+
 <p align="center"><img src="screens/en-bans.png" alt="The banned addresses and the end of their ban" width="640"></p>
 
 ### Ask for help

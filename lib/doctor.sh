@@ -346,6 +346,28 @@ doctor_transmission_settings() {
     fi
 }
 
+# The umask of Transmission running right now (« 0002 »; nothing if it is
+# not running)
+transmission_process_umask() {
+    local pid
+    pid=$(systemctl show -p MainPID --value transmission-daemon 2>/dev/null || true)
+    [[ $pid =~ ^[1-9][0-9]*$ ]] || return 0
+    awk '$1 == "Umask:" { print $2 }' "/proc/$pid/status" 2>/dev/null || true
+}
+
+# The files Transmission downloads: never writable by every account. Its umask
+# comes from its settings (Transmission 3 writes 0 in place of a umask it does
+# not read: settings of Transmission 4 restored on Debian 12). Said only when
+# wrong.
+doctor_transmission_umask() {
+    local umask
+    umask=$(transmission_process_umask)
+    [[ $umask =~ ^[0-7]+$ ]] || return 0
+    if (((8#$umask & 8#2) == 0)); then
+        doctor_warn 'Transmission makes its downloads writable by every account (umask %s)   → seedtunnel apply' "$umask"
+    fi
+}
+
 # The .torrent files of watch/ that Transmission cannot read are never added:
 # only « Permission denied » again and again in its journal (a file copied
 # there by root keeps the rights of its original, 600). Said, not changed:
@@ -489,6 +511,7 @@ doctor_seedbox() {
     fi
     doctor_transmission_apparmor
     doctor_transmission_settings
+    doctor_transmission_umask
     doctor_watch_unreadable
     free=$(disk_free_gb "$SEEDBOX_DATA_DIR")
     if [[ -z $free ]]; then

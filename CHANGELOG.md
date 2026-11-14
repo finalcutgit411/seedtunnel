@@ -3,9 +3,15 @@
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 
-## [1.0.6] - 2026-11-13
+## [1.0.6] - 2026-11-14
+
+### Security
+- Transmission: after a backup made with Transmission 4 (Debian 13, Ubuntu) was restored on Debian 12 (Transmission 3), the files it downloaded could be changed by every account of the server. Transmission 4 writes its umask as text (« "002" »), which Transmission 3 does not read: it put 0 in its place. The umask is now compared by its value, and written again for Transmission 3: `seedtunnel apply` puts a server already restored right, and `seedtunnel doctor` says when Transmission runs with such a umask. The files downloaded meanwhile keep their rights: `sudo find /srv/seedbox/complete /srv/seedbox/incomplete ! -type l -perm -o+w -exec chmod o-w {} +` closes them.
+- `seedtunnel apply` also empties the names of the programs of Transmission (set through the web interface), not only their switch.
+- Restore: a path that goes up out of the folders of seedtunnel (`etc/seedtunnel/../../…`) is refused before anything is extracted, with « Archive refused » (GNU tar stopped it, but later and less clearly).
 
 ### Fixed
+- `seedtunnel seedbox unban` right after a ban: a moment later, recidive banned the address again for a week (it reads the ban in the log of fail2ban). It is checked again a few seconds later, and unbanned again.
 - Ubuntu: logrotate never cut `/var/log/seedtunnel.log` (« parent directory has insecure permissions »: there, `/var/log` can be written by the group syslog). The rule now says which account cuts it (`su root root`), and the log no longer grows without end.
 - `seedtunnel seedbox sftp-key add` of a file that is not there: « File not found », no longer « Unexpected error ».
 - `seedtunnel apply` with nothing to change rewrote `vpn.conf`, `seedbox.conf` and `written.sha256` with the same content. A file whose content does not change now keeps its date.
@@ -14,7 +20,16 @@ versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 - nginx no longer tells its version on port 80 either (`server_tokens off`, as on 443). The web interface gets one `X-Frame-Options` (Transmission sends its own: hidden).
 - A subcommand given more arguments than it takes (`seedtunnel vpn list extra`) is refused before anything is done, as the commands already were.
 - The full disk protection writes what it does (stopped, started again, not started) to `/var/log/seedtunnel.log` too, not only to the journal.
-- `seedtunnel seedbox unban` says that fail2ban still counts the failures of the last 10 minutes: one more mistake bans the address again.
+- `seedtunnel seedbox unban` says that fail2ban still counts the failures of the last 10 minutes: a few more mistakes within these 10 minutes ban the address again. Without an address, it says how to use it.
+- `seedtunnel backup auto off` when the weekly backup is already off: says so, without warnings nor question.
+- No backup found: says where they are looked for (directly in `/root`, or in a folder of `/home`).
+- The comments of the file of a VPN client are in the language of seedtunnel.
+- Before removing the seedbox, and before restoring a backup with a seedbox: « close WinSCP / FileZilla first ». Their automatic reconnections, while the SFTP account is gone, count as failures, and fail2ban banned the address (every SSH session from there cut).
+- `seedtunnel seedbox sftp-config filezilla` no longer shows the address to paste into WinSCP.
+- Removing the seedbox also removes `python3-systemd` when seedtunnel installed it (it was there for fail2ban), on its own: if another program needs it, only it is kept.
+- Menu, firewall on trial: what to do is in a frame, said more clearly (a connection through the public address of the server is always enough; through the VPN, only if this window goes through the VPN too). « yes » before any new SSH connection: a red frame, with the time left.
+- Menu, « Domain name and HTTPS certificate »: the address now, its certificate, when it ends and the public IP in a frame, then the two kinds of name and their certificate (also when the seedbox is installed).
+- Frames: a line is no longer cut before « : » or inside « … » (French). The questions in French end with « : ».
 - Deleting the last backup made by the server says « the only backup made by this server » (one copied into a home folder may be older, or of another server).
 - French: « Utilisation » for the help of `seedtunnel firewall` (it said « Usage »). The help says that `restore` without a file lists the backups in a terminal only.
 

@@ -347,7 +347,7 @@ ask_back() {
     local _ab_var=$1 _ab_question _ab_answer
     _ab_question=$(t '%s (empty = back)' "$(t "$2")")
     ((INTERACTIVE)) || die 'Question asked outside interactive mode: %s' "$_ab_question"
-    IFS= read -r -e -i "${3-}" -p "$_ab_question: " _ab_answer || {
+    IFS= read -r -e -i "${3-}" -p "$(t '%s:' "$_ab_question") " _ab_answer || {
         echo
         exit 130
     }
@@ -361,7 +361,7 @@ ask() {
     local _ask_var=$1 _ask_question _ask_default=${3-} _ask_answer
     _ask_question=$(t "$2")
     ((INTERACTIVE)) || die 'Question asked outside interactive mode: %s' "$_ask_question"
-    IFS= read -r -e -i "$_ask_default" -p "$_ask_question: " _ask_answer || {
+    IFS= read -r -e -i "$_ask_default" -p "$(t '%s:' "$_ask_question") " _ask_answer || {
         echo
         exit 130
     }

@@ -503,7 +503,7 @@ backup_list() {
         index=$((index + 1))
         printf '  %s  %s\n' "$index" "$(backup_line "$file")"
     done < <(backup_candidates)
-    if ((!index)); then say 'No backup found in %s, nor in /root and /home.' "$BACKUP_DIR"; fi
+    if ((!index)); then say 'No backup found in %s, nor directly in /root or in a folder of /home.' "$BACKUP_DIR"; fi
 }
 
 # backup_kind FILE — made by hand or weekly by this server, or copied into
@@ -704,8 +704,13 @@ backup_auto_enable() {
 # Turning the weekly backup off from the menu or « backup auto off »: what it
 # does is said, then asked (« no » by default; --yes without a terminal). Not
 # when the VPN and the seedbox are removed: nothing is left to back up then.
+# Already off (nothing of it left): said, nothing asked.
 backup_auto_disable_asked() {
     WENT_BACK=0
+    if ! backup_auto_enabled && [[ ! -e $BACKUP_TIMER && ! -e $BACKUP_PASSPHRASE_FILE ]]; then
+        ok 'The weekly backup is already off: nothing to do.'
+        return 0
+    fi
     banner
     section 'Turn the weekly backup off'
     danger "$(t 'Turn the weekly backup off')" "$(t 'No more encrypted backup every week.')" \
@@ -858,7 +863,7 @@ backup_pick_file() {
     if ((_bp_index)); then backup_table "${_bp_files[@]}"; fi
     # Enter takes the newest one only if it was made by this server
     if [[ ${_bp_files[0]-} == "$BACKUP_DIR"/* ]]; then _bp_default=1; fi
-    if ((_bp_index == 0)); then say 'No backup found in %s, nor in /root and /home.' "$BACKUP_DIR"; fi
+    if ((_bp_index == 0)); then say 'No backup found in %s, nor directly in /root or in a folder of /home.' "$BACKUP_DIR"; fi
     echo
     while true; do
         if ((_bp_index)); then
@@ -904,7 +909,7 @@ backup_menu_mine() {
         if ((${#files[@]})); then
             backup_table "${files[@]}"
         else
-            say 'No backup found in %s, nor in /root and /home.' "$BACKUP_DIR"
+            say 'No backup found in %s, nor directly in /root or in a folder of /home.' "$BACKUP_DIR"
         fi
         echo
         total=0
@@ -1446,6 +1451,7 @@ restore_cli() {
 
 restore_main() {
     local file=${1-} list bad stamp was=$INTERACTIVE kept_passphrase=0 kept_firewall=0 kept_links=0 kept previous="" tries=0 agreed=1
+    local -a warning=()
     WENT_BACK=0
     [[ -n $file ]] || die 'Usage: seedtunnel restore FILE'
     [[ -r $file ]] || die 'File not found: %s' "$file"
@@ -1491,8 +1497,10 @@ restore_main() {
         backup_cleanup
         die 'Unreadable archive.'
     fi
-    # Nothing else than what seedtunnel saves is extracted
+    # Nothing else than what seedtunnel saves is extracted, and nothing that
+    # goes up out of it (« etc/seedtunnel/../../tmp/… »)
     bad=$(grep -vE "$BACKUP_ALLOWED" <<<"$list" || true)
+    if [[ -z $bad ]]; then bad=$(grep -E '(^|/)\.\.(/|$)' <<<"$list" || true); fi
     if [[ -n $bad ]]; then
         backup_cleanup
         die 'Archive refused: unexpected path "%s"' "${bad%%$'\n'*}"
@@ -1558,13 +1566,15 @@ restore_main() {
         say 'The SFTP account %s takes back the name of the backup: %s.' "$RESTORE_RENAME_FROM" "$RESTORE_RENAME_TO"
     fi
     echo
+    # with a seedbox, its SFTP account: the programs that use it closed first
+    if grep -qx 'etc/seedtunnel/seedbox.conf' <<<"$list"; then warning=("$(sftp_programs_warning)"); fi
     # a copy is kept only when there are settings to keep (none on a new
     # server)
     if restore_has_settings "$APP_STATE_DIR"; then
-        danger "$(t 'Restore a backup')" "$(t 'The current settings of seedtunnel are replaced by those of the backup (a copy of them is kept in /etc).')"
+        danger "$(t 'Restore a backup')" "$(t 'The current settings of seedtunnel are replaced by those of the backup (a copy of them is kept in /etc).')" "${warning[@]}"
         confirm 'Restore? The current settings of seedtunnel will be replaced' n || agreed=0
     else
-        danger "$(t 'Restore a backup')" "$(t 'The settings of the backup are put in place: this server has none of its own yet.')"
+        danger "$(t 'Restore a backup')" "$(t 'The settings of the backup are put in place: this server has none of its own yet.')" "${warning[@]}"
         confirm 'Restore the backup on this server?' n || agreed=0
     fi
     if ((!agreed)); then

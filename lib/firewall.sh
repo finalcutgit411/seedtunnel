@@ -535,6 +535,38 @@ firewall_new_ssh_login() {
     return 1
 }
 
+# firewall_duration SECONDS — « 1 min 32 s », « 45 s »
+firewall_duration() {
+    if (($1 >= 60)); then
+        printf '%s min %s s' $(($1 / 60)) $(($1 % 60))
+    else
+        printf '%s s' "$(($1 > 0 ? $1 : 0))"
+    fi
+}
+
+# What to do while the rules are on trial, in a frame: a new SSH connection.
+# Through the VPN, it proves something only if this session comes through it
+# too (firewall_new_ssh_login): said only when there is a VPN.
+firewall_trial_box() {
+    local -a lines
+    lines=("$(t 'Open a NEW SSH connection to this server (another PuTTY window, for example) and log in, without closing this one: it proves that you can still get in with the firewall.')")
+    if vpn_installed; then
+        lines+=("$(t 'Through the public address of the server, it is always enough. Through the VPN (%s), only if this window goes through the VPN too.' "$VPN_SUBNET.1")")
+    fi
+    lines+=("$(t 'Without it, the firewall undoes itself in 2 minutes.')")
+    ui_box info "$(t 'New SSH connection')" "${lines[@]}"
+}
+
+# « yes » without a new SSH login seen: in a red frame, with the time left
+firewall_no_login_box() {
+    local -a lines
+    lines=("$(t 'seedtunnel has seen none since the rules were put on trial.')")
+    lines+=("$(t 'Open a NEW window (keep this one), log in, then type "yes" again.')")
+    if vpn_installed; then lines+=("$(t 'Through the VPN, it only counts if this window goes through the VPN too.')"); fi
+    lines+=("$(t 'Time left: %s.' "$(firewall_duration "$1")")")
+    ui_box bad "$(t 'No new SSH connection yet')" "${lines[@]}"
+}
+
 # « yes » keeps the rules only once a new SSH login went through them; any
 # other answer, or no proof before the automatic undo, cancels
 firewall_wait_confirmation() {
@@ -545,7 +577,9 @@ firewall_wait_confirmation() {
         IFS= read -r -t "$left" -p "$(t 'Does it work? Type "yes" to keep the firewall:') " answer || return 1
         [[ ${answer,,} == yes || ${answer,,} == oui ]] || return 1
         if firewall_new_ssh_login "$start"; then return 0; fi
-        warn 'No new SSH login was seen since the rules were applied: open a NEW SSH connection to this server, then type "yes" again. From the Internet it always counts; through the VPN, only if this session goes through the VPN too.'
+        echo
+        firewall_no_login_box "$((start + 110 - $(date +%s)))"
+        echo
     done
 }
 
@@ -585,8 +619,8 @@ firewall_enable() {
         run 'Applying the rules (temporarily)' nft -f "$FIREWALL_CANDIDATE"
         start=$(date +%s)
         echo
-        say 'Now open a NEW SSH connection to this server, without closing this one.'
-        say 'From the Internet it always counts; through the VPN, only if this session goes through the VPN too.'
+        firewall_trial_box
+        echo
         if firewall_wait_confirmation "$start"; then
             systemctl stop "$FIREWALL_ROLLBACK_UNIT.timer" &>/dev/null || true
             # the automatic undo must really be cancelled before the new rules

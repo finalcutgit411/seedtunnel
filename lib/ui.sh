@@ -865,7 +865,8 @@ ui_table() {
 
 # ui_box LEVEL TITLE [LINE…] — framed message: bad (red, « ! »), ok (green,
 # « ✔ »: it is done), good (green, « ● »: a card, a summary before an
-# action), warn (yellow), info (pink). Long lines are wrapped.
+# action), warn (yellow), info (pink). Long lines are wrapped, never before a
+# « : » nor inside « … » (ui_glue).
 ui_box() {
     local level=$1 title=$2 mark line part width inner
     shift 2
@@ -889,9 +890,10 @@ ui_box() {
     ui_repeat ─ $((width - UI_LEN - 7))
     printf '  %s┌─ %s%s %s%s %s┐%s\n' "$UI_COLOR" "$C_BOLD" "$mark" "$title" "$C_RESET$UI_COLOR" "$UI_REPEAT" "$C_RESET"
     for line in "$@"; do
-        ui_wrap "$line" "$inner"
+        ui_glue "$line"
+        ui_wrap "$UI_GLUED" "$inner"
         for part in "${UI_LINES[@]}"; do
-            ui_pad "$part" "$inner"
+            ui_pad "${part//$'\x01'/ }" "$inner"
             printf '  %s│%s %s %s│%s\n' "$UI_COLOR" "$C_RESET" "$UI_PAD" "$UI_COLOR" "$C_RESET"
         done
     done

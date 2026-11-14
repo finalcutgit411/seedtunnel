@@ -319,6 +319,34 @@ domain_change_back_when_name_points_elsewhere() (
     domain_untouched
 )
 
+# The screen: what the seedbox is now in a green frame (its certificate, its
+# end and renewal with Let's Encrypt, the public IP), then the two choices
+domain_change_screen() (
+    domain_menu_load
+    colors_init off
+    UI_COLUMNS=80
+    certificate_days_left() { echo 76; }
+    answers ""
+    seedbox_change_domain >"$WORK/domain.out" 2>&1
+    cat "$WORK/domain.out"
+    local out
+    out=$(<"$WORK/domain.out")
+    [[ $out == *"┌─ ● Right now"*"│ Address      https://old.example.org/"*"│ Certificate  Let's Encrypt"*"│ Expires      2027-01-29 (in 76 days)"*"│ Renewed      automatically"*"│ Public IP    203.0.113.10"* ]] || return 1
+    [[ $out == *"New name of the seedbox, at your choice:"*"● a domain name (yours, or the one given by the provider"*"● or the IP address of the server: self-signed certificate"* ]] || return 1
+    # the address looked for before the screen, not on it
+    [[ ${out#*Right now} != *"Looking for the public IP address"* ]] || return 1
+    # self-signed: said so, nothing about an end or a renewal
+    SEEDBOX_CERTIFICATE=selfsigned
+    SEEDBOX_DOMAIN=203.0.113.10
+    answers ""
+    seedbox_change_domain >"$WORK/domain.out" 2>&1
+    out=$(<"$WORK/domain.out")
+    [[ $out == *"│ Certificate  self-signed (browser warning to accept)"* && $out != *Expires* && $out != *Renewed* ]] || {
+        printf '%s\n' "$out"
+        return 1
+    }
+)
+
 domain_change_applied_once_confirmed() (
     domain_menu_load
     confirm() { return 0; }
@@ -396,6 +424,40 @@ firewall_change_confirmed_becomes_permanent() (
     firewall_was_on
     firewall_enable <<<"yes" >"$WORK/fw/out" 2>&1
     [[ $(<"$FIREWALL_RULES") == "new rules" && ! -e $FIREWALL_CANDIDATE ]] && firewall_enabled
+)
+
+# On trial: what to do in a pink frame; « yes » before any new SSH login: a
+# red frame with the time left, and the question again; the VPN said only when
+# there is one
+firewall_trial_frames() (
+    firewall_trial_load
+    colors_init off
+    UI_COLUMNS=80
+    vpn_installed() { return 0; }
+    # no login the first time, one the second time
+    journalctl() {
+        if [[ -e $WORK/fw/second ]]; then
+            echo "Accepted publickey for admin from 203.0.113.5 port 50000 ssh2: ED25519 SHA256:x"
+        else
+            touch "$WORK/fw/second"
+        fi
+    }
+    printf 'yes\nyes\n' | firewall_enable >"$WORK/fw/out" 2>&1
+    cat "$WORK/fw/out"
+    firewall_enabled || return 1
+    grep -q "┌─ ● New SSH connection" "$WORK/fw/out" && grep -q "┌─ ! No new SSH connection yet" "$WORK/fw/out" \
+        && grep -q "the VPN (10.8.0.1), only if this window" "$WORK/fw/out" \
+        && grep -qE "│ Time left: 1 min [0-9]+ s\. +│" "$WORK/fw/out" || return 1
+    # without the VPN: nothing about it
+    firewall_trial_load
+    colors_init off
+    vpn_installed() { return 1; }
+    printf 'yes\n' | firewall_enable >"$WORK/fw/out" 2>&1
+    grep -q "New SSH connection" "$WORK/fw/out" && ! grep -q "Through the" "$WORK/fw/out" || {
+        cat "$WORK/fw/out"
+        return 1
+    }
+    [[ $(firewall_duration 92) == "1 min 32 s" && $(firewall_duration 45) == "45 s" && $(firewall_duration -3) == "0 s" ]]
 )
 
 # --- firewall: every change of state checked ------------------------------
@@ -1614,14 +1676,77 @@ transmission_scripts_turned_off() (
         printf '%s\n' '{"script-torrent-done-enabled": true, "script-torrent-done-filename": "/srv/seedbox/documents/x"}' >"$file"
         dpkg-query() { echo "$tested"; }
         seedbox_apply_transmission &>/dev/null || return 1
+        # turned off, and the name of the program set emptied too
         case $tested in
-            3.*) [[ $(jq -c '[."script-torrent-done-enabled", has("script-torrent-added-enabled"), has("script-torrent-done-seeding-enabled")]' "$file") == '[false,false,false]' ]] ;;
-            *) [[ $(jq -c '[."script-torrent-done-enabled", ."script-torrent-added-enabled", ."script-torrent-done-seeding-enabled"]' "$file") == '[false,false,false]' ]] ;;
+            3.*) [[ $(jq -c '[."script-torrent-done-enabled", ."script-torrent-done-filename", has("script-torrent-added-enabled"), has("script-torrent-done-seeding-enabled")]' "$file") == '[false,"",false,false]' ]] ;;
+            *) [[ $(jq -c '[."script-torrent-done-enabled", ."script-torrent-added-enabled", ."script-torrent-done-seeding-enabled", ."script-torrent-done-filename", ."script-torrent-added-filename", ."script-torrent-done-seeding-filename"]' "$file") == '[false,false,false,"","",""]' ]] ;;
         esac || {
             echo "$tested: $(<"$file")"
             return 1
         }
     done
+)
+
+# The umask of Transmission compared by its value: the text of Transmission 4
+# (« "002" ») is right for Transmission 4, but Transmission 3 does not read it
+# (and writes 0 in its place: downloads writable by every account). Settings of
+# Transmission 4 restored on Debian 12 are written again with 2; 0 always is.
+transmission_umask_by_version() (
+    load
+    local file="$WORK/settings-umask.json" tested start
+    TRANSMISSION_DROPIN="$WORK/dropin-umask/seedtunnel.conf"
+    TRANSMISSION_STATE_DIR="$WORK/tr-state-umask"
+    SEEDBOX_DATA_DIR="$WORK/data"
+    SEEDBOX_USER=lancelot
+    SEEDBOX_HASH_TRANSMISSION='{0123456789abcdef'
+    mkdir -p "$TRANSMISSION_STATE_DIR"
+    transmission_settings_file() { echo "$file"; }
+    diskguard_stopped() { return 1; }
+    chown() { :; }
+    systemctl() { echo "systemctl $*" >>"$WORK/umask-calls"; }
+    for tested in "4.1.1+dfsg-1ubuntu1.1" "4.0.6-1" "3.00-2.1+deb12u1"; do
+        dpkg-query() { echo "$tested"; }
+        for start in '"002"' 0 2; do
+            # every other setting already right (a first run puts them)
+            rm -f "$file"
+            seedbox_apply_transmission &>/dev/null || return 1
+            jq --argjson u "$start" '.umask = $u' "$file" >"$file.x" && mv "$file.x" "$file"
+            : >"$WORK/umask-calls"
+            seedbox_apply_transmission &>/dev/null || return 1
+            case $tested:$start in
+                # already right: nothing written, Transmission not stopped
+                4.*:'"002"' | *:2)
+                    ! grep -q "stop transmission-daemon" "$WORK/umask-calls" && [[ $(jq -c .umask "$file") == "$start" ]]
+                    ;;
+                *) grep -q "stop transmission-daemon" "$WORK/umask-calls" && [[ $(jq -c .umask "$file") == 2 ]] ;;
+            esac || {
+                echo "$tested, umask $start: $(jq -c .umask "$file")"
+                cat "$WORK/umask-calls"
+                return 1
+            }
+        done
+    done
+    # the name of the setting in the log, when it was wrong
+    grep -q "settings to change: umask" "$APP_LOG"
+)
+
+# Diagnostics: Transmission running with a umask that lets every account write
+# its downloads (said only then)
+doctor_transmission_umask_checked() (
+    load
+    transmission_process_umask() { echo 0002; }
+    DOCTOR_WARNINGS=0
+    doctor_transmission_umask >"$WORK/umask.out" 2>&1
+    ((DOCTOR_WARNINGS == 0)) && [[ ! -s $WORK/umask.out ]] || return 1
+    transmission_process_umask() { echo 0000; }
+    doctor_transmission_umask >"$WORK/umask.out" 2>&1
+    cat "$WORK/umask.out"
+    ((DOCTOR_WARNINGS == 1)) && grep -q "writable by every account (umask 0000)" "$WORK/umask.out" || return 1
+    # not running: nothing said
+    transmission_process_umask() { :; }
+    DOCTOR_WARNINGS=0
+    doctor_transmission_umask >"$WORK/umask.out" 2>&1
+    ((DOCTOR_WARNINGS == 0)) && [[ ! -s $WORK/umask.out ]]
 )
 
 # Nothing run from the folders where Transmission or the SFTP account write;
@@ -2115,6 +2240,27 @@ restore_refuses_links() (
     if (restore_main "$WORK/links.enc") >"$WORK/links.out" 2>&1; then return 1; fi
     cat "$WORK/links.out"
     grep -q "is a link, a program or a special file" "$WORK/links.out"
+)
+
+# A path that goes up (« etc/seedtunnel/../../tmp/… ») is refused before
+# anything is extracted, as a path out of the list (GNU tar would stop it too,
+# but later and less clearly)
+restore_refuses_going_up() (
+    restore_archive_load up
+    python3 - "$RESTORE_ROOT" "$WORK/up.tar.gz" <<'PY'
+import io, sys, tarfile
+root, out = sys.argv[1], sys.argv[2]
+with tarfile.open(out, "w:gz") as tar:
+    tar.add(root + "/etc/seedtunnel", arcname="etc/seedtunnel")
+    data = b"x\n"
+    info = tarfile.TarInfo("etc/seedtunnel/../../tmp/st-up")
+    info.size = len(data)
+    tar.addfile(info, io.BytesIO(data))
+PY
+    openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt -pass pass:"a test passphrase" -in "$WORK/up.tar.gz" -out "$WORK/up.enc"
+    if (restore_main "$WORK/up.enc") >"$WORK/up.out" 2>&1; then return 1; fi
+    cat "$WORK/up.out"
+    grep -q 'Archive refused: unexpected path "etc/seedtunnel/../../tmp/st-up"' "$WORK/up.out" && ! grep -q "Extracting the archive" "$WORK/up.out"
 )
 
 restore_accepts_letsencrypt_links() (
@@ -3176,11 +3322,17 @@ vpn_port_change_through_vpn() (
 
 firewall_message_says_rule() (
     firewall_trial_load
-    # no new login: « yes » is refused, and the rule is said
+    colors_init off
+    UI_COLUMNS=80
+    vpn_installed() { return 0; }
+    # no new login: « yes » is refused, and the rule is said (before, and with
+    # the refusal)
     journalctl() { :; }
     firewall_enable <<<"yes" >"$WORK/fw/out" 2>&1
     cat "$WORK/fw/out"
-    (($(grep -c "through the VPN, only if this session goes through the VPN too" "$WORK/fw/out") == 2))
+    grep -q "Through the public address of the server, it is always enough" "$WORK/fw/out" \
+        && (($(grep -c "only if this window goes through the VPN too" "$WORK/fw/out") == 1)) \
+        && (($(grep -c "it only counts if this window goes through the VPN too" "$WORK/fw/out") == 1))
 )
 
 backup_new_passphrase_warns() (
@@ -5715,7 +5867,7 @@ restore_picks_a_backup_by_number() (
     BACKUP_COPIED=()
     answers ""
     backup_pick_file file >"$WORK/pick.out" 2>&1
-    (($? == 1)) && grep -q "No backup found in $WORK/pick/none, nor in /root and /home." "$WORK/pick.out"
+    (($? == 1)) && grep -q "No backup found in $WORK/pick/none, nor directly in /root or in a folder of /home." "$WORK/pick.out"
 )
 
 # My backups: the list numbered (by command too), one downloaded by its
@@ -5902,9 +6054,15 @@ bans_load() {
     back_load
     NOW=$(date +%s)
     systemctl() { [[ $* == "is-active --quiet fail2ban" ]]; }
+    FAIL2BAN_SETTLE_DELAY=0
     # end of a ban in N seconds, as fail2ban writes it
     ban_line() { printf '%s \t%s + %s = %s\n' "$1" "$(date -d "@$((NOW - 60))" '+%F %T')" "$2" "$(date -d "@$((NOW + $3))" '+%F %T')"; }
     fail2ban-client() {
+        # an address unbanned is no longer banned
+        if [[ $1 == banned ]] && grep -qxF "unban $2" "$WORK/back-calls" 2>/dev/null; then
+            echo "[[]]"
+            return 0
+        fi
         case "$*" in
             "get sshd banip --with-time")
                 ban_line 203.0.113.7 3600 3000
@@ -5960,8 +6118,47 @@ unban_checks_the_address() (
     grep -q "1.2.3.4 is not banned right now: nothing to do." "$WORK/unban.out" && [[ ! -s $WORK/back-calls ]] || return 1
     fail2ban_unban 2001:db8::17 >"$WORK/unban.out" 2>&1 || return 1
     grep -qx "unban 2001:db8::17" "$WORK/back-calls" || return 1
+    grep -q "Checking that 2001:db8::17 stays unbanned… ok" "$WORK/unban.out" || return 1
     # unban does not reset what fail2ban counted: said
-    grep -q "one more mistake bans 2001:db8::17 again" "$WORK/unban.out"
+    grep -q "a few more mistakes within these 10 minutes ban 2001:db8::17 again" "$WORK/unban.out" || return 1
+    # without an address: how to use it, nothing done
+    : >"$WORK/back-calls"
+    seedbox_require_installed() { :; }
+    if (seedbox_cli unban) >"$WORK/unban.out" 2>&1; then return 1; fi
+    grep -q "Usage: seedtunnel seedbox unban IP" "$WORK/unban.out" && [[ ! -s $WORK/back-calls ]]
+)
+
+# seedbox unban right after a ban: recidive bans the address again a moment
+# later (it reads the ban in the log of fail2ban): seen, unbanned again
+unban_again_after_recidive() (
+    bans_load
+    FAIL2BAN_SETTLE_DELAY=0
+    : >"$WORK/back-calls"
+    fail2ban-client() {
+        case "$*" in
+            "banned 203.0.113.7")
+                case $(wc -l <"$WORK/back-calls") in
+                    0) echo "[['sshd']]" ;;
+                    1) echo "[['recidive']]" ;;
+                    *) echo "[[]]" ;;
+                esac
+                ;;
+            unban*) echo "unban $2" >>"$WORK/back-calls" ;;
+        esac
+    }
+    fail2ban_unban 203.0.113.7 >"$WORK/unban.out" 2>&1 || return 1
+    cat "$WORK/unban.out"
+    [[ $(grep -cx "unban 203.0.113.7" "$WORK/back-calls") == 2 ]] || return 1
+    grep -q "banned again (\[\['recidive'\]\]), unbanned again" "$APP_LOG" || return 1
+    # banned again each time: said as a failure, not as done
+    fail2ban-client() {
+        case "$*" in
+            banned*) echo "[['recidive']]" ;;
+            unban*) echo "unban $2" >>"$WORK/back-calls" ;;
+        esac
+    }
+    if (fail2ban_unban 203.0.113.7) >"$WORK/unban.out" 2>&1; then return 1; fi
+    grep -q "Checking that 203.0.113.7 stays unbanned… failed" "$WORK/unban.out"
 )
 
 bans_none_or_fail2ban_stopped() (
@@ -5983,6 +6180,10 @@ seedbox_removal_log_titles() (
         && declare -f seedbox_uninstall | grep -q "seedbox_letsencrypt_delete" \
         && declare -f seedbox_uninstall | grep -q "log_run 'Stopping the download links in progress' systemctl stop" \
         && ! declare -f seedbox_uninstall | grep -q 'APP_LOG' || return 1
+    # python3-systemd (for fail2ban) removed too, on its own: another program
+    # that needs it keeps only it, not the rest of the seedbox
+    declare -f seedbox_uninstall | grep -qx ' *apt_purge python3-systemd;\?' \
+        && ! declare -f seedbox_uninstall | grep 'apt_purge transmission-daemon' | grep -q python3-systemd || return 1
     SEEDBOX_USER=lancelot
     SEEDBOX_DATA_DIR="$WORK/no-data"
     id() { return 0; }
@@ -6157,6 +6358,15 @@ weekly_backup_off_asked() (
     grep -q -- "--yes" "$WORK/off.out" && ! grep -q disable "$WORK/off-calls" || return 1
     OPT_YES=1
     (backup_cli auto off) >/dev/null 2>&1 </dev/null && grep -qx disable "$WORK/off-calls" || return 1
+    # already off, nothing of it left: said, nothing asked nor done (even
+    # without --yes)
+    backup_auto_enabled() { return 1; }
+    BACKUP_TIMER="$WORK/off-none/seedtunnel-backup.timer"
+    BACKUP_PASSPHRASE_FILE="$WORK/off-none/backup.passphrase"
+    : >"$WORK/off-calls"
+    OPT_YES=0
+    (backup_cli auto off) >"$WORK/off.out" 2>&1 </dev/null || return 1
+    grep -q "The weekly backup is already off: nothing to do." "$WORK/off.out" && [[ ! -s $WORK/off-calls ]] || return 1
     # removing the VPN and the seedbox turns it off without a question
     declare -f backup_auto_stop_if_unused | grep -q 'backup_auto_disable;'
 )
@@ -6838,6 +7048,8 @@ restore_keeps_aside_only_settings() (
     [[ -z $(compgen -G "$APP_STATE_DIR.before-restore-*") ]] && ! grep -q "Once everything works" "$WORK/aside.out" || return 1
     # nothing kept: not said before either
     grep -q "this server has none of its own yet" "$WORK/aside.out" && ! grep -q "a copy of them is kept" "$WORK/aside.out" || return 1
+    # no seedbox in the backup: nothing said about WinSCP / FileZilla
+    ! grep -q "Close WinSCP / FileZilla first" "$WORK/aside.out" || return 1
     # now a server with settings: kept aside, and how to delete them said
     restore_main "$WORK/aside.enc" >"$WORK/aside.out" 2>&1 || {
         cat "$WORK/aside.out"
@@ -6850,6 +7062,18 @@ restore_keeps_aside_only_settings() (
         && grep -q "The settings it replaced are kept in $previous" "$WORK/aside.out" \
         && grep -q "delete them in Backup / restore › My backups, or:" "$WORK/aside.out" \
         && grep -qxF "  seedtunnel restore clean" "$WORK/aside.out" && ! grep -q "rm -rf" "$WORK/aside.out"
+)
+
+# A backup with a seedbox: WinSCP / FileZilla to close first, said in the frame
+# before the question (its SFTP account comes back meanwhile)
+restore_says_close_sftp_programs() (
+    restore_archive_load sftp
+    printf 'SEEDBOX_USER=lancelot\n' >"$RESTORE_ROOT/etc/seedtunnel/seedbox.conf"
+    restore_archive_make sftp
+    confirm() { return 1; }
+    (restore_main "$WORK/sftp.enc") >"$WORK/sftp.out" 2>&1
+    cat "$WORK/sftp.out"
+    grep -q "Close WinSCP / FileZilla first" "$WORK/sftp.out"
 )
 
 # Clock not synchronized in the first minutes after a start: said as being
@@ -7106,6 +7330,8 @@ removal_says_weekly_passphrase_deleted() (
     vpn_installed() { return 1; }
     seedbox_uninstall >"$WORK/removal.out" 2>&1 || return 1
     grep -q "its passphrase saved on the server is deleted" "$WORK/removal.out" || return 1
+    # its SFTP account goes: WinSCP / FileZilla to close first, said
+    grep -q "Close WinSCP / FileZilla first: their automatic reconnections would be counted as failed logins" "$WORK/removal.out" || return 1
     # the weekly backup off: nothing to say
     backup_auto_enabled() { return 1; }
     seedbox_uninstall >"$WORK/removal.out" 2>&1 || return 1
@@ -7277,6 +7503,42 @@ CLIENT_PRIVATE_KEY=yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk=
 EOF
     vpn_generate_client_conf telephone-salon >"$VPN_CLIENTS_DIR/telephone-salon.conf"
 }
+
+# The comments of the file of a client in the language of seedtunnel; the
+# settings themselves the same in every language
+client_file_comments_translated() (
+    # no QR code here: qrencode not needed
+    qrencode() { :; }
+    qr_client_load || return 1
+    local english french
+    english=$(vpn_generate_client_conf telephone-salon) || return 1
+    i18n_load fr
+    french=$(vpn_generate_client_conf telephone-salon) || return 1
+    printf '%s\n' "$french"
+    grep -qxF '# seedtunnel — client « telephone-salon » — IP 10.8.0.253 — port ouvert 60252' <<<"$french" \
+        && grep -qxF "# ::/0 envoie aussi l'IPv6 dans le tunnel (où il est bloqué) : aucune fuite IPv6" <<<"$french" \
+        && grep -qxF '# Garde le tunnel ouvert derrière une box : nécessaire pour le port ouvert' <<<"$french" || return 1
+    [[ $(grep -v '^#' <<<"$english") == "$(grep -v '^#' <<<"$french")" ]] && grep -q '^# seedtunnel — client "telephone-salon"' <<<"$english"
+)
+
+# Frames: a line wrapped never before « : », « ? », « ! », « ; », « » », nor
+# after « « » (French spacing), and the line keeps its width
+box_keeps_french_punctuation() (
+    load
+    colors_init off
+    UI_COLUMNS=40
+    ui_width
+    local out
+    out=$(ui_box bad "Titre" "Par l'adresse publique du serveur : elle suffit toujours. Tapez de nouveau « oui » maintenant ?")
+    printf '%s\n' "$out"
+    ! grep -qE '│ (:|\?|»)' <<<"$out" && ! grep -qE '« │|«$' <<<"$out" || return 1
+    local line widths=""
+    while IFS= read -r line; do
+        ui_len "$line"
+        widths+=" $UI_LEN"
+    done <<<"$out"
+    [[ $(tr ' ' '\n' <<<"$widths" | sed '/^$/d' | sort -u | wc -l) == 1 ]] && ! grep -q $'\x01' <<<"$out"
+)
 
 # The widest line of QR code (its squares) in what was shown
 qr_widest() {
@@ -7684,6 +7946,16 @@ seedbox_login_and_sftp_screens() (
     out=$(seedbox_sftp_config 2>&1)
     [[ $out == *"│ Host         seed.example.net"*"sftp://lancelot;fingerprint=x@seed.example.net:2222/"* ]] || return 1
     [[ $out == *"seedtunnel seedbox sftp-config winscp"*"seedtunnel seedbox sftp-config filezilla"*"seedtunnel seedbox sftp-key new"* && $out != *"[1]"* ]] || return 1
+    # the profile of FileZilla: the frame, but not the address for WinSCP;
+    # the one of WinSCP: both
+    sftp_profile_share() { echo "profile of $1"; }
+    out=$(seedbox_sftp_config filezilla 2>&1)
+    [[ $out == *"│ Host         seed.example.net"*"profile of filezilla"* && $out != *"sftp://"* && $out != *"WinSCP:"* ]] || {
+        printf '%s\n' "$out"
+        return 1
+    }
+    out=$(seedbox_sftp_config winscp 2>&1)
+    [[ $out == *"sftp://lancelot;fingerprint=x@seed.example.net:2222/"*"profile of winscp"* ]] || return 1
     # a request that is not known: refused
     seedbox_require_installed() { :; }
     out=$(seedbox_cli sftp-config cyberduck 2>&1) && return 1
@@ -8238,9 +8510,11 @@ check "domain menu: same name, certificate kept without a new request" domain_ch
 check "domain menu: warning and confirmation before replacing the certificate" domain_change_warns_before_replacing_certificate
 check "domain menu: B (or Q) goes back when the name points elsewhere" domain_change_back_when_name_points_elsewhere
 check "domain menu: new name applied once confirmed" domain_change_applied_once_confirmed
+check "domain: the seedbox now in a green frame (certificate, end, renewal, public IP), then the two choices" domain_change_screen
 check "firewall: change refused → previous rules back, boot file untouched" firewall_change_refused_restores_previous_rules
 check "firewall: first activation refused → no rules left" firewall_first_trial_refused_leaves_nothing
 check "firewall: change confirmed → becomes the rules loaded at boot" firewall_change_confirmed_becomes_permanent
+check "firewall on trial: what to do in a frame; « yes » without a new SSH login: a red frame with the time left" firewall_trial_frames
 check "VPN: a change refused by WireGuard is applied at the next run" vpn_change_failed_then_retried
 check "VPN: NAT rules loaded by systemd, wg0.conf runs no command (AppArmor, Ubuntu 26.04)" vpn_nat_loaded_by_systemd
 check "VPN: the clients cannot reach each other, nothing from outside the tunnel but replies and their open port" vpn_clients_isolated_and_protected
@@ -8286,10 +8560,12 @@ check "packages: kept if removing them would take another program" purge_kept_wh
 check "packages: list kept when the installed packages cannot be read" registry_kept_when_list_unreadable
 check "Transmission: settings write failing → previous ones whole, Transmission started" transmission_settings_failure_keeps_them
 check "Transmission: waits for the disk of the data" transmission_waits_for_data_disk
-check "Transmission: no program run at the end of a download (and when added, done seeding: Transmission 4)" transmission_scripts_turned_off
+check "Transmission: no program run at the end of a download (and when added, done seeding: Transmission 4), their names emptied" transmission_scripts_turned_off
+check "Transmission: umask compared by its value, the text of Transmission 4 written again for Transmission 3" transmission_umask_by_version
 check "Transmission: nothing run from the folders where it or SFTP write, settings private when it starts or stops" transmission_dropin_noexec_and_private
 check "Transmission: settings in 600 and its folder closed to the others after each run, by its own account" transmission_settings_made_private
 check "diagnostics: settings of Transmission readable by all, or a program set to run → warning" doctor_transmission_settings_checked
+check "diagnostics: Transmission running with a umask that lets every account write → warning" doctor_transmission_umask_checked
 check "SFTP: documents kept by the deletion of the account given back to it, never through a link nor to a download" sftp_documents_given_back
 check "ports 80/443: another program beside nginx is seen" web_ports_other_program_beside_nginx
 check "full disk: free space not measurable → said, Transmission left alone" diskguard_warns_when_unmeasurable
@@ -8470,13 +8746,14 @@ check "VPN clients: since when the VPN runs, or that it is stopped" vpn_table_sa
 check "DNS: going back changes nothing, the same DNS applies nothing" vpn_dns_can_go_back
 check "DNS: Quad9, Cloudflare, DNS4EU, AdGuard or other, from the menu and by command" vpn_dns_changed
 check "bans: address, jail and end of the ban, the soonest first; unbanned by number" bans_listed_with_their_end
-check "seedbox unban: an invalid address refused, one not banned said; once unbanned, the next mistake said to ban again" unban_checks_the_address
+check "seedbox unban: an invalid address refused, one not banned said, none: usage; once unbanned, checked again, and the next mistakes said to ban again" unban_checks_the_address
+check "seedbox unban: banned again by recidive right after, unbanned again; still banned: failed" unban_again_after_recidive
 check "bans: « no address banned », or fail2ban stopped" bans_none_or_fail2ban_stopped
-check "removing the seedbox: certificate, user and links under their own titles in the log" seedbox_removal_log_titles
+check "removing the seedbox: certificate, user and links under their own titles in the log; python3-systemd removed on its own" seedbox_removal_log_titles
 check "restore: torrents through watch/, whatever the version of Transmission (4.1 → 3 included)" restore_torrents_through_watch
 check "restore: Transmission stopped and started once" restore_stops_transmission_once
 check "diagnostics: a .torrent of watch/ unreadable by Transmission" doctor_sees_watch_unreadable
-check "weekly backup off: said and asked first, --yes without a terminal" weekly_backup_off_asked
+check "weekly backup off: said and asked first, --yes without a terminal; already off: said, nothing asked" weekly_backup_off_asked
 check "weekly backup off: the deletion of its passphrase said at the end, only if there was one" weekly_backup_off_says_passphrase_deleted
 check "the request for the password names nothing (« Restricted »)" password_request_names_nothing
 check "restore: a step that fails stops it, says how to go back, marker kept" restore_stops_when_a_step_fails
@@ -8504,6 +8781,8 @@ check "report: the SFTP account logged in is not an administrator, the DNS of th
 check "report: the SFTP account renamed is in the log, both names hidden" sftp_rename_in_log_hidden_in_report
 check "restore cut short: the way back puts back settings, SSH keys, certificate and torrents" restore_undo_puts_everything_back
 check "restore: the SFTP account renamed since the backup takes back its name, never another account, back on the way back" restore_takes_back_account_name
+check "restore: a backup with a seedbox says to close WinSCP / FileZilla first" restore_says_close_sftp_programs
+check "restore: a path that goes up refused before anything is extracted" restore_refuses_going_up
 check "restore: the settings replaced kept aside (and said before) only if there is something to go back to, how to delete them said" restore_keeps_aside_only_settings
 check "diagnostics: settings replaced by a finished restore said, with the command to delete them" doctor_reports_restore_leftovers
 check "menu: a backup copied into a home folder counts as in « backup list » (header, Latest)" menu_counts_copied_backups
@@ -8519,6 +8798,8 @@ check "diagnostics: a kernel installed since the start said, even without /run/r
 check "restore: magnet links put back through watch/ (Transmission 4), saved to add by hand (Transmission 3)" restore_magnet_links
 check "Transmission 4 and later take magnet links from watch/, Transmission 3 does not" transmission_magnets_from_version_4
 check "VPN: the QR code of a client fits in 80 columns, its file keeps its comments" vpn_qr_fits_80_columns
+check "VPN: the comments of the file of a client in the language of seedtunnel, its settings the same" client_file_comments_translated
+check "frames: French punctuation never alone at the start of a line" box_keeps_french_punctuation
 check "VPN: the QR code holds the same settings, without comments nor spaces" vpn_qr_text_keeps_the_settings
 check "VPN: window too small for the QR code: what to do is said instead" vpn_qr_window_too_small
 check "doctor: installed with an IP, one warning that asks for a domain name" doctor_ip_one_clear_warning

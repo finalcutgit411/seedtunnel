@@ -90,8 +90,8 @@ fr: Création de l'archive chiffrée
 en: Backup: %s
 fr: Sauvegarde : %s
 
-en: No backup found in %s, nor in /root and /home.
-fr: Aucune sauvegarde trouvée dans %s, ni dans /root et /home.
+en: No backup found in %s, nor directly in /root or in a folder of /home.
+fr: Aucune sauvegarde trouvée dans %s, ni directement dans /root ou dans un dossier de /home.
 
 en: No backup yet:  seedtunnel backup
 fr: Aucune sauvegarde pour l'instant :  seedtunnel backup
@@ -863,12 +863,6 @@ fr: Programmation de l'annulation automatique (2 min)
 en: Applying the rules (temporarily)
 fr: Application des règles (provisoire)
 
-en: Now open a NEW SSH connection to this server, without closing this one.
-fr: Ouvrez maintenant une NOUVELLE connexion SSH vers ce serveur, sans fermer celle-ci.
-
-en: From the Internet it always counts; through the VPN, only if this session goes through the VPN too.
-fr: Depuis Internet, elle compte toujours ; par le VPN, seulement si cette session passe aussi par le VPN.
-
 en: Does it work? Type "yes" to keep the firewall:
 fr: Elle fonctionne ? Tapez « oui » pour garder le pare-feu :
 
@@ -1231,12 +1225,6 @@ fr: Nom de domaine invalide : « %s »
 en: Seedbox available at %s (certificate %s)
 fr: Seedbox accessible sur %s (certificat %s)
 
-en: Right now: %s (certificate %s)
-fr: Actuellement : %s (certificat %s)
-
-en:   valid until %s, renewed automatically
-fr:   valable jusqu'au %s, renouvelé automatiquement
-
 en: Nothing to change: %s keeps its certificate.
 fr: Rien à changer : %s garde son certificat.
 
@@ -1297,8 +1285,14 @@ fr: Débannissement de %s
 en: %s is not banned right now: nothing to do.
 fr: %s n'est pas bannie en ce moment : rien à faire.
 
-en: Careful: fail2ban still counts the failures of the last 10 minutes; one more mistake bans %s again.
-fr: Attention : fail2ban compte encore les échecs des 10 dernières minutes ; une erreur de plus bannit de nouveau %s.
+en: Careful: fail2ban still counts the failures of the last 10 minutes: a few more mistakes within these 10 minutes ban %s again.
+fr: Attention : fail2ban compte encore les échecs des 10 dernières minutes : quelques erreurs de plus dans ces 10 minutes bannissent de nouveau %s.
+
+en: Checking that %s stays unbanned
+fr: Vérification que %s reste débannie
+
+en: Usage: seedtunnel seedbox unban IP
+fr: Utilisation : seedtunnel seedbox unban IP
 
 en: fail2ban does not answer (details in %s)   → seedtunnel seedbox restart
 fr: fail2ban ne répond pas (détails dans %s)   → seedtunnel seedbox restart
@@ -1732,9 +1726,6 @@ fr: Certificat accepté par les navigateurs pour %s
 en: The certificate served for %s is refused by browsers (curl code %s)   → seedtunnel seedbox domain %s
 fr: Le certificat servi pour %s est refusé par les navigateurs (code curl %s)   → seedtunnel seedbox domain %s
 
-en: No new SSH login was seen since the rules were applied: open a NEW SSH connection to this server, then type "yes" again. From the Internet it always counts; through the VPN, only if this session goes through the VPN too.
-fr: Aucune nouvelle connexion SSH vue depuis l'application des règles : ouvrez une NOUVELLE connexion SSH vers ce serveur, puis tapez de nouveau « oui ». Depuis Internet, elle compte toujours ; par le VPN, seulement si cette session passe aussi par le VPN.
-
 en: Removing the dependencies installed with them
 fr: Suppression des dépendances installées avec eux
 
@@ -2144,6 +2135,9 @@ fr: AppArmor autorise Transmission à écrire dans %s
 en: Transmission runs a program that seedtunnel did not set (%s): set through the web interface?   → seedtunnel apply
 fr: Transmission lance un programme que seedtunnel n'a pas réglé (%s) : réglé par l'interface web ?   → seedtunnel apply
 
+en: Transmission makes its downloads writable by every account (umask %s)   → seedtunnel apply
+fr: Transmission rend ses téléchargements modifiables par tous les comptes (umask %s)   → seedtunnel apply
+
 en: The settings of Transmission (hash of the password) or its folder can be read by every account   → seedtunnel apply
 fr: Les réglages de Transmission (empreinte du mot de passe) ou son dossier sont lisibles par tous les comptes   → seedtunnel apply
 
@@ -2201,6 +2195,9 @@ fr: SSH / SFTP : en attente de connexions (ssh.socket)
 
 en: Backup made on %s, restored on %s.
 fr: Sauvegarde faite sur %s, restaurée sur %s.
+
+en: The weekly backup is already off: nothing to do.
+fr: La sauvegarde hebdomadaire est déjà désactivée : rien à faire.
 
 en: Turn the weekly backup off
 fr: Désactiver la sauvegarde hebdomadaire
@@ -2856,3 +2853,81 @@ fr: Sans la passphrase, elle est irrécupérable.
 
 en: Download it now (one-time link)?
 fr: La télécharger maintenant (lien à usage unique) ?
+
+# --- 1.0.6 : fichier d'un client, pare-feu à l'essai, nom de domaine -------------
+
+en: # seedtunnel — client "%s" — IP %s — open port %s
+fr: # seedtunnel — client « %s » — IP %s — port ouvert %s
+
+en: # ::/0 also sends IPv6 into the tunnel (where it is blocked): no IPv6 leak
+fr: # ::/0 envoie aussi l'IPv6 dans le tunnel (où il est bloqué) : aucune fuite IPv6
+
+en: # Keeps the tunnel open behind a home router: needed for the open port
+fr: # Garde le tunnel ouvert derrière une box : nécessaire pour le port ouvert
+
+en: Close WinSCP / FileZilla first: their automatic reconnections would be counted as failed logins, and fail2ban could ban your address.
+fr: Fermez d'abord WinSCP / FileZilla : leurs reconnexions automatiques seraient comptées comme des échecs de connexion, et fail2ban pourrait bannir votre adresse.
+
+en: New SSH connection
+fr: Nouvelle connexion SSH
+
+en: Open a NEW SSH connection to this server (another PuTTY window, for example) and log in, without closing this one: it proves that you can still get in with the firewall.
+fr: Ouvrez une NOUVELLE connexion SSH vers ce serveur (une autre fenêtre PuTTY, par exemple) et connectez-vous, sans fermer celle-ci : elle prouve que vous pourrez encore entrer avec le pare-feu.
+
+en: Through the public address of the server, it is always enough. Through the VPN (%s), only if this window goes through the VPN too.
+fr: Par l'adresse publique du serveur, elle suffit toujours. Par le VPN (%s), seulement si cette fenêtre-ci passe aussi par le VPN.
+
+en: Without it, the firewall undoes itself in 2 minutes.
+fr: Sans elle, le pare-feu s'annule seul dans 2 minutes.
+
+en: No new SSH connection yet
+fr: Aucune nouvelle connexion SSH
+
+en: seedtunnel has seen none since the rules were put on trial.
+fr: seedtunnel n'en a vu aucune depuis la mise à l'essai des règles.
+
+en: Open a NEW window (keep this one), log in, then type "yes" again.
+fr: Ouvrez une NOUVELLE fenêtre (gardez celle-ci), connectez-vous, puis tapez de nouveau « oui ».
+
+en: Through the VPN, it only counts if this window goes through the VPN too.
+fr: Par le VPN, elle ne compte que si cette fenêtre-ci passe aussi par le VPN.
+
+en: Time left: %s.
+fr: Temps restant : %s.
+
+en: %s:
+fr: %s :
+
+en: Right now
+fr: Actuellement
+
+
+en: Expires
+fr: Expire le
+
+en: %s (in %s days)
+fr: %s (dans %s jours)
+
+en: Renewed
+fr: Renouvelé
+
+en: automatically
+fr: automatiquement
+
+en: Public IP
+fr: IP publique
+
+en: (browser warning to accept)
+fr: (alerte du navigateur à accepter)
+
+en: New name of the seedbox, at your choice:
+fr: Nouveau nom de la seedbox, au choix :
+
+en: Name of the seedbox, at your choice:
+fr: Nom de la seedbox, au choix :
+
+en: a domain name (yours, or the one given by the provider, e.g. vps-1234abcd.vps.ovh.net): Let's Encrypt certificate, trusted by browsers;
+fr: un nom de domaine (le vôtre, ou celui donné par l'hébergeur, ex. vps-1234abcd.vps.ovh.net) : certificat Let's Encrypt, reconnu par les navigateurs ;
+
+en: or the IP address of the server: self-signed certificate (the browser shows a warning to accept).
+fr: ou l'adresse IP du serveur : certificat auto-signé (le navigateur affiche une alerte à accepter).

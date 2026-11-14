@@ -91,14 +91,6 @@ text_en_share_steps_vpn() {
 EOF
 }
 
-text_en_seedbox_domain_help() {
-    cat <<'EOF'
-Domain name of the seedbox. Without a domain of your own, the provider often
-gives one (e.g. vps-1234abcd.vps.ovh.net). Otherwise, type the IP address:
-a self-signed certificate will be used (browser warning to accept).
-EOF
-}
-
 text_en_letsencrypt_failed_help() {
     cat <<EOF
   Common causes: port 80 blocked by the firewall of the provider, DNS not

@@ -59,8 +59,8 @@ SEEDBOX_NEW_PASSWORD=""
 # Settings imposed on Transmission. DHT, PEX, LPD and uTP are off: suited to
 # private trackers (can be changed in the web interface, Preferences). No
 # program run at the end of a download: anyone with the password of the web
-# interface could turn one on (Transmission 4 has two more: see
-# seedbox_apply_transmission).
+# interface could turn one on, and its name goes with it (Transmission 4 has
+# two more: see seedbox_apply_transmission).
 read -r -d '' TRANSMISSION_SETTINGS_FILTER <<'JQ' || true
 {
   "download-dir": $dl,
@@ -85,6 +85,7 @@ read -r -d '' TRANSMISSION_SETTINGS_FILTER <<'JQ' || true
   "lpd-enabled": false,
   "utp-enabled": false,
   "script-torrent-done-enabled": false,
+  "script-torrent-done-filename": "",
   "umask": 2
 }
 JQ
@@ -313,6 +314,17 @@ seedbox_ask_user() {
     ask_password SEEDBOX_NEW_PASSWORD
 }
 
+# The two kinds of name the seedbox can have, and the certificate of each
+seedbox_domain_choices() {
+    if [[ ${1-} == change ]]; then
+        ui_print_wrapped "  " "  " "$C_BOLD$(t 'New name of the seedbox, at your choice:')$C_RESET"
+    else
+        ui_print_wrapped "  " "  " "$C_BOLD$(t 'Name of the seedbox, at your choice:')$C_RESET"
+    fi
+    ui_print_wrapped "  $C_BRAND●$C_RESET " "    " "$(t "a domain name (yours, or the one given by the provider, e.g. vps-1234abcd.vps.ovh.net): Let's Encrypt certificate, trusted by browsers;")"
+    ui_print_wrapped "  $C_BRAND●$C_RESET " "    " "$(t 'or the IP address of the server: self-signed certificate (the browser shows a warning to accept).')"
+}
+
 # Asks for the domain name and checks that it points to this server.
 # Sets SEEDBOX_DOMAIN, and SEEDBOX_LETSENCRYPT: auto if Let's Encrypt has a
 # chance, otherwise no. An empty answer or B goes back, with status 1, and
@@ -320,7 +332,7 @@ seedbox_ask_user() {
 seedbox_ask_domain() {
     local ip=$1 mode=${2-} ips choice answer default=$SEEDBOX_DOMAIN
     if [[ $mode == change ]]; then default=""; fi
-    text seedbox_domain_help
+    seedbox_domain_choices "$mode"
     echo
     while true; do
         if [[ $mode == change ]]; then
@@ -488,16 +500,28 @@ transmission_desired_settings() {
         "\$ENV.SEEDTUNNEL_HASH as \$hash | $TRANSMISSION_SETTINGS_FILTER"
 }
 
-# Are the wanted settings already in place? (« umask » is ignored: Transmission
-# writes it back in its own way depending on the version)
+# « umask » compared by its value: Transmission 4 writes it as text in octal
+# (« "002" »), Transmission 3 as a number (2). Transmission 3 does not read the
+# text (settings of Transmission 4, brought back by a restore on Debian 12) and
+# writes 0 in its place: every file it downloads would then be writable by
+# every account. So the text counts only with Transmission 4. Anything else:
+# -1 (never the right value).
+TRANSMISSION_UMASK_JQ='def umask_value: if type == "number" then . elif type == "string" and $text_ok and test("^[0-7]+$") then (explode | map(. - 48) | reduce .[] as $x (0; . * 8 + $x)) else -1 end;'
+
+# true if Transmission reads « umask » written as text (4.0 and later)
+transmission_umask_text() {
+    if transmission_version_at_least 4.0.0~; then echo true; else echo false; fi
+}
+
+# Are the wanted settings already in place?
 transmission_settings_uptodate() {
     [[ -s $1 ]] || return 1
-    jq -e --slurpfile d <(printf '%s' "$2") '. as $c | $d[0] | del(.umask) | to_entries | all(.value == $c[.key])' "$1" &>/dev/null
+    jq -e --argjson text_ok "$(transmission_umask_text)" --slurpfile d <(printf '%s' "$2") "$TRANSMISSION_UMASK_JQ"' . as $c | $d[0] | (.umask | umask_value) == ($c.umask | umask_value) and (del(.umask) | to_entries | all(.value == $c[.key]))' "$1" &>/dev/null
 }
 
 # Names of the wanted settings that differ (for the log: never their values)
 transmission_settings_differences() {
-    jq -r --slurpfile d <(printf '%s' "$2") '. as $c | $d[0] | del(.umask) | to_entries[] | select(.value != $c[.key]) | .key' "$1" 2>/dev/null \
+    jq -r --argjson text_ok "$(transmission_umask_text)" --slurpfile d <(printf '%s' "$2") "$TRANSMISSION_UMASK_JQ"' . as $c | $d[0] | (if (.umask | umask_value) != ($c.umask | umask_value) then "umask" else empty end), (del(.umask) | to_entries[] | select(.value != $c[.key]) | .key)' "$1" 2>/dev/null \
         | paste -sd' ' - || true
 }
 
@@ -579,7 +603,7 @@ seedbox_apply_transmission() {
         desired=$(jq -c '. + {"preferred_transports": ["tcp"]}' <<<"$desired")
     fi
     if jq -e 'has("script-torrent-added-enabled")' "$settings" &>/dev/null || transmission_knows_more_scripts; then
-        desired=$(jq -c '. + {"script-torrent-added-enabled": false, "script-torrent-done-seeding-enabled": false}' <<<"$desired")
+        desired=$(jq -c '. + {"script-torrent-added-enabled": false, "script-torrent-added-filename": "", "script-torrent-done-seeding-enabled": false, "script-torrent-done-seeding-filename": ""}' <<<"$desired")
     fi
     install -d -m 755 "${TRANSMISSION_DROPIN%/*}"
     if write_if_changed "$TRANSMISSION_DROPIN" 644 root:root transmission_generate_dropin "$settings"; then
@@ -1494,8 +1518,11 @@ seedbox_sftp_config() {
     section 'SFTP connection (WinSCP, FileZilla)'
     seedbox_sftp_card "$port" "$fingerprint" "$keys_only"
     echo
-    text sftp_config_help
-    echo
+    # the address to paste is for WinSCP: not shown for FileZilla
+    if [[ ${1-} != filezilla ]]; then
+        text sftp_config_help
+        echo
+    fi
     case ${1-} in
         winscp | filezilla) sftp_profile_share "$1" "$port" ;;
         *)
@@ -2071,6 +2098,32 @@ seedbox_set_domain() {
     ok 'Seedbox available at %s (certificate %s)' "https://$SEEDBOX_DOMAIN/" "$(seedbox_certificate_label)"
 }
 
+# seedbox_domain_card IP 1|0 — the address of the seedbox now, its certificate
+# (its end and its renewal with Let's Encrypt: 1) and the public IP of the
+# server, in a green frame
+seedbox_domain_card() {
+    local ip=$1 letsencrypt=$2 certificate expiry days
+    if [[ $SEEDBOX_CERTIFICATE == selfsigned ]]; then
+        certificate="$C_YELLOW$(t 'self-signed')$C_RESET $(t '(browser warning to accept)')"
+    else
+        certificate=$(seedbox_certificate_label)
+    fi
+    ui_field_add "$(t 'Address')" "${C_CYAN}https://$SEEDBOX_DOMAIN/$C_RESET"
+    ui_field_add "$(t 'Certificate')" "$certificate"
+    if ((letsencrypt)); then
+        expiry=$(letsencrypt_expiry_date)
+        days=$(certificate_days_left "$LETSENCRYPT_DIR/cert.pem")
+        if [[ -n $expiry && -n $days ]]; then
+            ui_field_add "$(t 'Expires')" "$(t '%s (in %s days)' "$expiry" "$days")"
+        elif [[ -n $expiry ]]; then
+            ui_field_add "$(t 'Expires')" "$expiry"
+        fi
+        ui_field_add "$(t 'Renewed')" "$(t 'automatically')"
+    fi
+    ui_field_add "$(t 'Public IP')" "${ip:-$(t 'not found')}"
+    ui_box_fields good "$(t 'Right now')"
+}
+
 # Menu: change the domain. Nothing is touched before the end: an empty answer
 # goes back, and replacing a valid Let's Encrypt certificate is confirmed first
 # (Let's Encrypt limits how many certificates a name can get each week).
@@ -2078,17 +2131,14 @@ seedbox_change_domain() {
     local ip server had_letsencrypt=0
     local old_domain=$SEEDBOX_DOMAIN old_letsencrypt=$SEEDBOX_LETSENCRYPT old_server=$SEEDBOX_LETSENCRYPT_SERVER
     WENT_BACK=0
+    # the address first, under the menu: the screen comes once it is known
+    printf '\n  %s' "$(t 'Looking for the public IP address…')"
+    ip=$(public_ipv4)
+    echo
     banner
     section 'Domain name and HTTPS certificate'
-    say 'Right now: %s (certificate %s)' "https://$SEEDBOX_DOMAIN/" "$(seedbox_certificate_label)"
-    if [[ $SEEDBOX_CERTIFICATE != selfsigned ]] && letsencrypt_usable "$SEEDBOX_LETSENCRYPT_SERVER"; then
-        had_letsencrypt=1
-        say '  valid until %s, renewed automatically' "$(letsencrypt_expiry_date)"
-    fi
-    echo
-    printf '%s ' "$(t 'Looking for the public IP address…')"
-    ip=$(public_ipv4)
-    echo "${ip:-$(t 'not found')}"
+    if [[ $SEEDBOX_CERTIFICATE != selfsigned ]] && letsencrypt_usable "$SEEDBOX_LETSENCRYPT_SERVER"; then had_letsencrypt=1; fi
+    seedbox_domain_card "$ip" "$had_letsencrypt"
     echo
     if ! seedbox_ask_domain "$ip" change; then
         WENT_BACK=1
@@ -2123,6 +2173,15 @@ seedbox_change_domain() {
     seedbox_save
     echo
     ok 'Seedbox available at %s (certificate %s)' "https://$SEEDBOX_DOMAIN/" "$(seedbox_certificate_label)"
+}
+
+# Said before removing the seedbox and before a restore: the account of the
+# SFTP goes away (or comes back) meanwhile, and a WinSCP or FileZilla left open
+# tries again every few seconds. fail2ban counts each try as a failure (it
+# reads them again when it starts) and bans the address: every SSH session
+# from there is cut.
+sftp_programs_warning() {
+    t 'Close WinSCP / FileZilla first: their automatic reconnections would be counted as failed logins, and fail2ban could ban your address.'
 }
 
 FAIL2BAN_JAILS=(sshd nginx-http-auth recidive)
@@ -2214,8 +2273,30 @@ fail2ban_unban() {
         return 0
     fi
     run "$(t 'Unbanning %s' "$ip")" fail2ban-client unban "$ip"
+    run "$(t 'Checking that %s stays unbanned' "$ip")" fail2ban_unban_settle "$ip"
     # fail2ban keeps counting the failures it saw (unban does not reset them)
-    say 'Careful: fail2ban still counts the failures of the last 10 minutes; one more mistake bans %s again.' "$ip"
+    say 'Careful: fail2ban still counts the failures of the last 10 minutes: a few more mistakes within these 10 minutes ban %s again.' "$ip"
+}
+
+# Seconds before checking that an address just unbanned stays so (tests: 0)
+FAIL2BAN_SETTLE_DELAY=${FAIL2BAN_SETTLE_DELAY:-2}
+
+# fail2ban_unban_settle IP — recidive reads the bans of the other jails in the
+# log of fail2ban a moment after they are made: an address unbanned right
+# after its ban could be banned again by it, for a week. Checked a little
+# later (3 times at most) and unbanned again. Status 1: still banned.
+fail2ban_unban_settle() {
+    local ip=$1 jails try
+    for try in 1 2 3; do
+        sleep "$FAIL2BAN_SETTLE_DELAY"
+        jails=$(fail2ban-client banned "$ip") || return 1
+        [[ $jails == *[A-Za-z]* ]] || return 0
+        printf 'try %s: banned again (%s), unbanned again\n' "$try" "$jails"
+        fail2ban-client unban "$ip" || return 1
+    done
+    sleep "$FAIL2BAN_SETTLE_DELAY"
+    jails=$(fail2ban-client banned "$ip") || return 1
+    [[ $jails != *[A-Za-z]* ]]
 }
 
 fail2ban_bans_menu() {
@@ -2285,21 +2366,19 @@ seedbox_letsencrypt_delete() {
 
 seedbox_uninstall() {
     local delete_data=0 note
+    local -a lines=()
     banner
     section 'Remove the seedbox'
     # the last part removed: the weekly backup and its passphrase go too
     note=$(backup_removal_note vpn)
-    if ((INTERACTIVE)); then
-        if [[ -n $note ]]; then
-            danger "$(t 'Remove the seedbox')" "$(text seedbox_uninstall_help | tr '\n' ' ')" "$note"
-        else
-            danger "$(t 'Remove the seedbox')" "$(text seedbox_uninstall_help | tr '\n' ' ')"
-        fi
-    else
+    if ((INTERACTIVE)); then lines+=("$(text seedbox_uninstall_help | tr '\n' ' ')"); fi
+    if [[ -n $note ]]; then lines+=("$note"); fi
+    lines+=("$(sftp_programs_warning)")
+    if ((!INTERACTIVE)); then
         text seedbox_uninstall_help
         echo
-        if [[ -n $note ]]; then danger "$(t 'Remove the seedbox')" "$note"; fi
     fi
+    danger "$(t 'Remove the seedbox')" "${lines[@]}"
     if ! confirm 'Remove the seedbox?' n; then return 0; fi
     if ((INTERACTIVE)); then
         if confirm "$(t 'ALSO delete all the data in %s?' "$SEEDBOX_DATA_DIR")" n; then delete_data=1; fi
@@ -2331,6 +2410,9 @@ seedbox_uninstall() {
     rm -rf "$SEEDBOX_SSL_DIR" "$LETSENCRYPT_WEBROOT"
     systemctl daemon-reload 2>/dev/null || true
     apt_purge transmission-daemon transmission-common nginx nginx-common certbot fail2ban inotify-tools putty-tools
+    # installed for fail2ban; on its own: if another program needs it, only it
+    # is kept
+    apt_purge python3-systemd
     if ((delete_data)) && [[ -n $SEEDBOX_DATA_DIR && $SEEDBOX_DATA_DIR != / ]]; then
         run 'Deleting the data' rm -rf "${SEEDBOX_DATA_DIR:?}"
     fi
@@ -2489,7 +2571,8 @@ seedbox_cli() {
             ;;
         unban)
             seedbox_require_installed
-            fail2ban_unban "${1-}"
+            [[ -n ${1-} ]] || die 'Usage: seedtunnel seedbox unban IP'
+            fail2ban_unban "$1"
             ;;
         restart)
             seedbox_require_installed

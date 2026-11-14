@@ -209,6 +209,8 @@ Après 5 connexions ratées en 10 minutes, fail2ban bannit votre adresse pendant
 
 Votre adresse n'y est pas ? Cherchez une adresse IPv6 : beaucoup de box passent par IPv6.
 
+Avant de retirer la seedbox ou de restaurer une sauvegarde, fermez WinSCP et FileZilla : pendant ce temps, le compte SFTP disparaît, leurs reconnexions automatiques comptent comme des échecs, et votre adresse peut être bannie.
+
 <p align="center"><img src="screens/fr-bans.png" alt="Les adresses bannies et la fin de leur bannissement" width="640"></p>
 
 ### Demander de l'aide
