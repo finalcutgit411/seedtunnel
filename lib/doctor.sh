@@ -307,6 +307,73 @@ doctor_vpn_forward() {
     fi
 }
 
+# --- Rights, log, tokens of the links ------------------------------------------------
+
+# Under the title System: what root keeps is for root only, what root runs is
+# changed by root only (rights_* of common.sh), the log of seedtunnel cut.
+doctor_files() {
+    local open files list
+    open=$(rights_secrets_open)
+    if [[ -n $open ]]; then
+        list=$(paste -sd ' ' <<<"$open")
+        doctor_error 'Other accounts than root can open the secrets of seedtunnel (keys, passwords): %s   → seedtunnel apply' "$list"
+    else
+        doctor_ok 'Settings and secrets of seedtunnel readable by root only'
+    fi
+    files=$(rights_app_open)
+    if [[ -n $files ]]; then
+        doctor_error '%s file(s) of seedtunnel, run by root, can be changed by another account (%s…)   → seedtunnel apply' \
+            "$(wc -l <<<"$files")" "$(head -n 1 <<<"$files")"
+    else
+        doctor_ok 'Files of seedtunnel: only root can change them'
+    fi
+    if vpn_installed || seedbox_installed; then doctor_log_rotation; fi
+}
+
+# logrotate takes the rule of seedtunnel and cuts its log (Ubuntu: /var/log can
+# be written by the group syslog, and without « su » the log is skipped).
+# Debug mode: nothing cut, nothing written.
+doctor_log_rotation() {
+    local out
+    if [[ ! -f $LOGROTATE_FILE ]] || ! command -v logrotate >/dev/null; then
+        doctor_warn 'Log of seedtunnel never cut (rule of logrotate missing): it grows without end   → seedtunnel apply'
+        return 0
+    fi
+    out=$(timeout 20 logrotate -d "$LOGROTATE_FILE" 2>&1 || true)
+    if [[ $out == *"$APP_LOG"* && $out != *"error:"* ]]; then
+        doctor_ok 'Log of seedtunnel cut every month (logrotate)'
+    elif [[ $(log_rotation_generate) != "$(cat "$LOGROTATE_FILE" 2>/dev/null)" ]]; then
+        doctor_warn 'logrotate refuses the rule of seedtunnel (changed by hand?): its log grows without end   → seedtunnel apply'
+    else
+        doctor_warn 'logrotate refuses the rule of seedtunnel: its log grows without end   → logrotate -d %s (says why)' "$LOGROTATE_FILE"
+    fi
+}
+
+# The logs of nginx of now (it cuts them each day): the site writes
+# « /share/<token> » in place of the token of a link, its password
+NGINX_LOG_FILES=(/var/log/nginx/access.log /var/log/nginx/error.log)
+
+# share_tokens_logged — how many lines of these logs show the token of a link
+share_tokens_logged() {
+    local file lines count=0
+    for file in "${NGINX_LOG_FILES[@]}"; do
+        [[ -f $file ]] || continue
+        lines=$(grep -Ec "$SHARE_URL_PATH/[0-9a-f]{32}" -- "$file" 2>/dev/null || true)
+        count=$((count + ${lines:-0}))
+    done
+    printf '%s' "$count"
+}
+
+doctor_share_tokens() {
+    local count
+    count=$(share_tokens_logged)
+    if ((count > 0)); then
+        doctor_warn 'The logs of nginx show the token of a link in clear (%s line(s)): whoever reads them can open a link still valid   → seedtunnel apply (the lines already written go within a day)' "$count"
+    else
+        doctor_ok 'Tokens of the links hidden in the logs of nginx'
+    fi
+}
+
 # Ubuntu 26.04: AppArmor must let Transmission into the data folder. The rules
 # in place, and no refusal since they were written (refused, it cannot
 # download, whatever the permissions of the folder).
@@ -341,6 +408,8 @@ doctor_transmission_settings() {
         doctor_warn 'Transmission runs a program that seedtunnel did not set (%s): set through the web interface?   → seedtunnel apply' "$scripts"
     elif (((8#$mode | 8#$dir_mode) & 8#7)); then
         doctor_warn 'The settings of Transmission (hash of the password) or its folder can be read by every account   → seedtunnel apply'
+    elif transmission_runs_from_data; then
+        doctor_warn 'Transmission could run a program put in %s (its lock of systemd is not in force)   → seedtunnel apply' "$SEEDBOX_DATA_DIR"
     else
         doctor_ok 'Settings of Transmission private, no program run by it'
     fi
@@ -496,6 +565,7 @@ doctor_seedbox() {
         fi
         doctor_certificate_served "$ip"
     fi
+    doctor_share_tokens
 
     if seedbox_sftp_rule_applies; then
         doctor_ok 'SFTP locked in %s' "$SEEDBOX_DATA_DIR"
@@ -567,6 +637,7 @@ doctor_links() {
     else
         doctor_error 'Site of the links: unexpected answer (code %s)   → seedtunnel vpn links on' "${code:-$(t 'none')}"
     fi
+    doctor_share_tokens
     [[ -n $ip ]] || return 0
     code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 8 --resolve "$domain:443:$ip" "$test" 2>/dev/null || true)
     if [[ $code == 404 ]]; then
@@ -699,6 +770,7 @@ doctor_main() {
     ip=$(public_ipv4)
     echo "${ip:-$(t 'not found')}"
     doctor_system
+    doctor_files
     if vpn_installed; then doctor_vpn "$ip"; fi
     if seedbox_installed; then doctor_seedbox "$ip"; fi
     links_load

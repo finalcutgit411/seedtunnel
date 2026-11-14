@@ -328,6 +328,7 @@ apply_main() {
     banner
     section 'Applying the configuration'
     update_save_previous
+    rights_apply
     log_rotation_apply
     if vpn_installed; then
         vpn_apply

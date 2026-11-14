@@ -614,6 +614,40 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 EOF
 }
 
+# The mounts seen by Transmission running right now (status 1: not running)
+transmission_mountinfo() {
+    local pid
+    pid=$(systemctl show -p MainPID --value transmission-daemon 2>/dev/null || true)
+    [[ $pid =~ ^[1-9][0-9]*$ ]] || return 1
+    cat "/proc/$pid/mountinfo" 2>/dev/null
+}
+
+# mount_noexec DIR <MOUNTINFO — is DIR on a mount that runs nothing
+# (« noexec »)? The mount that holds it is the one with the longest mount
+# point above it, the last one when several are on top of each other.
+mount_noexec() {
+    awk -v dir="$1" '
+        {
+            point = $5
+            gsub(/\\040/, " ", point)
+            above = (point == "/") ? "/" : point "/"
+            if (index(dir "/", above) == 1 && length(point) >= best) { best = length(point); options = $6 }
+        }
+        END { exit !(options ~ /(^|,)noexec(,|$)/) }'
+}
+
+# transmission_runs_from_data — Transmission is running and could run a
+# program put in the folder of the data (the « NoExecPaths » of its drop-in
+# not in force: started before it, or set otherwise by another drop-in)
+transmission_runs_from_data() {
+    local mounts data
+    mounts=$(transmission_mountinfo) || return 1
+    [[ -n $mounts ]] || return 1
+    # the mounts are named by the real path (no link in it)
+    data=$(readlink -f -- "$SEEDBOX_DATA_DIR" 2>/dev/null) || data=$SEEDBOX_DATA_DIR
+    ! mount_noexec "$data" <<<"$mounts"
+}
+
 seedbox_apply_transmission() {
     local settings desired changes restart=0 stopped=0 tmp
     settings=$(transmission_settings_file) || exit 1
@@ -638,6 +672,10 @@ seedbox_apply_transmission() {
     fi
     install -d -m 755 "${TRANSMISSION_DROPIN%/*}"
     if write_if_changed "$TRANSMISSION_DROPIN" 644 root:root transmission_generate_dropin "$settings"; then
+        run 'Reloading systemd' systemctl daemon-reload
+        restart=1
+    elif transmission_runs_from_data; then
+        # the file is right, but the Transmission running does not have it
         run 'Reloading systemd' systemctl daemon-reload
         restart=1
     fi

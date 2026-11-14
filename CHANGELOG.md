@@ -3,6 +3,20 @@
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 
+## [1.0.8] - 2026-11-14
+
+### Added
+- `seedtunnel doctor` checks five more things, without changing anything:
+  - the settings of seedtunnel (keys of the VPN, passphrase, hashes of the passwords), its backups, the file of WireGuard and the passwords of the web interface: no other account than root can open them;
+  - the files of seedtunnel, and the version kept for `seedtunnel update back`: no other account than root can change them (root runs them);
+  - Transmission running right now cannot run anything from the folder of the data (its lock of systemd is in force);
+  - logrotate takes the rule of seedtunnel: its log is cut every month;
+  - no token of a link in clear in the logs of nginx.
+- `seedtunnel apply` puts these rights back: settings and backups for root only, files of seedtunnel changeable by root only. A Transmission running without its lock is started again with it.
+
+### Changed
+- Tests: on GitHub, seedtunnel runs from a copy that belongs to root, as when installed from its archive.
+
 ## [1.0.7] - 2026-11-14
 
 ### Added

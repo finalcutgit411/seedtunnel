@@ -18,6 +18,7 @@
 - TLS 1.2/1.3 only. HSTS is only turned on with a real certificate.
 - Automatic security updates (`unattended-upgrades`).
 - `/etc/seedtunnel` and the backups are readable by root only, and so are the settings a restore replaced (`/etc/seedtunnel.before-restore-…`, old keys and passphrase included). `seedtunnel doctor` points them out until they are deleted: Backup / restore → « My backups », or `seedtunnel restore clean`.
+- `seedtunnel doctor` checks that the settings, the backups and the files of SeedTunnel belong to root only (only root can change what root runs), that Transmission can run nothing from the data folder, and that no token of a link is in clear in the logs of nginx. `seedtunnel apply` puts the rights back in order.
 - A backup made by someone else cannot run anything when restored: no executable file, only the settings of SeedTunnel with values it would accept, valid names of VPN clients, every file owned by root, and from Let's Encrypt only the certificate of SeedTunnel, renewed with no command other than reloading nginx.
 - root never writes where the account of Transmission (or the SFTP user) could lead it with a link: the settings of Transmission and the torrents put back are written by its own account.
 - The token of a download link, its password, is never in the argument of a command (`ps` and `systemctl status` show those to every account), nor is the hash of the seedbox password.

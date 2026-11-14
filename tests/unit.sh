@@ -53,6 +53,8 @@ load() {
     # need one play it
     CONFLICT_ROOT="$WORK/no-panel"
     WIREGUARD_CONF="$WORK/wireguard/wg0.conf"
+    # nor the logs of its nginx
+    NGINX_LOG_FILES=("$WORK/nginx-access.log" "$WORK/nginx-error.log")
     # the tests do not run as root: the command, as the current user
     runuser() {
         while [[ $1 != -- ]]; do shift; done
@@ -8981,6 +8983,238 @@ ui_menu_two_digit_keys() (
     [[ $out == *$'\n   [9] A rather long entry of the menu, number 9\n  [10] A rather long'* ]]
 )
 
+# --- 1.0.8: the diagnostics check the rights, the log, the tokens of the links ---
+
+# A copy of seedtunnel as its archive gives it: folders 755, files 644
+rights_app_copy() {
+    APP_DIR="$WORK/rights-app/seedtunnel"
+    rm -rf "$WORK/rights-app"
+    mkdir -p "$APP_DIR/lib"
+    printf 'echo\n' >"$APP_DIR/seedtunnel.sh"
+    printf 'x=1\n' >"$APP_DIR/lib/common.sh"
+    chmod 755 "$WORK/rights-app" "$APP_DIR" "$APP_DIR/lib" "$APP_DIR/seedtunnel.sh"
+    chmod 644 "$APP_DIR/lib/common.sh"
+    # a link counts for nothing (its rights are always 777)
+    ln -s /etc/hostname "$APP_DIR/lib/link"
+}
+
+# What root keeps (settings, backups, file of WireGuard, passwords of the web
+# interface): another account than root can open none of them
+doctor_secrets_for_root_only() (
+    load
+    rights_app_copy
+    BACKUP_DIR="$WORK/rights-backups"
+    NGINX_HTPASSWD="$WORK/rights-htpasswd"
+    mkdir -p "$BACKUP_DIR" "${WIREGUARD_CONF%/*}"
+    : >"$WIREGUARD_CONF"
+    : >"$NGINX_HTPASSWD"
+    chmod 700 "$APP_STATE_DIR" "$BACKUP_DIR"
+    chmod 600 "$WIREGUARD_CONF"
+    chmod 640 "$NGINX_HTPASSWD"
+    files_said() {
+        DOCTOR_ERRORS=0
+        doctor_files >"$WORK/rights.out" 2>&1
+        cat "$WORK/rights.out"
+    }
+    files_said
+    ((DOCTOR_ERRORS == 0)) && grep -q "Settings and secrets of seedtunnel readable by root only" "$WORK/rights.out" || return 1
+    local path mode
+    for path in "$APP_STATE_DIR:755:700" "$BACKUP_DIR:750:700" "$WIREGUARD_CONF:644:600" "$NGINX_HTPASSWD:644:640"; do
+        IFS=: read -r path mode back <<<"$path"
+        chmod "$mode" "$path"
+        files_said
+        ((DOCTOR_ERRORS == 1)) && grep -qF "Other accounts than root can open the secrets of seedtunnel (keys, passwords): $path   → seedtunnel apply" "$WORK/rights.out" || return 1
+        chmod "$back" "$path"
+    done
+    files_said
+    ((DOCTOR_ERRORS == 0))
+)
+
+# What root runs (this version of seedtunnel and the one kept for « update
+# back »): another account than root can change none of it
+doctor_app_files_for_root_only() (
+    load
+    rights_app_copy
+    BACKUP_DIR="$WORK/none"
+    chmod 700 "$APP_STATE_DIR"
+    files_said() {
+        DOCTOR_ERRORS=0
+        doctor_files >"$WORK/rights.out" 2>&1
+        cat "$WORK/rights.out"
+    }
+    files_said
+    ((DOCTOR_ERRORS == 0)) && grep -q "Files of seedtunnel: only root can change them" "$WORK/rights.out" || return 1
+    chmod o+w "$APP_DIR/lib/common.sh"
+    files_said
+    ((DOCTOR_ERRORS == 1)) && grep -qF "1 file(s) of seedtunnel, run by root, can be changed by another account ($APP_DIR/lib/common.sh…)   → seedtunnel apply" "$WORK/rights.out" || return 1
+    chmod o-w "$APP_DIR/lib/common.sh"
+    # writable by the group: only a group other than root counts
+    if (($(id -g) != 0)); then
+        chmod g+w "$APP_DIR/lib"
+        files_said
+        grep -qF "1 file(s) of seedtunnel" "$WORK/rights.out" || return 1
+        chmod g-w "$APP_DIR/lib"
+    fi
+    # the version kept for « update back » too
+    mkdir -p "$APP_DIR.old"
+    printf 'echo\n' >"$APP_DIR.old/seedtunnel.sh"
+    chmod 755 "$APP_DIR.old"
+    chmod 666 "$APP_DIR.old/seedtunnel.sh"
+    files_said
+    ((DOCTOR_ERRORS == 1)) && grep -qF "($APP_DIR.old/seedtunnel.sh…)" "$WORK/rights.out"
+)
+
+# « seedtunnel apply » puts the rights back as the diagnostics want them, and
+# says nothing when they already are
+apply_gives_rights_back() (
+    load
+    rights_app_copy
+    BACKUP_DIR="$WORK/rights-backups"
+    mkdir -p "$BACKUP_DIR" "$APP_DIR.old"
+    printf 'echo\n' >"$APP_DIR.old/seedtunnel.sh"
+    chmod 755 "$APP_STATE_DIR" "$BACKUP_DIR" "$APP_DIR.old"
+    chmod 666 "$APP_DIR/lib/common.sh" "$APP_DIR.old/seedtunnel.sh"
+    chmod 777 "$APP_DIR/lib"
+    # the tests do not run as root
+    chown() { echo "chown $*" >>"$WORK/rights-chown"; }
+    rm -f "$WORK/rights-chown"
+    rights_apply >"$WORK/rights.out" 2>&1 || {
+        cat "$WORK/rights.out"
+        return 1
+    }
+    cat "$WORK/rights.out"
+    grep -q "Giving the settings and the files of seedtunnel back to root… ok" "$WORK/rights.out" || return 1
+    stat -c '%a %n' "$APP_STATE_DIR" "$BACKUP_DIR" "$APP_DIR/lib" "$APP_DIR/lib/common.sh" "$APP_DIR.old/seedtunnel.sh"
+    [[ $(stat -c %a "$APP_STATE_DIR") == 700 && $(stat -c %a "$BACKUP_DIR") == 700 ]] || return 1
+    [[ $(stat -c %a "$APP_DIR/lib") == 755 && $(stat -c %a "$APP_DIR/lib/common.sh") == 644 ]] || return 1
+    [[ $(stat -c %a "$APP_DIR.old/seedtunnel.sh") == 644 ]] || return 1
+    grep -qx "chown root:root $APP_STATE_DIR" "$WORK/rights-chown" || return 1
+    # all right: nothing done, nothing said
+    rights_apply >"$WORK/rights.out" 2>&1
+    [[ ! -s $WORK/rights.out ]] || return 1
+    declare -f apply_main | grep -q rights_apply
+)
+
+# logrotate takes the rule of seedtunnel: said, and why when it does not
+doctor_log_rotation_checked() (
+    load
+    mkdir -p "$WORK/bin"
+    # logrotate -d says what it would do: here, what the test wants
+    printf '#!/bin/sh\ncat "%s"\n' "$WORK/logrotate-says" >"$WORK/bin/logrotate"
+    chmod 755 "$WORK/bin/logrotate"
+    PATH="$WORK/bin:$PATH"
+    LOGROTATE_FILE="$WORK/logrotate-seedtunnel"
+    log_rotation_generate >"$LOGROTATE_FILE"
+    rotation_said() {
+        DOCTOR_WARNINGS=0
+        doctor_log_rotation >"$WORK/rotation.out" 2>&1
+        cat "$WORK/rotation.out"
+    }
+    printf 'reading config file %s\nconsidering log %s\n  log does not need rotating\n' "$LOGROTATE_FILE" "$APP_LOG" >"$WORK/logrotate-says"
+    rotation_said
+    ((DOCTOR_WARNINGS == 0)) && grep -q "Log of seedtunnel cut every month (logrotate)" "$WORK/rotation.out" || return 1
+    printf 'considering log %s\nerror: skipping "%s" because parent directory has insecure permissions\n' "$APP_LOG" "$APP_LOG" >"$WORK/logrotate-says"
+    rotation_said
+    ((DOCTOR_WARNINGS == 1)) && grep -qF "→ logrotate -d $LOGROTATE_FILE (says why)" "$WORK/rotation.out" || return 1
+    printf 'weekly\n' >>"$LOGROTATE_FILE"
+    rotation_said
+    ((DOCTOR_WARNINGS == 1)) && grep -qF "(changed by hand?): its log grows without end   → seedtunnel apply" "$WORK/rotation.out" || return 1
+    rm -f "$LOGROTATE_FILE"
+    rotation_said
+    ((DOCTOR_WARNINGS == 1)) && grep -q "rule of logrotate missing" "$WORK/rotation.out" || return 1
+    # with neither VPN nor seedbox, no line about it
+    chmod 700 "$APP_STATE_DIR"
+    rights_app_copy
+    doctor_files >"$WORK/rotation.out" 2>&1
+    ! grep -q "logrotate" "$WORK/rotation.out" || return 1
+    vpn_installed() { return 0; }
+    doctor_files >"$WORK/rotation.out" 2>&1
+    grep -q "rule of logrotate missing" "$WORK/rotation.out"
+)
+
+# The token of a link in clear in the logs of nginx: said (the site writes
+# « /share/<token> » in its place)
+doctor_share_tokens_checked() (
+    load
+    local token=0123456789abcdef0123456789abcdef
+    NGINX_LOG_FILES=("$WORK/tokens-access.log" "$WORK/tokens-error.log")
+    rm -f "${NGINX_LOG_FILES[@]}"
+    tokens_said() {
+        DOCTOR_WARNINGS=0
+        doctor_share_tokens >"$WORK/tokens.out" 2>&1
+        cat "$WORK/tokens.out"
+    }
+    tokens_said
+    ((DOCTOR_WARNINGS == 0)) && grep -q "Tokens of the links hidden in the logs of nginx" "$WORK/tokens.out" || return 1
+    printf '%s\n' '203.0.113.7 - - [14/Nov/2026:16:42:01 +0000] "GET /share/<token>/phone.conf HTTP/1.1" 200 312 "-" "curl"' >"${NGINX_LOG_FILES[0]}"
+    tokens_said
+    ((DOCTOR_WARNINGS == 0)) || return 1
+    printf '2026/11/14 16:42:02 [error] 12#12: *3 limiting requests, request: "GET /share/%s/phone.conf HTTP/1.1"\n' "$token" >"${NGINX_LOG_FILES[1]}"
+    tokens_said
+    ((DOCTOR_WARNINGS == 1)) && grep -qF "show the token of a link in clear (1 line(s))" "$WORK/tokens.out" || return 1
+    # in the sections of the seedbox and of the site of the links
+    declare -f doctor_seedbox | grep -q doctor_share_tokens && declare -f doctor_links | grep -q doctor_share_tokens
+)
+
+# Nothing can be run by Transmission from the folder of the data: the mount
+# that holds it, as Transmission sees it, is « noexec »
+transmission_noexec_checked() (
+    load
+    local root='22 1 8:1 / / rw,relatime shared:1 - ext4 /dev/sda1 rw'
+    local data='30 22 8:1 /srv/seedbox /srv/seedbox rw,nosuid,nodev,noexec,relatime shared:1 - ext4 /dev/sda1 rw'
+    local srv='31 22 8:2 / /srv rw,noexec,relatime shared:2 - ext4 /dev/sdb1 rw'
+    local again='32 30 8:1 /srv/seedbox /srv/seedbox rw,relatime shared:1 - ext4 /dev/sda1 rw'
+    mount_noexec /srv/seedbox <<<"$root"$'\n'"$data" || return 1
+    mount_noexec /srv/seedbox/complete <<<"$root"$'\n'"$data" || return 1
+    ! mount_noexec /srv/seedboxes <<<"$root"$'\n'"$data" || return 1
+    ! mount_noexec /srv <<<"$root"$'\n'"$data" || return 1
+    # the disk of /srv runs nothing: what is in it neither
+    mount_noexec /srv/seedbox <<<"$root"$'\n'"$srv" || return 1
+    # a mount on top of the one that runs nothing: the one on top counts
+    ! mount_noexec /srv/seedbox <<<"$root"$'\n'"$data"$'\n'"$again" || return 1
+    # the diagnostics, through the settings of Transmission
+    local dir="$WORK/tr-noexec"
+    rm -rf "$dir"
+    mkdir -p "$dir/state"
+    chmod 750 "$dir/state"
+    TRANSMISSION_STATE_DIR="$dir/state"
+    SEEDBOX_DATA_DIR=/srv/seedbox
+    transmission_settings_file() { echo "$dir/settings.json"; }
+    printf '%s\n' '{"script-torrent-done-enabled": false}' >"$dir/settings.json"
+    chmod 600 "$dir/settings.json"
+    printf '%s\n' "$root" "$data" >"$dir/mountinfo"
+    transmission_mountinfo() { cat "$dir/mountinfo"; }
+    DOCTOR_WARNINGS=0
+    doctor_transmission_settings >"$WORK/trn.out" 2>&1
+    ((DOCTOR_WARNINGS == 0)) && grep -q "Settings of Transmission private, no program run by it" "$WORK/trn.out" || {
+        cat "$WORK/trn.out"
+        return 1
+    }
+    printf '%s\n' "$root" >"$dir/mountinfo"
+    DOCTOR_WARNINGS=0
+    doctor_transmission_settings >"$WORK/trn.out" 2>&1
+    cat "$WORK/trn.out"
+    ((DOCTOR_WARNINGS == 1)) && grep -qF "Transmission could run a program put in /srv/seedbox (its lock of systemd is not in force)   → seedtunnel apply" "$WORK/trn.out" || return 1
+    # the folder of the data through a link: the mounts name its real path
+    mkdir -p "$dir/data-real"
+    ln -s "$dir/data-real" "$dir/data-link"
+    SEEDBOX_DATA_DIR="$dir/data-link"
+    printf '%s\n' "$root" "30 22 8:1 / $dir/data-real rw,noexec shared:1 - ext4 /dev/sda1 rw" >"$dir/mountinfo"
+    DOCTOR_WARNINGS=0
+    doctor_transmission_settings >"$WORK/trn.out" 2>&1
+    ((DOCTOR_WARNINGS == 0)) || {
+        cat "$WORK/trn.out"
+        return 1
+    }
+    # Transmission not running: nothing to check
+    transmission_mountinfo() { return 1; }
+    DOCTOR_WARNINGS=0
+    doctor_transmission_settings >"$WORK/trn.out" 2>&1
+    ((DOCTOR_WARNINGS == 0)) || return 1
+    # « seedtunnel apply » starts it again with its lock
+    declare -f seedbox_apply_transmission | grep -q transmission_runs_from_data
+)
+
 check "vpn_sync: WireGuard refusing the configuration shows « failed »" vpn_sync_reports_wg_failure
 check "vpn_sync: a failure of « wg-quick strip » is seen" vpn_sync_reports_strip_failure
 check "vpn_sync: « ok » when every step works" vpn_sync_ok_when_all_steps_work
@@ -9334,5 +9568,11 @@ check "restore: the site of the links of the backup put back, the one of this se
 check "site of the links: applied again by apply and a new address, removed with the VPN, replaced by a seedbox" links_site_wired_in
 check "menus: with a key [10], the texts stay aligned (one or two columns)" ui_menu_two_digit_keys
 check "backup from the menu: its download offered right away; by command, no question" backup_from_menu_offers_link
+check "diagnostics: settings, backups, file of WireGuard and web passwords for root only, said otherwise" doctor_secrets_for_root_only
+check "diagnostics: the files of seedtunnel (and the version kept) changeable by root only, said otherwise" doctor_app_files_for_root_only
+check "apply: settings, backups and files of seedtunnel given back to root, nothing said when they are" apply_gives_rights_back
+check "diagnostics: logrotate takes the rule of seedtunnel, or why not" doctor_log_rotation_checked
+check "diagnostics: a token of a link in clear in the logs of nginx is said" doctor_share_tokens_checked
+check "diagnostics: Transmission runs nothing from the folder of the data (noexec), apply starts it again" transmission_noexec_checked
 printf '\n\033[1m%s passed, %s failed\033[0m\n' "$PASS" "$FAIL"
 ((FAIL == 0))

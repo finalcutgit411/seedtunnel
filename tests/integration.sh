@@ -171,6 +171,76 @@ logrotate_test() {
     [[ $out == *"/var/log/seedtunnel.log"* && $out != *"insecure permissions"* && $out != *"error:"* ]]
 }
 
+# What root keeps and runs (settings, files of seedtunnel): opened to another
+# account, the diagnostics say it, and « seedtunnel apply » gives them back to
+# root
+rights_test() {
+    local out file=/opt/seedtunnel/lib/common.sh
+    out=$(app doctor 2>&1) || true
+    grep -qF "Settings and secrets of seedtunnel readable by root only" <<<"$out" \
+        && grep -qF "Files of seedtunnel: only root can change them" <<<"$out" || {
+        echo "$out"
+        return 1
+    }
+    chown nobody /etc/seedtunnel/vpn.conf
+    chmod o+w "$file"
+    out=$(app doctor 2>&1) || true
+    grep -F -e "secrets of seedtunnel" -e "run by root" <<<"$out"
+    grep -qF "Other accounts than root can open the secrets of seedtunnel (keys, passwords): /etc/seedtunnel   → seedtunnel apply" <<<"$out" \
+        && grep -qF "1 file(s) of seedtunnel, run by root, can be changed by another account ($file…)" <<<"$out" || return 1
+    out=$(app apply 2>&1) || {
+        echo "$out"
+        return 1
+    }
+    grep -qF "Giving the settings and the files of seedtunnel back to root… ok" <<<"$out" || {
+        echo "$out"
+        return 1
+    }
+    stat -c '%U %a %n' /etc/seedtunnel/vpn.conf "$file"
+    [[ $(stat -c %U /etc/seedtunnel/vpn.conf) == root && $(stat -c %a "$file") == 644 ]] || return 1
+    out=$(app doctor 2>&1) || true
+    grep -qF "Settings and secrets of seedtunnel readable by root only" <<<"$out" \
+        && grep -qF "Files of seedtunnel: only root can change them" <<<"$out"
+}
+
+# Transmission started without its lock (« NoExecPaths= » emptied by another
+# drop-in): the diagnostics say it, « seedtunnel apply » starts it again with
+# its lock
+transmission_lock_test() {
+    local override=/etc/systemd/system/transmission-daemon.service.d/zz-test.conf out
+    printf '[Service]\nNoExecPaths=\n' >"$override"
+    { systemctl daemon-reload && systemctl restart transmission-daemon; } || return 1
+    out=$(app doctor 2>&1) || true
+    grep -qF "Transmission could run a program put in $DATA (its lock of systemd is not in force)" <<<"$out" || {
+        grep -F "Transmission" <<<"$out"
+        return 1
+    }
+    rm -f "$override"
+    out=$(app apply 2>&1) || {
+        echo "$out"
+        return 1
+    }
+    grep -qF "Starting Transmission" <<<"$out" || {
+        echo "$out"
+        return 1
+    }
+    transmission_noexec_test || return 1
+    output_has "Settings of Transmission private, no program run by it" app doctor
+}
+
+# The token of a link in clear in a log of nginx (written by another site, or
+# by an older version): the diagnostics say it. The log is put back as it was
+# (same file: nginx and fail2ban keep it open).
+doctor_tokens_test() {
+    local log=/var/log/nginx/access.log size out
+    output_has "Tokens of the links hidden in the logs of nginx" app doctor || return 1
+    size=$(stat -c %s "$log")
+    printf '%s\n' '127.0.0.1 - - [14/Nov/2026:16:42:01 +0000] "GET /share/0123456789abcdef0123456789abcdef/phone.conf HTTP/1.1" 404 0 "-" "curl"' >>"$log"
+    out=$(app doctor 2>&1) || true
+    truncate -s "$size" "$log"
+    grep -qF "The logs of nginx show the token of a link in clear (1 line(s))" <<<"$out"
+}
+
 # HTTP code returned by the seedbox (credentials optional)
 http_code() {
     local path=$1
@@ -1408,6 +1478,7 @@ EOF
     check "no change when run again" nothing_changed app vpn install --config "$W/ci.conf"
     # the rule comes with the installation (base packages)
     check "log of seedtunnel cut by logrotate (Ubuntu: /var/log writable by syslog)" logrotate_test
+    check "doctor: the log of seedtunnel cut every month" output_has "Log of seedtunnel cut every month (logrotate)" app doctor
     check "keys and configuration unchanged" md5sum -c --quiet "$W/vpn.md5"
 
     step "VPN: commands"
@@ -1491,6 +1562,7 @@ EOF
     check "Transmission waits for the disk of the data" output_has "$DATA" systemctl show transmission-daemon -p RequiresMountsFor
     check "Transmission: nothing can be run from the folder of the data" transmission_noexec_test
     check "Transmission: its settings private again after a restart, its folder closed to the others" transmission_private_test
+    check "Transmission without its lock: said by doctor, started again with it by apply" transmission_lock_test
     # Ubuntu 26.04: its AppArmor profile confines Transmission; elsewhere, nothing
     if [[ -f /etc/apparmor.d/transmission ]] && grep -q 'local/transmission-daemon' /etc/apparmor.d/transmission; then
         check "AppArmor: Transmission allowed in the data folder" grep -qxF "\"$DATA/**\" rwk," /etc/apparmor.d/local/transmission-daemon
@@ -1510,6 +1582,7 @@ EOF
     check "HEAD refused (405) without using the link up" share_head_test
     check "watcher killed: the link is deleted anyway" share_watcher_killed_test
     check "tokens of the links hidden in the logs of nginx (access, errors)" share_log_test
+    check "doctor: a token of a link in clear in the logs of nginx is said" doctor_tokens_test
     check "seedbox sftp-config: WinSCP address with fingerprint, FileZilla and WinSCP files" sftp_config_test
     check "list of links impossible: page « nothing here », no password" share_folder_test
     check "unknown token: 404" http_is 404 /share/0123456789abcdef0123456789abcdef/
@@ -1574,6 +1647,7 @@ EOF
 
     step "Applying the configuration again (seedtunnel apply)"
     check "puts back in order a change made by hand" apply_test
+    check "settings and files of seedtunnel opened to another account: said by doctor, given back to root by apply" rights_test
     check "run again: no change" nothing_changed app apply
     check "a timer turned off by hand is put back in service" timers_put_back_test
     check "unknown command refused before anything is done" commands_refused_first_test

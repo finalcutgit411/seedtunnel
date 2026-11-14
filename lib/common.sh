@@ -7,7 +7,7 @@
 # =============================================================================
 
 APP_NAME="seedtunnel"
-APP_VERSION="1.0.7"
+APP_VERSION="1.0.8"
 # Format of the settings in /etc/seedtunnel, and so of the backups that hold
 # them: 1 up to now. Raised by a version that writes its settings another
 # way; a backup of a format newer than this version knows is refused.
@@ -607,6 +607,82 @@ secret_file_check() {
     if ! secret_file_private "$1"; then
         die '%s may hold a secret: it must belong to root and be readable by root only:  chown root: %s && chmod 600 %s' "$1" "$1" "$1"
     fi
+}
+
+# --- Rights of what root keeps and runs ---------------------------------------------
+# What seedtunnel keeps (keys, passphrase, hashes of passwords) is for root
+# only; what root runs (the files of seedtunnel) can be changed by root only.
+# Checked by « seedtunnel doctor », put right by « seedtunnel apply ».
+
+# rights_open PATH MASK — PATH printed if it is there and belongs to another
+# account than root, or if its rights have one of the bits of MASK (octal)
+rights_open() {
+    local owner="" mode=""
+    read -r owner mode < <(stat -c '%u %a' -- "$1" 2>/dev/null) || return 0
+    if [[ $owner != "$EUID" ]] || ((8#$mode & 8#$2)); then printf '%s\n' "$1"; fi
+}
+
+# rights_settings_open — the folders of seedtunnel that hold secrets and that
+# another account than root can open (one per line): its settings (keys of
+# the VPN, passphrase, hashes of the passwords), with what is inside, and its
+# backups.
+# A folder of root closed to the others is enough for what is inside; a
+# restore copies the owner of the archive, and the folder must stay closed.
+rights_settings_open() {
+    local open
+    open=$(rights_open "$APP_STATE_DIR" 077)
+    if [[ -z $open && -n $(find "$APP_STATE_DIR" -xdev ! -type l ! -user "$EUID" -print -quit 2>/dev/null) ]]; then
+        open=$APP_STATE_DIR
+    fi
+    if [[ -n $open ]]; then printf '%s\n' "$open"; fi
+    rights_open "$BACKUP_DIR" 077
+}
+
+# rights_secrets_open — rights_settings_open, and the files outside of it
+# that hold a secret: the file of WireGuard (key of the server), the
+# passwords of the web interface (hashes; read by nginx, through its group)
+rights_secrets_open() {
+    rights_settings_open
+    rights_open "$WIREGUARD_CONF" 077
+    rights_open "$NGINX_HTPASSWD" 007
+}
+
+# rights_app_open — the files of seedtunnel (this version, and the one kept
+# for « update back ») that another account than root could change, one per
+# line: root runs them. Writable by their group only matters for a group
+# other than root (archives before 1.0.5: 664 root:root). A link counts for
+# nothing (only who can write in its folder can change it).
+rights_app_open() {
+    local dir
+    for dir in "$APP_DIR" "$APP_DIR.old"; do
+        [[ -d $dir ]] || continue
+        find "$dir" -xdev ! -type l \( ! -user "$EUID" -o -perm /002 -o \( -perm /020 ! -group 0 \) \) -print 2>/dev/null || true
+    done
+}
+
+rights_fix() {
+    local dir
+    if [[ -n $(rights_open "$APP_STATE_DIR" 077) ]]; then
+        { chown root:root "$APP_STATE_DIR" && chmod 700 "$APP_STATE_DIR"; } || return 1
+    fi
+    find "$APP_STATE_DIR" -xdev ! -type l ! -user "$EUID" -exec chown root:root {} + || return 1
+    if [[ -n $(rights_open "$BACKUP_DIR" 077) ]]; then
+        { chown root:root "$BACKUP_DIR" && chmod 700 "$BACKUP_DIR"; } || return 1
+    fi
+    for dir in "$APP_DIR" "$APP_DIR.old"; do
+        [[ -d $dir ]] || continue
+        find "$dir" -xdev ! -type l ! -user "$EUID" -exec chown root:root {} + || return 1
+        find "$dir" -xdev ! -type l -perm /022 -exec chmod go-w {} + || return 1
+    done
+}
+
+# rights_apply — for « seedtunnel apply »: the settings and the backups for
+# root only, the files of seedtunnel changeable by root only (the file of
+# WireGuard and the passwords of the web interface are written again by the
+# VPN and the seedbox, with their rights)
+rights_apply() {
+    [[ -n $(rights_settings_open)$(rights_app_open) ]] || return 0
+    run 'Giving the settings and the files of seedtunnel back to root' rights_fix
 }
 
 config_load() {

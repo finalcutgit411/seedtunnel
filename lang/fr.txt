@@ -3180,3 +3180,41 @@ fr: Port %s déjà pris
 
 en: Ports 80, 443 already taken
 fr: Ports 80 et 443 déjà pris
+
+# --- 1.0.8 : le diagnostic vérifie les droits, le journal et les jetons des liens ----
+
+en: Giving the settings and the files of seedtunnel back to root
+fr: Remise des réglages et des fichiers de seedtunnel à root
+
+en: Other accounts than root can open the secrets of seedtunnel (keys, passwords): %s   → seedtunnel apply
+fr: D'autres comptes que root ont accès aux secrets de seedtunnel (clés, mots de passe) : %s   → seedtunnel apply
+
+en: Settings and secrets of seedtunnel readable by root only
+fr: Réglages et secrets de seedtunnel lisibles par root seulement
+
+en: %s file(s) of seedtunnel, run by root, can be changed by another account (%s…)   → seedtunnel apply
+fr: %s fichier(s) de seedtunnel, lancés par root, modifiables par un autre compte (%s…)   → seedtunnel apply
+
+en: Files of seedtunnel: only root can change them
+fr: Fichiers de seedtunnel : seul root peut les modifier
+
+en: Log of seedtunnel never cut (rule of logrotate missing): it grows without end   → seedtunnel apply
+fr: Journal de seedtunnel jamais coupé (règle de logrotate absente) : il grossit sans fin   → seedtunnel apply
+
+en: Log of seedtunnel cut every month (logrotate)
+fr: Journal de seedtunnel coupé chaque mois (logrotate)
+
+en: logrotate refuses the rule of seedtunnel (changed by hand?): its log grows without end   → seedtunnel apply
+fr: logrotate refuse la règle de seedtunnel (modifiée à la main ?) : son journal grossit sans fin   → seedtunnel apply
+
+en: logrotate refuses the rule of seedtunnel: its log grows without end   → logrotate -d %s (says why)
+fr: logrotate refuse la règle de seedtunnel : son journal grossit sans fin   → logrotate -d %s (dit pourquoi)
+
+en: The logs of nginx show the token of a link in clear (%s line(s)): whoever reads them can open a link still valid   → seedtunnel apply (the lines already written go within a day)
+fr: Les journaux de nginx montrent le jeton d'un lien en clair (%s ligne(s)) : qui les lit peut ouvrir un lien encore valable   → seedtunnel apply (les lignes déjà écrites disparaissent en moins d'un jour)
+
+en: Tokens of the links hidden in the logs of nginx
+fr: Jetons des liens cachés dans les journaux de nginx
+
+en: Transmission could run a program put in %s (its lock of systemd is not in force)   → seedtunnel apply
+fr: Transmission pourrait lancer un programme déposé dans %s (son verrouillage par systemd n'est pas en place)   → seedtunnel apply

@@ -55,8 +55,11 @@ jobs:
       - name: Start the test server (systemd)
         run: |
           docker run -d --name st --hostname seedtunnel-ci --privileged --cgroupns=host \
-            -v /sys/fs/cgroup:/sys/fs/cgroup:rw -v "$PWD":/opt/seedtunnel:ro seedtunnel-test
+            -v /sys/fs/cgroup:/sys/fs/cgroup:rw -v "$PWD":/src:ro seedtunnel-test
           docker exec st systemctl is-system-running --wait || true
+          # copied as from its archive: files of root, changeable by root only
+          # (seedtunnel doctor checks it, seedtunnel apply puts it right)
+          docker exec st sh -c 'cp -a /src /opt/seedtunnel && chown -R root:root /opt/seedtunnel && chmod -R go-w /opt/seedtunnel'
 
       - name: Phase 1 — VPN, seedbox, links, SFTP, SSH keys, firewall, full disk
         run: docker exec st /opt/seedtunnel/tests/integration.sh phase1
