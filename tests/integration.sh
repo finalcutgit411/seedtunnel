@@ -304,9 +304,17 @@ foreign_wireguard_put() {
     printf '[Interface]\nPrivateKey = kept-by-the-test\n' >/etc/wireguard/wg0.conf
 }
 
-# A Transmission installed by hand before seedtunnel, then removed by hand
+# A Transmission installed by hand before seedtunnel, then removed by hand. The
+# lists of apt are still empty here: seedtunnel has not installed anything yet.
 transmission_by_hand() {
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends transmission-daemon >/dev/null
+    DEBIAN_FRONTEND=noninteractive apt-get update -q >/dev/null \
+        && DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends transmission-daemon >/dev/null
+}
+# Tried only when this Transmission is really there: otherwise the seedbox would
+# be installed here, and the next steps would fail because of it
+seedbox_refused_next_to_transmission() {
+    [[ $(dpkg-query -W -f='${Status}' transmission-daemon 2>/dev/null) == *' installed' ]] || return 1
+    output_has "Transmission already there" app seedbox install --config "$W/ci.conf"
 }
 transmission_removed_by_hand() {
     DEBIAN_FRONTEND=noninteractive apt-get purge -y -q --auto-remove transmission-daemon >/dev/null
@@ -1374,7 +1382,7 @@ EOF
     check "another VPN: its file kept" grep -qx "PrivateKey = kept-by-the-test" /etc/wireguard/wg0.conf
     rm -f /etc/wireguard/wg0.conf
     check "Transmission installed by hand" transmission_by_hand
-    check "Transmission of its own: seedbox refused" output_has "Transmission already there" app seedbox install --config "$W/ci.conf"
+    check "Transmission of its own: seedbox refused" seedbox_refused_next_to_transmission
     check "Transmission removed by hand" transmission_removed_by_hand
     check "nothing installed by seedtunnel" nothing_installed
 
