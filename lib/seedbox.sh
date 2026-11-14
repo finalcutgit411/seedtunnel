@@ -124,9 +124,16 @@ seedbox_require_installed() {
 # points to, or a file of its own in its folder. Nothing else: the account of
 # Transmission can change this link (its folder belongs to it), and root would
 # then read, write and back up the file it points to. Status 1 otherwise.
+# Without the link, the file of /etc, never a link either: its folder can be
+# written by the group of Transmission.
 transmission_settings_file() {
     local link="$TRANSMISSION_STATE_DIR/settings.json" real
     if [[ ! -e $link && ! -L $link ]]; then
+        if [[ -L $TRANSMISSION_ETC_SETTINGS || (-e $TRANSMISSION_ETC_SETTINGS && ! -f $TRANSMISSION_ETC_SETTINGS) ]]; then
+            err 'The settings of Transmission %s are not a file (a link?): seedtunnel does not follow it   → rm %s, then seedtunnel apply' \
+                "$TRANSMISSION_ETC_SETTINGS" "$TRANSMISSION_ETC_SETTINGS"
+            return 1
+        fi
         printf '%s' "$TRANSMISSION_ETC_SETTINGS"
         return 0
     fi
@@ -140,6 +147,13 @@ transmission_settings_file() {
             "$link" "${real:-?}" "$TRANSMISSION_ETC_SETTINGS" "$link"
         return 1
     fi
+}
+
+# transmission_settings_read FILE — the settings of Transmission, read by its
+# own account, never by root: where it could lead root with a link, it can
+# only read what it can read already
+transmission_settings_read() {
+    runuser -u "$TRANSMISSION_USER" -- cat -- "$1"
 }
 
 # transmission_settings_write FILE SOURCE — the settings of Transmission
@@ -691,7 +705,7 @@ seedbox_apply_transmission() {
         # to it, and still does)
         tmp=$(mktemp "$APP_STATE_DIR/.transmission-settings.XXXXXX")
         if ! { if [[ -s $settings ]]; then
-            jq --slurpfile d <(printf '%s' "$desired") '. + $d[0]' "$settings"
+            transmission_settings_read "$settings" | jq --slurpfile d <(printf '%s' "$desired") '. + $d[0]'
         else
             printf '%s\n' "$desired"
         fi; } >"$tmp" 2>>"$APP_LOG" || ! jq empty "$tmp" 2>/dev/null || ! transmission_settings_write "$settings" "$tmp" 2>>"$APP_LOG"; then

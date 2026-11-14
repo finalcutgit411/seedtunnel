@@ -193,9 +193,12 @@ doctor_restore_interrupted() {
     local previous
     restore_interrupted || return 0
     previous=$(restore_interrupted_previous)
-    if [[ -n $previous && -d $previous ]]; then
-        doctor_error 'A restore did not finish: the settings of seedtunnel may be incomplete. To go back to those from before it:  rm -rf %s && mv %s %s && rm -f %s && seedtunnel apply' \
-            "$APP_STATE_DIR" "$previous" "$APP_STATE_DIR" "$RESTORE_MARKER"
+    if [[ -n $previous && -f $previous.undo ]]; then
+        # also when it stopped halfway: it can be run again
+        doctor_error 'A restore did not finish: the settings of seedtunnel may be incomplete. To go back to what was there before it:  bash %s.undo' "$previous"
+    elif [[ -n $previous && -d $previous ]]; then
+        doctor_error 'A restore did not finish: the settings of seedtunnel may be incomplete. To go back to those from before it:  test -d %s && rm -rf %s && mv -T %s %s && seedtunnel apply && rm -f %s' \
+            "$previous" "$APP_STATE_DIR" "$previous" "$APP_STATE_DIR" "$RESTORE_MARKER"
     else
         doctor_error 'A restore did not finish: the settings of seedtunnel may be incomplete. Run it again:  seedtunnel restore FILE'
     fi

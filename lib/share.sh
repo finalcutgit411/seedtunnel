@@ -216,9 +216,13 @@ EOF
 
 # Links go through an HTTPS site, which must be running: the one of the
 # seedbox or, with the VPN alone, the site of the links (offered the first
-# time). Status 1 if it is declined: $1 (translated), what to do instead, is
-# said.
+# time). SHARE_READY: 1 if a link can be made, 0 if the site was declined
+# ($1, translated, says what to do instead). Called on its own, never in a
+# condition (« || return 0 »): « set -e » would be off for every step of the
+# installation of the site, and a step that fails would be taken for done.
+SHARE_READY=0
 share_require() {
+    SHARE_READY=1
     if seedbox_installed; then
         systemctl is-active --quiet nginx || die 'nginx is stopped:  seedtunnel seedbox restart'
         return 0
@@ -384,15 +388,16 @@ links_site_help() {
 }
 
 # links_offer HINT — VPN alone, no site for the links yet: what it is, then
-# the question. Status 1 if the answer is no: HINT (translated) says what to
-# do instead.
+# the question. No: SHARE_READY=0, and HINT (translated) says what to do
+# instead.
 links_offer() {
     links_site_help
     echo
     if ! confirm 'Install the site of the links? (opens ports 80 and 443)' y; then
         echo
         printf '  %s\n' "$1"
-        return 1
+        SHARE_READY=0
+        return 0
     fi
     links_install
 }

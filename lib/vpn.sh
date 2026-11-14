@@ -851,7 +851,8 @@ vpn_client_link() {
 vpn_share_client() {
     local name=$1
     vpn_require_client "$name"
-    share_require "$(t 'Without a link:  seedtunnel vpn show %s  (QR code, or content to copy and paste).' "$name")" || return 0
+    share_require "$(t 'Without a link:  seedtunnel vpn show %s  (QR code, or content to copy and paste).' "$name")"
+    ((SHARE_READY)) || return 0
     share_create "$VPN_CLIENTS_DIR/$name.conf" "$name.conf" "$(t 'VPN configuration "%s"' "$name")" \
         "$(text share_steps_vpn)" "$(t 'This file holds the secret key of "%s": delete it once imported.' "$name")"
 }

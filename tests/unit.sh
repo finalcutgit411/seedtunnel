@@ -2097,7 +2097,7 @@ restore_unfinished_says_how_to_go_back() (
     cat "$WORK/restore2.out"
     grep -q "did not finish" "$WORK/restore2.out" \
         && grep -q "bash $APP_STATE_DIR.before-restore-[0-9-]*.undo" "$WORK/restore2.out" \
-        && grep -q "^mv -T -- $APP_STATE_DIR.before-restore-[0-9-]* $APP_STATE_DIR$" "$APP_STATE_DIR".before-restore-*.undo \
+        && grep -q "^ *mv -T -- $APP_STATE_DIR.before-restore-[0-9-]* $APP_STATE_DIR$" "$APP_STATE_DIR".before-restore-*.undo \
         && [[ $(cat "$APP_STATE_DIR".before-restore-*/vpn.conf) == "VPN_PORT=1194" ]]
 )
 
@@ -3714,7 +3714,16 @@ doctor_reports_interrupted_restore() (
     cat "$WORK/interrupted.out"
     # the way back, with the folder of the settings from before
     ((DOCTOR_ERRORS == 1)) && grep -q "A restore did not finish" "$WORK/interrupted.out" \
-        && grep -qF "mv $WORK/interrupted-before $APP_STATE_DIR" "$WORK/interrupted.out" || return 1
+        && grep -qF "test -d $WORK/interrupted-before && rm -rf $APP_STATE_DIR && mv -T $WORK/interrupted-before $APP_STATE_DIR && seedtunnel apply && rm -f $RESTORE_MARKER" "$WORK/interrupted.out" || return 1
+    # with the script of the way back: that one (it puts back the rest too)
+    : >"$WORK/interrupted-before.undo"
+    doctor_system >"$WORK/interrupted.out" 2>&1
+    grep -qF "To go back to what was there before it:  bash $WORK/interrupted-before.undo" "$WORK/interrupted.out" || return 1
+    # its settings already put back, it stopped later: still that one
+    rmdir "$WORK/interrupted-before"
+    doctor_system >"$WORK/interrupted.out" 2>&1
+    grep -qF "bash $WORK/interrupted-before.undo" "$WORK/interrupted.out" || return 1
+    rm -f "$WORK/interrupted-before.undo"
     # nothing from before: restore again
     printf 'none\n' >"$RESTORE_MARKER"
     doctor_system >"$WORK/interrupted.out" 2>&1
@@ -3922,8 +3931,9 @@ restore_failure_says_marker() (
     RESTORE_MARKER="$WORK/failure.restore-unfinished"
     restore_unfinished 2>"$WORK/failure.out"
     cat "$WORK/failure.out"
-    # the way back also removes the marker, or « doctor » would say it forever
-    grep -qF "mv $WORK/failure-before $APP_STATE_DIR && rm -f $RESTORE_MARKER && seedtunnel apply" "$WORK/failure.out"
+    # the way back also removes the marker, or « doctor » would say it forever;
+    # only once « seedtunnel apply » worked, and run twice it deletes nothing
+    grep -qF "test -d $WORK/failure-before && rm -rf $APP_STATE_DIR && mv -T $WORK/failure-before $APP_STATE_DIR && seedtunnel apply && rm -f $RESTORE_MARKER" "$WORK/failure.out"
 )
 
 # -------------------------------------------------------------------------------
@@ -6395,7 +6405,7 @@ backup_list_download_delete() (
     grep -q "No backup number 4" "$WORK/mine.out" || return 1
     # downloaded by its number
     banner() { :; }
-    share_require() { :; }
+    share_require() { SHARE_READY=1; }
     share_create() { echo "share $1" >>"$WORK/mine-calls"; }
     rm -f "$WORK/mine-calls"
     backup_share 3 >/dev/null 2>&1 || return 1
@@ -7061,6 +7071,33 @@ restore_refuses_letsencrypt_commands() (
     ! grep -q "refused" "$WORK/le-ok.out" && grep -q "The backup contains" "$WORK/le-ok.out"
 )
 
+# The renewal file as certbot reads it: a name between quotes, after a mark of
+# UTF-8, or a section followed by a comment is the same name for it. Refused,
+# like the plain names with these values.
+restore_refuses_letsencrypt_quoted_names() (
+    local line renewal
+    for line in '"archive_dir" = /tmp/other-service/archive' "'cert' = /tmp/other-service/live/cert.pem" \
+        $'\xef\xbb\xbfarchive_dir = /tmp/other-service/archive' '[[ "webroot_map" ]]' \
+        $'[[webroot_map]] # the same section\nseedbox.example.org = /tmp/other-service'; do
+        restore_archive_load le-quoted
+        renewal="$RESTORE_ROOT/etc/letsencrypt/renewal/seedtunnel.conf"
+        mkdir -p "${renewal%/*}"
+        printf 'version = 2.9.0\narchive_dir = %s/archive/seedtunnel\n[renewalparams]\nauthenticator = webroot\nwebroot_path = /var/www/letsencrypt,\nrenew_hook = systemctl reload nginx\n%s\n' \
+            "$LETSENCRYPT_ROOT" "$line" >"$renewal"
+        restore_archive_make le-quoted
+        if (restore_main "$WORK/le-quoted.enc") >"$WORK/le-quoted.out" 2>&1; then
+            echo "accepted: $line"
+            return 1
+        fi
+        grep -qF "Archive refused: unexpected value of " "$WORK/le-quoted.out" \
+            && grep -qF " in etc/letsencrypt/renewal/seedtunnel.conf" "$WORK/le-quoted.out" || {
+            echo "line: $line"
+            cat "$WORK/le-quoted.out"
+            return 1
+        }
+    done
+)
+
 # Only the certificate of seedtunnel and the account go back: not the other
 # certificates of the backup, nor its renewal-hooks
 restore_letsencrypt_only_seedtunnel() (
@@ -7222,6 +7259,47 @@ transmission_settings_link_to_etc_only() (
     rm "$TRANSMISSION_ETC_SETTINGS"
     ln -s /etc/shadow "$TRANSMISSION_ETC_SETTINGS"
     ! transmission_settings_file >/dev/null 2>&1
+)
+
+# Without the link of its folder, the file of /etc: never through a link
+# either (its folder can be written by the group of Transmission). And root
+# never reads its settings itself to merge them: its own account does.
+transmission_settings_fallback_no_link() (
+    load
+    local dir="$WORK/tr-fallback" out
+    rm -rf "$dir"
+    mkdir -p "$dir/state" "$dir/etc"
+    TRANSMISSION_STATE_DIR="$dir/state"
+    TRANSMISSION_ETC_SETTINGS="$dir/etc/settings.json"
+    TRANSMISSION_USER=debian-transmission
+    # none yet, or a file: that one
+    [[ $(transmission_settings_file) == "$TRANSMISSION_ETC_SETTINGS" ]] || return 1
+    echo '{"rpc-port": 9091}' >"$TRANSMISSION_ETC_SETTINGS"
+    [[ $(transmission_settings_file) == "$TRANSMISSION_ETC_SETTINGS" ]] || return 1
+    # a link to a file of another program: refused, said, nothing read
+    echo '{"token": "FAKE-DATA-ONLY"}' >"$dir/other.json"
+    rm "$TRANSMISSION_ETC_SETTINGS"
+    ln -s "$dir/other.json" "$TRANSMISSION_ETC_SETTINGS"
+    if out=$(transmission_settings_file 2>&1); then
+        echo "accepted: $out"
+        return 1
+    fi
+    echo "$out"
+    [[ $out == *"are not a file (a link?): seedtunnel does not follow it   → rm $TRANSMISSION_ETC_SETTINGS, then seedtunnel apply"* ]] || return 1
+    # a folder in its place: refused too
+    rm "$TRANSMISSION_ETC_SETTINGS"
+    mkdir "$TRANSMISSION_ETC_SETTINGS"
+    ! transmission_settings_file >/dev/null 2>&1 || return 1
+    # read by the account of Transmission
+    runuser() {
+        echo "runuser $*" >>"$dir/calls"
+        while [[ $1 != -- ]]; do shift; done
+        shift
+        "$@"
+    }
+    [[ $(transmission_settings_read "$dir/other.json") == *FAKE-DATA-ONLY* ]] || return 1
+    grep -qx "runuser -u debian-transmission -- cat -- $dir/other.json" "$dir/calls" || return 1
+    declare -f seedbox_apply_transmission | grep -qF 'transmission_settings_read "$settings" | jq'
 )
 
 # --- DNS of the clients: one line of addresses -------------------------------------
@@ -7430,6 +7508,59 @@ restore_undo_puts_everything_back() (
     [[ $(<"$LETSENCRYPT_ROOT/live/seedtunnel/cert.pem") == "cert of before" && -f $TRANSMISSION_STATE_DIR/torrents/a.torrent ]] || return 1
     [[ ! -e $RESTORE_MARKER && ! -e $previous && ! -e $previous.outside && ! -e $previous.undo ]] || return 1
     grep -q "seedtunnel apply" "$base/calls"
+)
+
+# The way back stops (« seedtunnel apply » fails), then is run again: what it
+# put back the first time stays (it used to delete the settings it had just
+# put back); its marker and its copies go only once it went to the end
+restore_undo_runs_again() (
+    load
+    local base="$WORK/undo-again" previous status=0
+    rm -rf "$base"
+    mkdir -p "$base/bin" "$base/state" "$base/keys" "$base/le/live/seedtunnel" "$base/tr/torrents"
+    APP_STATE_DIR="$base/state"
+    RESTORE_MARKER="$base/state.restore-unfinished"
+    SFTP_KEYS_DIR="$base/keys"
+    LETSENCRYPT_ROOT="$base/le"
+    TRANSMISSION_STATE_DIR="$base/tr"
+    echo "VPN_PORT=1194" >"$APP_STATE_DIR/vpn.conf"
+    echo "key of before" >"$SFTP_KEYS_DIR/lancelot"
+    echo "cert of before" >"$LETSENCRYPT_ROOT/live/seedtunnel/cert.pem"
+    echo "torrent of before" >"$TRANSMISSION_STATE_DIR/torrents/a.torrent"
+    previous="$APP_STATE_DIR.before-restore-20261114-190000"
+    echo "$previous" >"$RESTORE_MARKER"
+    mv "$APP_STATE_DIR" "$previous"
+    restore_keep_outside "$previous" || return 1
+    mkdir -p "$APP_STATE_DIR"
+    echo "VPN_PORT=51820" >"$APP_STATE_DIR/vpn.conf"
+    echo "key of the backup" >"$SFTP_KEYS_DIR/lancelot"
+    echo "cert of the backup" >"$LETSENCRYPT_ROOT/live/seedtunnel/cert.pem"
+    rm -rf "$TRANSMISSION_STATE_DIR/torrents"
+    printf '#!/bin/sh\n' >"$base/bin/systemctl"
+    # « seedtunnel apply » fails the first time only
+    printf '#!/bin/sh\nif [ ! -e %s ]; then : >%s; exit 42; fi\necho "seedtunnel $*" >>%s\n' \
+        "$base/failed-once" "$base/failed-once" "$base/calls" >"$base/bin/seedtunnel"
+    chmod 755 "$base/bin/systemctl" "$base/bin/seedtunnel"
+    PATH="$base/bin:$PATH" bash "$previous.undo" >"$base/first.out" 2>&1 || status=$?
+    cat "$base/first.out"
+    ((status == 42)) || return 1
+    [[ $(<"$APP_STATE_DIR/vpn.conf") == "VPN_PORT=1194" ]] || return 1
+    [[ -e $RESTORE_MARKER && -d $previous.outside && -f $previous.undo ]] || return 1
+    # run again: everything back, then its marker, its copies and itself go
+    PATH="$base/bin:$PATH" bash "$previous.undo" || return 1
+    [[ $(<"$APP_STATE_DIR/vpn.conf") == "VPN_PORT=1194" && $(<"$SFTP_KEYS_DIR/lancelot") == "key of before" ]] || return 1
+    [[ $(<"$LETSENCRYPT_ROOT/live/seedtunnel/cert.pem") == "cert of before" && -f $TRANSMISSION_STATE_DIR/torrents/a.torrent ]] || return 1
+    [[ ! -e $RESTORE_MARKER && ! -e $previous && ! -e $previous.outside && ! -e $previous.undo ]] || return 1
+    grep -qx "seedtunnel apply" "$base/calls" || return 1
+    # nothing left to put back (both folders gone): it stops, nothing deleted
+    echo "$previous" >"$RESTORE_MARKER"
+    restore_keep_outside "$previous" || return 1
+    rm -rf "$APP_STATE_DIR"
+    status=0
+    PATH="$base/bin:$PATH" bash "$previous.undo" >"$base/third.out" 2>&1 || status=$?
+    cat "$base/third.out"
+    ((status == 1)) && grep -q "Nothing to put back" "$base/third.out" \
+        && [[ $(<"$SFTP_KEYS_DIR/lancelot") == "key of before" && -e $RESTORE_MARKER ]]
 )
 
 # Seen on a real server: the SFTP account renamed since the backup. The
@@ -8742,10 +8873,13 @@ share_require_offers_links_site() (
     printf '%s\n' "$out"
     [[ $out == *"Download links go through an HTTPS site"*"https://203.0.113.7/share/…"*"self-signed (IP address)"*"seedtunnel vpn links off"* ]] || return 1
     [[ $out == *"Install the site of the links? (opens ports 80 and 443) → run again with --yes to confirm."* ]] || return 1
-    # no: what to do instead, status 1, nothing installed
+    # no: what to do instead, SHARE_READY=0, nothing installed
     confirm() { return 1; }
-    if out=$(share_require "what to do instead" 2>&1); then return 1; fi
-    [[ $out == *"  what to do instead"* && ! -e $WORK/links-require-calls ]] || return 1
+    out=$(
+        share_require "what to do instead"
+        echo "ready=$SHARE_READY"
+    ) 2>&1 || return 1
+    [[ $out == *"  what to do instead"* && $out == *"ready=0" && ! -e $WORK/links-require-calls ]] || return 1
     # a domain name: Let's Encrypt if it points to this server
     VPN_PUBLIC_ADDRESS=vpn.example.org
     out=$(share_require x 2>&1) || true
@@ -8753,7 +8887,7 @@ share_require_offers_links_site() (
     # yes: installed
     confirm() { return 0; }
     share_require x >/dev/null 2>&1 || return 1
-    [[ $(<"$WORK/links-require-calls") == installed ]] || return 1
+    [[ $(<"$WORK/links-require-calls") == installed && $SHARE_READY == 1 ]] || return 1
     # there: no question; nginx stopped: said
     links_save
     confirm() {
@@ -8771,6 +8905,63 @@ share_require_offers_links_site() (
     rm -f "$LINKS_CONF_FILE"
     if out=$(share_require "the hint" 2>&1); then return 1; fi
     [[ $out == *"Neither is installed."*"the hint"* ]]
+)
+
+# Settings that cannot be written stop what is being done. The site of the
+# links offered before a link: a step that fails stops it (it used to end
+# with « installed » and the link shown: « share_require … || return 0 »
+# turned « set -e » off for the whole installation)
+links_install_stops_on_failure() (
+    load
+    local out
+    LINKS_CONF_FILE="$WORK/links-failure.conf"
+    rm -f "$LINKS_CONF_FILE" "$LINKS_CONF_FILE.tmp"
+    # the renaming of a file of settings fails (disk full…)
+    if out=$( (
+        mv() { return 42; }
+        LINKS_CERTIFICATE=selfsigned
+        links_save
+        echo "after the failure"
+    ) 2>&1); then
+        echo "$out"
+        return 1
+    fi
+    [[ $out == *"Cannot write $LINKS_CONF_FILE (disk full?)."* && $out != *"after the failure"* && ! -e $LINKS_CONF_FILE.tmp ]] || {
+        echo "$out"
+        return 1
+    }
+    # a link to a VPN client, the site of the links installed first; a step
+    # of the installation fails, without being checked (seedtunnel runs with
+    # « set -e »)
+    local common='
+        vpn_installed() { return 0; }
+        seedbox_installed() { return 1; }
+        vpn_require_client() { :; }
+        share_create() { echo "LINK SHOWN"; }
+        VPN_PUBLIC_ADDRESS=203.0.113.7
+        LINKS_CONF_FILE="$WORK/links-strict.conf"
+        rm -f "$LINKS_CONF_FILE"
+        links_install() {
+            false
+            echo "Site of the links installed."
+        }'
+    if out=$(strict "$common"'
+        confirm() { return 0; }
+        vpn_share_client phone' 2>&1); then
+        echo "$out"
+        return 1
+    fi
+    echo "$out"
+    [[ $out != *"Site of the links installed."* && $out != *"LINK SHOWN"* ]] || return 1
+    # declined: what to do instead, no link, nothing wrong
+    out=$(strict "$common"'
+        confirm() { return 1; }
+        vpn_share_client phone
+        echo "status $?"' 2>&1) || return 1
+    echo "$out"
+    [[ $out == *"Without a link:  seedtunnel vpn show phone"* && $out == *"status 0"* && $out != *"LINK SHOWN"* ]] || return 1
+    # the same for a backup
+    declare -f backup_share_file | grep -qx '    share_require .*' && declare -f backup_share_file | grep -qE '\(\( ?SHARE_READY ?\)\) \|\| return 0'
 )
 
 # A link through the site of the links: the address of the VPN, its nginx
@@ -9568,6 +9759,10 @@ check "restore: the site of the links of the backup put back, the one of this se
 check "site of the links: applied again by apply and a new address, removed with the VPN, replaced by a seedbox" links_site_wired_in
 check "menus: with a key [10], the texts stay aligned (one or two columns)" ui_menu_two_digit_keys
 check "backup from the menu: its download offered right away; by command, no question" backup_from_menu_offers_link
+check "restore: its way back stopped, then run again, keeps what it put back" restore_undo_runs_again
+check "restore: names of certbot between quotes, after a mark of UTF-8 or a section with a comment refused" restore_refuses_letsencrypt_quoted_names
+check "Transmission: without its link, the file of /etc never through a link; its settings read by its own account" transmission_settings_fallback_no_link
+check "site of the links offered before a link: a step that fails stops it, no « installed », no link" links_install_stops_on_failure
 check "diagnostics: settings, backups, file of WireGuard and web passwords for root only, said otherwise" doctor_secrets_for_root_only
 check "diagnostics: the files of seedtunnel (and the version kept) changeable by root only, said otherwise" doctor_app_files_for_root_only
 check "apply: settings, backups and files of seedtunnel given back to root, nothing said when they are" apply_gives_rights_back

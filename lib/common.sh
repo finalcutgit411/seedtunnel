@@ -7,7 +7,7 @@
 # =============================================================================
 
 APP_NAME="seedtunnel"
-APP_VERSION="1.0.8"
+APP_VERSION="1.0.9"
 # Format of the settings in /etc/seedtunnel, and so of the backups that hold
 # them: 1 up to now. Raised by a version that writes its settings another
 # way; a backup of a format newer than this version knows is refused.
@@ -464,11 +464,14 @@ state_write() {
     } >"$file.tmp" || die 'Cannot write %s (disk full?).' "$file"
     if [[ -f $file && ! -L $file ]] && cmp -s "$file.tmp" "$file"; then
         rm -f "$file.tmp"
-        chmod 600 "$file"
+        chmod 600 "$file" || die 'Cannot write %s (disk full?).' "$file"
         return 0
     fi
-    chmod 600 "$file.tmp"
-    mv -f "$file.tmp" "$file"
+    # checked here: a caller may run with « set -e » turned off
+    if ! { chmod 600 "$file.tmp" && mv -f "$file.tmp" "$file"; }; then
+        rm -f "$file.tmp"
+        die 'Cannot write %s (disk full?).' "$file"
+    fi
 }
 
 state_read() {

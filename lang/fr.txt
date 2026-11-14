@@ -414,8 +414,8 @@ fr: Transmission arrêté : disque presque plein (%s Go libres).
 
 # --- Diagnostic ---------------------------------------------------------------------------
 
-en: A restore did not finish: the settings of seedtunnel may be incomplete. To go back to those from before it:  rm -rf %s && mv %s %s && rm -f %s && seedtunnel apply
-fr: Une restauration ne s'est pas terminée : les réglages de seedtunnel sont peut-être incomplets. Pour revenir à ceux d'avant :  rm -rf %s && mv %s %s && rm -f %s && seedtunnel apply
+en: A restore did not finish: the settings of seedtunnel may be incomplete. To go back to those from before it:  test -d %s && rm -rf %s && mv -T %s %s && seedtunnel apply && rm -f %s
+fr: Une restauration ne s'est pas terminée : les réglages de seedtunnel sont peut-être incomplets. Pour revenir à ceux d'avant :  test -d %s && rm -rf %s && mv -T %s %s && seedtunnel apply && rm -f %s
 
 en: A restore did not finish: the settings of seedtunnel may be incomplete. Run it again:  seedtunnel restore FILE
 fr: Une restauration ne s'est pas terminée : les réglages de seedtunnel sont peut-être incomplets. Relancez-la :  seedtunnel restore FICHIER
@@ -3218,3 +3218,14 @@ fr: Jetons des liens cachés dans les journaux de nginx
 
 en: Transmission could run a program put in %s (its lock of systemd is not in force)   → seedtunnel apply
 fr: Transmission pourrait lancer un programme déposé dans %s (son verrouillage par systemd n'est pas en place)   → seedtunnel apply
+
+# --- 1.0.9 : retour arrière relançable, certbot, réglages de Transmission, site des liens ----
+
+en: Nothing to put back: %s and %s are both missing.
+fr: Rien à remettre : %s et %s manquent tous les deux.
+
+en: A restore did not finish: the settings of seedtunnel may be incomplete. To go back to what was there before it:  bash %s.undo
+fr: Une restauration ne s'est pas terminée : les réglages de seedtunnel sont peut-être incomplets. Pour revenir à ce qu'il y avait avant :  bash %s.undo
+
+en: The settings of Transmission %s are not a file (a link?): seedtunnel does not follow it   → rm %s, then seedtunnel apply
+fr: Les réglages de Transmission %s ne sont pas un fichier (un lien ?) : seedtunnel ne le suit pas   → rm %s, puis seedtunnel apply

@@ -20,7 +20,7 @@
 - `/etc/seedtunnel` et les sauvegardes sont lisibles par root uniquement, comme les réglages qu'une restauration a remplacés (`/etc/seedtunnel.before-restore-…`, anciennes clés et passphrase comprises). `seedtunnel doctor` les signale jusqu'à leur suppression : Sauvegarde / restauration → « Mes sauvegardes », ou `seedtunnel restore clean`.
 - `seedtunnel doctor` vérifie que les réglages, les sauvegardes et les fichiers de SeedTunnel ne sont qu'à root (seul root peut modifier ce que root lance), que Transmission ne peut rien lancer depuis le dossier des données, et qu'aucun jeton de lien n'est en clair dans les journaux de nginx. `seedtunnel apply` remet les droits en ordre.
 - Une sauvegarde faite par quelqu'un d'autre ne peut rien lancer à la restauration : aucun fichier exécutable, seulement les réglages de SeedTunnel avec des valeurs qu'il accepterait, des noms de clients VPN valides, tous les fichiers à root, et de Let's Encrypt seulement le certificat de SeedTunnel, renouvelé sans autre commande que le rechargement de nginx.
-- root n'écrit jamais là où le compte de Transmission (ou l'utilisateur SFTP) pourrait le mener avec un lien : les réglages de Transmission et les torrents remis sont écrits par son propre compte.
+- root ne lit ni n'écrit jamais là où le compte de Transmission (ou l'utilisateur SFTP) pourrait le mener avec un lien : les réglages de Transmission sont lus et écrits par son propre compte, et les torrents remis écrits par lui.
 - Le jeton d'un lien de téléchargement, son mot de passe, ne figure dans aucun argument de commande (`ps` et `systemctl status` les montrent à tous les comptes), pas plus que le hash du mot de passe de la seedbox.
 
 ## Ce que SeedTunnel ne garantit pas

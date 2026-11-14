@@ -145,8 +145,8 @@ restore_unfinished() {
                 printf '  bash %s.undo\n' "$RESTORE_PREVIOUS" >&2
             else
                 warn 'The restore did not finish (details in %s). Your previous settings are kept in %s. To go back to them:' "$APP_LOG" "$RESTORE_PREVIOUS"
-                printf '  rm -rf %s && mv %s %s && rm -f %s && seedtunnel apply\n' \
-                    "$APP_STATE_DIR" "$RESTORE_PREVIOUS" "$APP_STATE_DIR" "$RESTORE_MARKER" >&2
+                printf '  test -d %s && rm -rf %s && mv -T %s %s && seedtunnel apply && rm -f %s\n' \
+                    "$RESTORE_PREVIOUS" "$APP_STATE_DIR" "$RESTORE_PREVIOUS" "$APP_STATE_DIR" "$RESTORE_MARKER" >&2
             fi
             ;;
     esac
@@ -176,34 +176,46 @@ restore_keep_outside() {
 }
 
 # restore_undo_script PREVIOUS — the script that puts back what was there
-# before the restore (see restore_keep_outside)
+# before the restore (see restore_keep_outside). It can be run again if it
+# stops (« seedtunnel apply » failing, a power cut): the settings of before
+# are moved back only while they are still beside, and its marker and its
+# copies stay until the end.
 restore_undo_script() {
     local previous=$1 outside="$1.outside"
     cat <<EOF
 #!/bin/bash
 # Written by seedtunnel: puts back what was there before a restore that did
 # not finish (settings, SSH keys of SFTP, certificate, list of torrents).
+# Run again if it stops: what it already put back is kept.
 set -e
 systemctl stop transmission-daemon 2>/dev/null || true
-rm -rf -- $(printf '%q' "$APP_STATE_DIR")
-mv -T -- $(printf '%q %q' "$previous" "$APP_STATE_DIR")
-rm -rf -- $(printf '%q' "$SFTP_KEYS_DIR")
-if [ -d $(printf '%q' "$outside/ssh-keys") ]; then cp -a -- $(printf '%q %q' "$outside/ssh-keys" "$SFTP_KEYS_DIR"); fi
-for part in $(printf '%q %q %q' "live/$LETSENCRYPT_CERT_NAME" "archive/$LETSENCRYPT_CERT_NAME" "renewal/$LETSENCRYPT_CERT_NAME.conf"); do
-    rm -rf -- $(printf '%q' "$LETSENCRYPT_ROOT")/"\$part"
-    if [ -e $(printf '%q' "$outside/letsencrypt")/"\$part" ]; then
-        mkdir -p $(printf '%q' "$LETSENCRYPT_ROOT")/"\${part%/*}"
-        cp -a -- $(printf '%q' "$outside/letsencrypt")/"\$part" $(printf '%q' "$LETSENCRYPT_ROOT")/"\${part%/*}/"
-    fi
-done
-for part in torrents resume; do
-    rm -rf -- $(printf '%q' "$TRANSMISSION_STATE_DIR")/"\$part"
-    if [ -d $(printf '%q' "$outside/transmission")/"\$part" ]; then cp -a -- $(printf '%q' "$outside/transmission")/"\$part" $(printf '%q' "$TRANSMISSION_STATE_DIR")/; fi
-done
+if [ -d $(printf '%q' "$previous") ]; then
+    rm -rf -- $(printf '%q' "$APP_STATE_DIR")
+    mv -T -- $(printf '%q %q' "$previous" "$APP_STATE_DIR")
+fi
+if [ ! -d $(printf '%q' "$APP_STATE_DIR") ]; then
+    echo $(printf '%q' "$(t 'Nothing to put back: %s and %s are both missing.' "$previous" "$APP_STATE_DIR")") >&2
+    exit 1
+fi
+if [ -d $(printf '%q' "$outside") ]; then
+    rm -rf -- $(printf '%q' "$SFTP_KEYS_DIR")
+    if [ -d $(printf '%q' "$outside/ssh-keys") ]; then cp -a -- $(printf '%q %q' "$outside/ssh-keys" "$SFTP_KEYS_DIR"); fi
+    for part in $(printf '%q %q %q' "live/$LETSENCRYPT_CERT_NAME" "archive/$LETSENCRYPT_CERT_NAME" "renewal/$LETSENCRYPT_CERT_NAME.conf"); do
+        rm -rf -- $(printf '%q' "$LETSENCRYPT_ROOT")/"\$part"
+        if [ -e $(printf '%q' "$outside/letsencrypt")/"\$part" ]; then
+            mkdir -p $(printf '%q' "$LETSENCRYPT_ROOT")/"\${part%/*}"
+            cp -a -- $(printf '%q' "$outside/letsencrypt")/"\$part" $(printf '%q' "$LETSENCRYPT_ROOT")/"\${part%/*}/"
+        fi
+    done
+    for part in torrents resume; do
+        rm -rf -- $(printf '%q' "$TRANSMISSION_STATE_DIR")/"\$part"
+        if [ -d $(printf '%q' "$outside/transmission")/"\$part" ]; then cp -a -- $(printf '%q' "$outside/transmission")/"\$part" $(printf '%q' "$TRANSMISSION_STATE_DIR")/; fi
+    done
+fi
 $(restore_undo_rename)
+seedtunnel apply
 rm -f -- $(printf '%q' "$RESTORE_MARKER")
 rm -rf -- $(printf '%q' "$outside")
-seedtunnel apply
 rm -f -- "\$0"
 EOF
 }
@@ -582,7 +594,8 @@ backup_share_file() {
     size=$(human_size "$(stat -c %s "$file")")
     banner
     section "$2"
-    share_require "$(t 'Without a link, copy it with WinSCP or scp: %s' "$file")" || return 0
+    share_require "$(t 'Without a link, copy it with WinSCP or scp: %s' "$file")"
+    ((SHARE_READY)) || return 0
     say 'Backup of %s.' "$(date -r "$file" '+%F %R')"
     share_create "$file" "${file##*/}" "$(t 'seedtunnel backup')" "$(text share_steps_backup)" \
         "$(t 'The backup is encrypted: it cannot be read without its passphrase.')" "$BACKUP_DOWNLOADED_MARK"
@@ -1260,19 +1273,34 @@ restore_bad_setting() (
 # etc/letsencrypt). certbot runs the commands of the renewal file of a
 # certificate as root, twice a day, and writes where it says: only the
 # reload of nginx, and the paths seedtunnel uses. Nothing: all fine.
+# Names (of the settings, of the sections) only as certbot writes them: its
+# reader also takes a name between quotes, after a mark of UTF-8 or followed
+# by a comment as the same name, which this check would not recognise.
 restore_letsencrypt_unsafe() {
     local file="$1/renewal/$LETSENCRYPT_CERT_NAME.conf" line key value section="" live
     [[ -e $file || -L $file ]] || return 0
     live="$LETSENCRYPT_ROOT/live/$LETSENCRYPT_CERT_NAME"
     while IFS= read -r line || [[ -n $line ]]; do
         line=${line%$'\r'}
+        # a comment, for certbot too
+        [[ $line =~ ^[[:space:]]*# ]] && continue
         if [[ $line =~ ^[[:space:]]*\[ ]]; then
-            section=${line//[[:space:]]/}
+            section=${line%%#*}
+            section=${section//[[:space:]]/}
+            [[ $section =~ ^\[+[a-z_]+\]+$ ]] || {
+                printf '%s' "$section"
+                return 0
+            }
             continue
         fi
         [[ $line == *=* ]] || continue
         key=${line%%=*}
         key=${key//[[:space:]]/}
+        # a setting of certbot, or a domain name in [[webroot_map]]
+        [[ $key =~ ^[A-Za-z0-9._:-]+$ ]] || {
+            printf '%s' "$key"
+            return 0
+        }
         value=${line#*=}
         value=${value#"${value%%[![:space:]]*}"}
         value=${value%"${value##*[![:space:]]}"}

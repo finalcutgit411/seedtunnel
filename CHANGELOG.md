@@ -3,6 +3,16 @@
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 
+## [1.0.9] - 2026-11-14
+
+### Security
+- Restore: the renewal file of the certificate in a backup is read as certbot reads it. A name between quotes (`"archive_dir"`), after a mark of UTF-8, or a section followed by a comment, is the same name for certbot, and passed the check: a backup made by someone else could send the renewals to other paths. These names are refused, like the plain ones with such values.
+- Transmission: without the link of its folder, its settings in `/etc/transmission-daemon` are no longer followed when they are a link (that folder can be written by the group of Transmission), and root no longer reads them to merge them: the account of Transmission does. A link there could have made root copy a file of another program where Transmission reads it.
+
+### Fixed
+- Restore cut short: its way back (`bash …undo`) can be run again if it stops (`seedtunnel apply` failing, a power cut). Run again, it deleted the settings it had just put back. Its marker and its copies now go only once it went to the end, and `seedtunnel doctor` shows it as long as it is there. The command shown when there is no such script no longer deletes anything when run a second time.
+- Site of the links installed before a link: a step that failed (settings that cannot be written, disk full) no longer ends with « Site of the links installed. » and the link. It stops there, and says why.
+
 ## [1.0.8] - 2026-11-14
 
 ### Added
