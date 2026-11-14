@@ -282,29 +282,26 @@ forward_drop_tables() {
 # wins over any other table that accepts: it must be the program that set it
 # that lets the VPN through.
 doctor_vpn_forward() {
-    local ruleset family name allowed docker interface blocked=0
+    local ruleset family name allowed docker blocked=0
     ruleset=$(nft list ruleset 2>/dev/null) || return 0
-    interface=$(default_interface)
     while read -r family name allowed docker; do
-        if ((allowed)) && { ((docker == 0)) || docker_forward_drop_off; }; then continue; fi
+        if ((allowed)) && { ((docker == 0)) || docker_forward_drop_off || vpn_docker_on; }; then continue; fi
         blocked=1
         if ((allowed)); then
-            doctor_warn 'Docker blocks the traffic that crosses the server; rules let the clients through for now, but those added by hand disappear at the next restart   → Docker 28 or later: add  "ip-forward-no-drop": true  to %s' "$DOCKER_DAEMON_CONFIG"
+            doctor_warn 'Docker blocks the traffic that crosses the server; rules typed by hand let the clients through for now, but they disappear at the next restart   → seedtunnel apply (puts them back at each start of Docker)'
         elif ((docker)); then
-            doctor_error 'Docker blocks the traffic of the clients: they connect, but have no Internet'
-            say '  Right now (until the next restart):'
-            printf '    iptables -I DOCKER-USER -i %s -o %s -j ACCEPT\n' "$VPN_INTERFACE" "${interface:-?}"
-            printf '    iptables -I DOCKER-USER -i %s -o %s -m conntrack --ctstate RELATED,ESTABLISHED,DNAT -j ACCEPT\n' "${interface:-?}" "$VPN_INTERFACE"
-            if docker_forward_drop_off; then
-                say '  Already in %s: Docker no longer blocks after the next restart of the server.' "$DOCKER_DAEMON_CONFIG"
-            else
-                say '  For good (Docker 28 or later): add  "ip-forward-no-drop": true  to %s (read when Docker starts)' "$DOCKER_DAEMON_CONFIG"
-            fi
+            doctor_error 'Docker blocks the traffic of the clients: they connect, but have no Internet   → seedtunnel apply (2 rules in DOCKER-USER, put back at each start of Docker)'
         else
             doctor_error 'The firewall rules of another program (table %s) block the traffic of the clients: they connect, but have no Internet. They must accept what comes in by %s and what goes back to it.' "$family $name" "$VPN_INTERFACE"
         fi
     done < <(forward_drop_tables "$VPN_INTERFACE" <<<"$ruleset")
-    if ((blocked == 0)); then doctor_ok 'Traffic of the clients to the Internet: allowed'; fi
+    if ((blocked == 0)); then
+        if vpn_docker_on && docker_installed; then
+            doctor_ok 'Traffic of the clients to the Internet: allowed (through Docker: rules of seedtunnel in DOCKER-USER)'
+        else
+            doctor_ok 'Traffic of the clients to the Internet: allowed'
+        fi
+    fi
 }
 
 # Ubuntu 26.04: AppArmor must let Transmission into the data folder. The rules

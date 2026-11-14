@@ -33,6 +33,9 @@ VPN_SYSCTL_FILE="/etc/sysctl.d/90-seedtunnel-vpn.conf"
 WIREGUARD_CONF="/etc/wireguard/$VPN_INTERFACE.conf"
 # Addition to the service of WireGuard: it loads the NAT rules (see below)
 VPN_SYSTEMD_DROPIN="/etc/systemd/system/wg-quick@$VPN_INTERFACE.service.d/seedtunnel.conf"
+# Puts back, after each start of Docker, the two rules that let the VPN
+# through its firewall (vpn_apply_docker)
+VPN_DOCKER_UNIT="/etc/systemd/system/seedtunnel-docker.service"
 
 vpn_load() {
     VPN_PORT=51820
@@ -383,6 +386,125 @@ vpn_apply() {
         run 'Reloading systemd' systemctl daemon-reload
     fi
     vpn_reconcile "$changed"
+    vpn_apply_docker
+}
+
+# --- Docker on the same server ----------------------------------------------------
+# Docker refuses by default the traffic that crosses the server (its FORWARD
+# policy: drop): the clients connect, but have no Internet. It keeps the chain
+# DOCKER-USER for the rules of the administrator, read before its own: two
+# rules there let the VPN through, nothing else, and the protection of Docker
+# stays. From the VPN to the Internet; back, the answers and the connections
+# to the open ports of the clients (DNAT). With iptables, as Docker; never its
+# own chains, never its settings (« ip-forward-no-drop » only exists since
+# Docker 28: an older one would refuse to start).
+
+# Docker installed (its service known to systemd)
+docker_installed() { [[ $(systemctl show -p LoadState --value docker.service 2>/dev/null) == loaded ]]; }
+
+# The chain of Docker for the rules of the administrator is there (not with
+# the nftables mode of Docker, nor with « "iptables": false »: nothing blocks)
+docker_user_chain() { command -v iptables >/dev/null 2>&1 && iptables -w -n -L DOCKER-USER >/dev/null 2>&1; }
+
+# docker_rule out|back INTERFACE — the arguments of one of the two rules
+docker_rule() {
+    if [[ $1 == out ]]; then
+        printf '%s' "-i $VPN_INTERFACE -o $2 -s $VPN_SUBNET.0/24 -j ACCEPT"
+    else
+        printf '%s' "-i $2 -o $VPN_INTERFACE -d $VPN_SUBNET.0/24 -m conntrack --ctstate RELATED,ESTABLISHED,DNAT -j ACCEPT"
+    fi
+}
+
+# Both rules in DOCKER-USER right now, for INTERFACE
+docker_rules_present() {
+    local rule
+    for rule in out back; do
+        # shellcheck disable=SC2046 # the arguments of the rule, one by one
+        iptables -w -C DOCKER-USER $(docker_rule "$rule" "$1") 2>/dev/null || return 1
+    done
+}
+
+# The service that puts the rules back each time Docker starts (and takes them
+# away when it stops): never twice the same rule
+vpn_generate_docker_unit() {
+    local out back
+    out=$(docker_rule out "$1")
+    back=$(docker_rule back "$1")
+    cat <<EOF
+# Written by seedtunnel: lets the VPN through the firewall of Docker
+[Unit]
+Description=seedtunnel: VPN let through the firewall of Docker (DOCKER-USER)
+After=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'iptables -w -n -L DOCKER-USER >/dev/null 2>&1 || exit 0; iptables -w -C DOCKER-USER $back 2>/dev/null || iptables -w -I DOCKER-USER $back; iptables -w -C DOCKER-USER $out 2>/dev/null || iptables -w -I DOCKER-USER $out'
+ExecStop=/bin/sh -c 'while iptables -w -D DOCKER-USER $out 2>/dev/null; do :; done; while iptables -w -D DOCKER-USER $back 2>/dev/null; do :; done'
+
+[Install]
+WantedBy=docker.service
+EOF
+}
+
+# vpn_apply_docker — with Docker: the service written (for the interface to
+# the Internet), on, and the rules in place. Without Docker any more: the
+# service goes. Said only when something is done.
+vpn_apply_docker() {
+    local unit=${VPN_DOCKER_UNIT##*/}
+    if ! docker_installed; then
+        vpn_remove_docker
+        return 0
+    fi
+    if [[ -e $VPN_DOCKER_UNIT ]] && [[ $(vpn_generate_docker_unit "$VPN_OUT_INTERFACE") != "$(<"$VPN_DOCKER_UNIT")" ]]; then
+        # another interface: the rules of the old one taken away first, by the
+        # service as it was
+        systemctl stop "$unit" &>/dev/null || true
+    fi
+    if write_if_changed "$VPN_DOCKER_UNIT" 644 root:root vpn_generate_docker_unit "$VPN_OUT_INTERFACE"; then
+        run 'Reloading systemd' systemctl daemon-reload
+    fi
+    if ! systemctl is-enabled --quiet "$unit" 2>/dev/null; then systemctl enable --quiet "$unit" 2>>"$APP_LOG" || true; fi
+    # Docker stopped: its service puts the rules when it starts
+    systemctl is-active --quiet docker.service || return 0
+    docker_user_chain || return 0
+    if ! docker_rules_present "$VPN_OUT_INTERFACE" || ! systemctl is-active --quiet "$unit"; then
+        run 'Letting the VPN through Docker (DOCKER-USER)' systemctl restart "$unit"
+        docker_rules_present "$VPN_OUT_INTERFACE" \
+            || die 'The rules for Docker are not in DOCKER-USER (details in %s).' "$APP_LOG"
+    fi
+}
+
+# vpn_docker_on — the service of seedtunnel for Docker is on
+vpn_docker_on() { [[ -e $VPN_DOCKER_UNIT ]] && systemctl is-enabled --quiet "${VPN_DOCKER_UNIT##*/}" 2>/dev/null; }
+
+# The service and its rules taken away (with the VPN, or Docker gone)
+vpn_remove_docker() {
+    local unit=${VPN_DOCKER_UNIT##*/}
+    [[ -e $VPN_DOCKER_UNIT ]] || return 0
+    log_run 'Taking the rules for Docker away' systemctl disable --now "$unit"
+    rm -f "$VPN_DOCKER_UNIT"
+    systemctl daemon-reload 2>/dev/null || true
+}
+
+# Menu Firewall: Docker blocks the VPN (installed after it, rules taken away):
+# said, asked, then done right away
+vpn_docker_menu() {
+    banner
+    section 'Let the VPN through Docker'
+    ui_box info "$(t 'What seedtunnel does')" \
+        "$(t 'Two rules in the chain DOCKER-USER: what comes from the VPN (%s) and goes to the Internet (%s) is accepted, and so are the answers that come back, and the connections to the open ports of the clients.' "$VPN_INTERFACE" "$VPN_OUT_INTERFACE")" \
+        "$(t 'A small service (seedtunnel-docker) puts them back each time Docker starts; they go away with the VPN.')" \
+        "$(t 'Nothing else changes for Docker: neither its settings nor its containers, and it is not restarted.')"
+    echo
+    if ! confirm 'Let the VPN through Docker?' y; then return 0; fi
+    vpn_apply_docker
+    if docker_rules_present "$VPN_OUT_INTERFACE"; then
+        echo
+        ok 'The VPN goes through Docker: the devices have the Internet again.'
+    fi
+    pause
 }
 
 # vpn_reconcile CHANGED — puts the running VPN in line with its files. Even when
@@ -995,6 +1117,7 @@ vpn_uninstall() {
     if ip link show "$VPN_INTERFACE" &>/dev/null || nft list table ip seedtunnel &>/dev/null; then
         die 'The VPN could not be stopped (details in %s): nothing was deleted. Try again, or:  systemctl stop wg-quick@%s' "$APP_LOG" "$VPN_INTERFACE"
     fi
+    vpn_remove_docker
     rm -rf "${VPN_STATE_DIR:?}" "$VPN_CONF_FILE" "$WIREGUARD_CONF" "$VPN_SYSCTL_FILE" "$VPN_SYSTEMD_DROPIN"
     # the folder only if nothing else is in it (an addition of the administrator)
     rmdir "${VPN_SYSTEMD_DROPIN%/*}" 2>/dev/null || true

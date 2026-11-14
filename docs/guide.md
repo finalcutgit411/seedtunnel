@@ -273,7 +273,7 @@ Run again, the installation only changes what needs to change. A file changed by
 - **The VPN is IPv4.** The IPv6 of the devices is blocked in the tunnel rather than leaking.
 - **The devices of the VPN do not see each other**: a laptop cannot reach a phone through the tunnel. Each one reaches the server and the Internet.
 - **One person per seedbox.**
-- **Docker on the same server** can cut the VPN off the Internet: the devices connect, but nothing comes back. The diagnostic sees it, so does the home screen (block Firewall in red), and the screen Firewall gives the two commands that fix it right away. For good, with Docker 28 or later: add `"ip-forward-no-drop": true` to `/etc/docker/daemon.json` (the whole file, if it does not exist: `{ "ip-forward-no-drop": true }`), then restart the server. An older Docker does not know this setting and would refuse to start. SeedTunnel never touches the rules of Docker.
+- **Docker on the same server** refuses by default the traffic that crosses the server: left alone, the devices would connect to the VPN without having the Internet. SeedTunnel puts it right by itself: when the VPN is installed, and at each `seedtunnel apply`, it adds two rules to `DOCKER-USER`, the chain Docker keeps for your own rules. They only concern the VPN: what leaves it for the Internet; back, the answers and the connections to the open ports of the clients. A small service, `seedtunnel-docker`, puts them back each time Docker starts, and they go away with the VPN. The protection of Docker stays: SeedTunnel changes neither its settings nor its own rules. Docker installed after SeedTunnel: the home screen shows it (block Firewall in red), and Firewall → `[4] Let the VPN through Docker` puts it right.
 
 ### Other ways to install
 

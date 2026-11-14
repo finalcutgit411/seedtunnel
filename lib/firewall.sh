@@ -725,8 +725,7 @@ NFTABLES_CONF="/etc/nftables.conf"
 
 # fw_finding LEVEL SHORT TITLE LINE… — one finding: bad or warn, a few words
 # for the home screen (« Docker blocks the VPN »), the title of its frame and
-# its lines (texts already translated). FW_COMMANDS: commands to show under
-# the frame, set just before (one per line).
+# its lines (texts already translated)
 fw_finding() {
     local text
     FW_LEVELS+=("$1")
@@ -735,18 +734,25 @@ fw_finding() {
     shift 3
     printf -v text '%s\n' "$@"
     FW_TEXTS+=("${text%$'\n'}")
-    FW_CMDS+=("$FW_COMMANDS")
-    FW_COMMANDS=""
 }
 
-# firewall_findings — FW_LEVELS, FW_SHORTS, FW_TITLES, FW_TEXTS, FW_CMDS: what
-# is wrong, the worst first in its kind (nothing: all is right)
+# firewall_findings — FW_LEVELS, FW_SHORTS, FW_TITLES, FW_TEXTS: what is
+# wrong, the worst first in its kind (nothing: all is right)
 firewall_findings() {
-    local rules missing ruleset family name allowed docker interface fix
-    FW_LEVELS=() FW_SHORTS=() FW_TITLES=() FW_TEXTS=() FW_CMDS=()
-    FW_COMMANDS=""
-    # what puts the rules in place again: the menu, or the command
-    if ((INTERACTIVE)); then fix=$(t '[1] Enable / update the firewall'); else fix="seedtunnel firewall enable"; fi
+    local rules missing ruleset family name allowed docker fix docker_fix
+    FW_LEVELS=() FW_SHORTS=() FW_TITLES=() FW_TEXTS=()
+    # 1: Docker blocks the VPN, or only rules typed by hand let it through
+    # (the menu offers to let it through for good)
+    FW_DOCKER=0
+    # what puts the rules in place again, what lets the VPN through Docker:
+    # the menu, or the command
+    if ((INTERACTIVE)); then
+        fix=$(t '[1] Enable / update the firewall')
+        docker_fix=$(t '[4] Let the VPN through Docker')
+    else
+        fix="seedtunnel firewall enable"
+        docker_fix="seedtunnel apply"
+    fi
     if { vpn_installed || seedbox_installed; } && ufw_active; then
         fw_finding bad "$(t 'ufw is on')" "$(t 'ufw is on')" \
             "$(t 'The firewall of Ubuntu blocks the VPN and the seedbox.')" \
@@ -776,29 +782,21 @@ firewall_findings() {
         fi
     fi
     # the traffic of the clients crosses the server: another program may
-    # refuse it (doctor_vpn_forward)
+    # refuse it (doctor_vpn_forward). Docker: let through for good by the
+    # service of seedtunnel (or by its own setting).
     if vpn_installed && ruleset=$(nft list ruleset 2>/dev/null); then
-        interface=$(default_interface || true)
         while read -r family name allowed docker; do
             [[ -n $family ]] || continue
-            if ((allowed)) && { ((docker == 0)) || docker_forward_drop_off; }; then continue; fi
+            if ((allowed)) && { ((docker == 0)) || docker_forward_drop_off || vpn_docker_on; }; then continue; fi
+            if ((docker)); then FW_DOCKER=1; fi
             if ((docker && allowed)); then
                 fw_finding warn "$(t 'rules for Docker temporary')" "$(t 'Temporary rules for Docker')" \
                     "$(t 'Rules added by hand let the VPN through, but they disappear at the next restart of Docker or of the server.')" \
-                    "$(t 'For good (Docker 28 or later): add  "ip-forward-no-drop": true  to %s, then restart the server.' "$DOCKER_DAEMON_CONFIG")"
+                    "$(t 'To keep them: %s (2 rules in the chain DOCKER-USER, the one Docker keeps for your own rules, put back each time Docker starts).' "$docker_fix")"
             elif ((docker)); then
-                FW_COMMANDS="iptables -I DOCKER-USER -i $VPN_INTERFACE -o ${interface:-?} -j ACCEPT"$'\n'
-                FW_COMMANDS+="iptables -I DOCKER-USER -i ${interface:-?} -o $VPN_INTERFACE -m conntrack --ctstate RELATED,ESTABLISHED,DNAT -j ACCEPT"
-                if docker_forward_drop_off; then
-                    fw_finding bad "$(t 'Docker blocks the VPN')" "$(t 'Docker blocks the VPN')" \
-                        "$(t 'The devices connect to the VPN, but have no Internet: Docker, installed on this server, refuses by default the traffic that crosses it.')" \
-                        "$(t 'Already in %s: Docker no longer blocks after the next restart of the server. Right now (until then), the commands below.' "$DOCKER_DAEMON_CONFIG")"
-                else
-                    fw_finding bad "$(t 'Docker blocks the VPN')" "$(t 'Docker blocks the VPN')" \
-                        "$(t 'The devices connect to the VPN, but have no Internet: Docker, installed on this server, refuses by default the traffic that crosses it.')" \
-                        "$(t 'Right now (until the next restart): the commands below.')" \
-                        "$(t 'For good (Docker 28 or later): add  "ip-forward-no-drop": true  to %s, then restart the server.' "$DOCKER_DAEMON_CONFIG")"
-                fi
+                fw_finding bad "$(t 'Docker blocks the VPN')" "$(t 'Docker blocks the VPN')" \
+                    "$(t 'The devices connect to the VPN, but have no Internet: Docker, installed on this server, refuses by default the traffic that crosses it.')" \
+                    "$(t 'To put it right: %s (2 rules in the chain DOCKER-USER, the one Docker keeps for your own rules, put back each time Docker starts).' "$docker_fix")"
             else
                 fw_finding bad "$(t 'another program blocks the VPN')" "$(t 'Another program blocks the VPN')" \
                     "$(t 'The rules of another program (table %s) refuse the traffic that crosses the server: the devices connect to the VPN, but have no Internet.' "$family $name")" \
@@ -813,8 +811,7 @@ firewall_findings() {
     fi
 }
 
-# The findings: in frames in the menus, as lines for the commands; the
-# commands to type under them
+# The findings: in frames in the menus, as lines for the commands
 firewall_findings_show() {
     local i line
     local -a lines
@@ -830,9 +827,6 @@ firewall_findings_show() {
                 printf '%s!%s %s\n' "$C_YELLOW" "$C_RESET" "${FW_TITLES[i]}"
             fi
             while IFS= read -r line; do printf '  %s\n' "$line"; done <<<"${FW_TEXTS[i]}"
-        fi
-        if [[ -n ${FW_CMDS[i]} ]]; then
-            while IFS= read -r line; do printf '    %s\n' "$line"; done <<<"${FW_CMDS[i]}"
         fi
     done
 }
@@ -866,6 +860,8 @@ firewall_menu() {
         ui_menu_add 1 "$(t 'Enable / update the firewall')"
         ui_menu_add 2 "$(t 'Turn the firewall off')"
         ui_menu_add 3 "$(t 'Show the rules')"
+        # only when Docker blocks the VPN (firewall_findings, just above)
+        if ((FW_DOCKER)); then ui_menu_add 4 "$(t 'Let the VPN through Docker')"; fi
         ui_menu_show
         echo
         ui_menu_ask choice back
@@ -873,6 +869,7 @@ firewall_menu() {
             1) ui_action firewall_enable ;;
             2) ui_action firewall_disable ;;
             3) ui_action firewall_rules_menu ;;
+            4) if ((FW_DOCKER)); then ui_action vpn_docker_menu; fi ;;
             "" | b) return 0 ;;
             q) ui_quit ;;
         esac

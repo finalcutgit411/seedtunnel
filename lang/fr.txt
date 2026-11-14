@@ -2085,21 +2085,6 @@ fr: Rechercher une mise à jour et l'installer
 en: IPv4 routing off for %s: the clients will have no Internet   → sysctl -w %s=1
 fr: Routage IPv4 désactivé pour %s : les clients n'auront pas Internet   → sysctl -w %s=1
 
-en: Docker blocks the traffic that crosses the server; rules let the clients through for now, but those added by hand disappear at the next restart   → Docker 28 or later: add  "ip-forward-no-drop": true  to %s
-fr: Docker bloque le trafic qui traverse le serveur ; des règles laissent passer les clients pour l'instant, mais celles ajoutées à la main disparaissent au prochain redémarrage   → Docker 28 ou plus récent : ajoutez  "ip-forward-no-drop": true  dans %s
-
-en: Docker blocks the traffic of the clients: they connect, but have no Internet
-fr: Docker bloque le trafic des clients : ils se connectent, mais n'ont pas Internet
-
-en:   Right now (until the next restart):
-fr:   Tout de suite (jusqu'au prochain redémarrage) :
-
-en:   Already in %s: Docker no longer blocks after the next restart of the server.
-fr:   Déjà dans %s : Docker ne bloquera plus après le prochain redémarrage du serveur.
-
-en:   For good (Docker 28 or later): add  "ip-forward-no-drop": true  to %s (read when Docker starts)
-fr:   Pour de bon (Docker 28 ou plus récent) : ajoutez  "ip-forward-no-drop": true  dans %s (lu au démarrage de Docker)
-
 en: The firewall rules of another program (table %s) block the traffic of the clients: they connect, but have no Internet. They must accept what comes in by %s and what goes back to it.
 fr: Les règles de pare-feu d'un autre programme (table %s) bloquent le trafic des clients : ils se connectent, mais n'ont pas Internet. Elles doivent accepter ce qui entre par %s et ce qui y retourne.
 
@@ -2988,20 +2973,11 @@ fr: règles pour Docker provisoires
 en: Rules added by hand let the VPN through, but they disappear at the next restart of Docker or of the server.
 fr: Des règles ajoutées à la main laissent passer le VPN, mais elles disparaîtront au prochain redémarrage de Docker ou du serveur.
 
-en: For good (Docker 28 or later): add  "ip-forward-no-drop": true  to %s, then restart the server.
-fr: Pour de bon (Docker 28 ou plus récent) : ajoutez  "ip-forward-no-drop": true  dans %s, puis redémarrez le serveur.
-
 en: Docker blocks the VPN
 fr: Docker bloque le VPN
 
 en: The devices connect to the VPN, but have no Internet: Docker, installed on this server, refuses by default the traffic that crosses it.
 fr: Les appareils se connectent au VPN, mais n'ont pas Internet : Docker, installé sur ce serveur, refuse par défaut le trafic qui le traverse.
-
-en: Already in %s: Docker no longer blocks after the next restart of the server. Right now (until then), the commands below.
-fr: Déjà dans %s : Docker ne bloquera plus après le prochain redémarrage du serveur. Tout de suite (d'ici là), les commandes ci-dessous.
-
-en: Right now (until the next restart): the commands below.
-fr: Tout de suite (jusqu'au prochain redémarrage) : les commandes ci-dessous.
 
 en: another program blocks the VPN
 fr: un autre programme bloque le VPN
@@ -3032,3 +3008,53 @@ fr: Un programme bloque le VPN
 
 en: nftables empties the rules
 fr: nftables vide les règles
+
+# --- 1.0.6 : le VPN à travers Docker (chaîne DOCKER-USER) -------------------------
+
+en: Docker blocks the traffic that crosses the server; rules typed by hand let the clients through for now, but they disappear at the next restart   → seedtunnel apply (puts them back at each start of Docker)
+fr: Docker bloque le trafic qui traverse le serveur ; des règles tapées à la main laissent passer les clients pour l'instant, mais elles disparaissent au prochain redémarrage   → seedtunnel apply (les remet à chaque démarrage de Docker)
+
+en: Docker blocks the traffic of the clients: they connect, but have no Internet   → seedtunnel apply (2 rules in DOCKER-USER, put back at each start of Docker)
+fr: Docker bloque le trafic des clients : ils se connectent, mais n'ont pas Internet   → seedtunnel apply (2 règles dans DOCKER-USER, remises à chaque démarrage de Docker)
+
+en: Traffic of the clients to the Internet: allowed (through Docker: rules of seedtunnel in DOCKER-USER)
+fr: Trafic des clients vers Internet : autorisé (à travers Docker : règles de seedtunnel dans DOCKER-USER)
+
+en: [4] Let the VPN through Docker
+fr: [4] Laisser passer le VPN à travers Docker
+
+en: Let the VPN through Docker
+fr: Laisser passer le VPN à travers Docker
+
+en: Letting the VPN through Docker (DOCKER-USER)
+fr: Passage du VPN à travers Docker (DOCKER-USER)
+
+en: The rules for Docker are not in DOCKER-USER (details in %s).
+fr: Les règles pour Docker ne sont pas dans DOCKER-USER (détails dans %s).
+
+en: Taking the rules for Docker away
+fr: Retrait des règles pour Docker
+
+en: What seedtunnel does
+fr: Ce que fait seedtunnel
+
+en: Two rules in the chain DOCKER-USER: what comes from the VPN (%s) and goes to the Internet (%s) is accepted, and so are the answers that come back, and the connections to the open ports of the clients.
+fr: Deux règles dans la chaîne DOCKER-USER : ce qui vient du VPN (%s) et va vers Internet (%s) est accepté, ainsi que les réponses qui reviennent et les connexions aux ports ouverts des clients.
+
+en: A small service (seedtunnel-docker) puts them back each time Docker starts; they go away with the VPN.
+fr: Un petit service (seedtunnel-docker) les remet à chaque démarrage de Docker ; elles partent avec le VPN.
+
+en: Nothing else changes for Docker: neither its settings nor its containers, and it is not restarted.
+fr: Rien d'autre ne change pour Docker : ni ses réglages, ni ses conteneurs, et il n'est pas redémarré.
+
+en: Let the VPN through Docker?
+fr: Laisser passer le VPN à travers Docker ?
+
+en: The VPN goes through Docker: the devices have the Internet again.
+fr: Le VPN passe à travers Docker : les appareils ont de nouveau Internet.
+
+en: To keep them: %s (2 rules in the chain DOCKER-USER, the one Docker keeps for your own rules, put back each time Docker starts).
+fr: Pour les garder : %s (2 règles dans la chaîne DOCKER-USER, celle que Docker réserve à vos propres règles, remises à chaque démarrage de Docker).
+
+en: To put it right: %s (2 rules in the chain DOCKER-USER, the one Docker keeps for your own rules, put back each time Docker starts).
+fr: Pour le régler : %s (2 règles dans la chaîne DOCKER-USER, celle que Docker réserve à vos propres règles, remises à chaque démarrage de Docker).

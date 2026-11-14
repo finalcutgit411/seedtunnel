@@ -291,6 +291,78 @@ tunnel_test() {
     ip netns exec st-client ping -c 3 -W 2 10.8.0.1
 }
 
+# --- Docker on the same server (a fake one) -----------------------------------
+# What Docker does to the traffic that crosses the server, without Docker: its
+# chain DOCKER-USER read first in FORWARD, then everything refused (policy
+# drop). seedtunnel must let the VPN through with two rules in DOCKER-USER,
+# put back by its service each time « Docker » starts.
+docker_fake_install() {
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends iptables >/dev/null || return 1
+    cat >/etc/systemd/system/docker.service <<'EOF'
+[Unit]
+Description=Docker played by the tests of seedtunnel (its firewall only)
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'iptables -w -N DOCKER-USER 2>/dev/null; iptables -w -C FORWARD -j DOCKER-USER 2>/dev/null || iptables -w -I FORWARD -j DOCKER-USER; iptables -w -P FORWARD DROP'
+ExecStop=/usr/sbin/iptables -w -P FORWARD ACCEPT
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload && systemctl start docker.service
+}
+
+# The client « phone » (tunnel_test) reaches the gateway of the server through
+# the tunnel: its traffic crosses the server (FORWARD), out by its interface
+# to the Internet
+docker_client_reach() {
+    local gateway public
+    gateway=$(ip -4 route show default | awk '{ print $3; exit }')
+    public=$(awk -F' = ' '/^PublicKey/ { print $2 }' /etc/seedtunnel/vpn/clients/phone.conf)
+    ip netns exec st-client wg set wgc peer "$public" allowed-ips "10.8.0.0/24,$gateway/32" || return 1
+    ip -n st-client route replace "$gateway/32" dev wgc || return 1
+    ip netns exec st-client ping -c 2 -W 2 "$gateway"
+}
+
+# The two rules of seedtunnel in DOCKER-USER, once each
+docker_rules_once() {
+    local interface
+    interface=$(ip -4 route show default | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i+1); exit } }')
+    iptables -w -S DOCKER-USER
+    (($(iptables -w -S DOCKER-USER | grep -c -- "-i wg0 -o $interface -s 10.8.0.0/24 -j ACCEPT") == 1)) \
+        && (($(iptables -w -S DOCKER-USER | grep -c -- "-i $interface -o wg0 -d 10.8.0.0/24 .*RELATED,ESTABLISHED,DNAT.* -j ACCEPT") == 1))
+}
+
+# « apply » again: nothing said, the rules still once each
+docker_apply_again_test() {
+    local out
+    out=$(app apply 2>&1) || return 1
+    [[ $out != *"through Docker"* ]] && docker_rules_once
+}
+
+# « Docker » restarted: the service of seedtunnel restarted with it, the rules
+# back once, the client through again
+docker_restart_test() {
+    systemctl restart docker.service || return 1
+    systemctl is-active --quiet seedtunnel-docker.service && docker_rules_once && docker_client_reach
+}
+
+# « Docker » gone: « apply » takes the service of seedtunnel and its rules away
+docker_fake_remove() {
+    systemctl disable --now docker.service 2>/dev/null
+    rm -f /etc/systemd/system/docker.service
+    systemctl daemon-reload
+    app apply || return 1
+    [[ ! -e /etc/systemd/system/seedtunnel-docker.service ]] || return 1
+    if iptables -w -S DOCKER-USER 2>/dev/null | grep -q -- "-i wg0"; then return 1; fi
+    iptables -w -D FORWARD -j DOCKER-USER 2>/dev/null
+    iptables -w -F DOCKER-USER 2>/dev/null
+    iptables -w -X DOCKER-USER 2>/dev/null
+    iptables -w -P FORWARD ACCEPT
+}
+
 # A second client, « tablet », in its own network namespace with its own way to
 # the server (192.168.251.0/24). The two clients cannot reach each other
 # through the tunnel, and a ping sent to the tablet from outside the tunnel
@@ -1302,6 +1374,20 @@ EOF
     check "VPN clients: cannot reach each other, nor be reached from outside the tunnel" vpn_isolation_test
     check "VPN clients: protected in the NAT table of the VPN, said by the diagnostics" \
         output_has "clients of the VPN protected" app doctor
+    check "the client reaches the gateway of the server through the tunnel" docker_client_reach
+
+    step "VPN: Docker on the same server (played by the tests)"
+    check "« Docker »: chain DOCKER-USER, traffic that crosses the server refused" docker_fake_install
+    check_fails "Docker blocks: the client no longer goes through the server" docker_client_reach
+    check "doctor: Docker blocks the clients, « seedtunnel apply » said" \
+        output_has "Docker blocks the traffic of the clients: they connect, but have no Internet   → seedtunnel apply" app doctor
+    check "apply: the VPN let through Docker" output_has "Letting the VPN through Docker (DOCKER-USER)… ok" app apply
+    check "two rules in DOCKER-USER, once each" docker_rules_once
+    check "the client goes through the server again" docker_client_reach
+    check "apply again: nothing done twice" docker_apply_again_test
+    check "« Docker » restarted: the rules back once, the client through" docker_restart_test
+    check "doctor: the traffic through Docker allowed" output_has "allowed (through Docker: rules of seedtunnel in DOCKER-USER)" app doctor
+    check "« Docker » gone: the service of seedtunnel and its rules too" docker_fake_remove
     # for phase 2: a backup of this server while it has its VPN only
     printf 'a test passphrase\n' >"$W/vpn-only.pass"
     chmod 600 "$W/vpn-only.pass"

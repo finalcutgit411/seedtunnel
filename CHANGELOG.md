@@ -11,6 +11,7 @@ versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 - Restore: a path that goes up out of the folders of seedtunnel (`etc/seedtunnel/../../…`) is refused before anything is extracted, with « Archive refused » (GNU tar stopped it, but later and less clearly).
 
 ### Fixed
+- Docker on the same server: the VPN clients connected, but had no Internet (Docker refuses by default the traffic that crosses the server). seedtunnel now lets the VPN through, when the VPN is installed and at each `seedtunnel apply`: two rules in `DOCKER-USER`, the chain Docker keeps for the rules of the administrator, limited to the VPN (out to the Internet; back, the answers and the connections to the open ports of the clients). A service, `seedtunnel-docker`, puts them back each time Docker starts; they go away with the VPN. The protection of Docker stays, and its settings are not touched. Docker installed later: menu Firewall → `[4] Let the VPN through Docker`.
 - `seedtunnel seedbox unban` right after a ban: a moment later, recidive banned the address again for a week (it reads the ban in the log of fail2ban). It is checked again a few seconds later, and unbanned again.
 - Ubuntu: logrotate never cut `/var/log/seedtunnel.log` (« parent directory has insecure permissions »: there, `/var/log` can be written by the group syslog). The rule now says which account cuts it (`su root root`), and the log no longer grows without end.
 - `seedtunnel seedbox sftp-key add` of a file that is not there: « File not found », no longer « Unexpected error ».
@@ -31,8 +32,7 @@ versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 - Menu, « Domain name and HTTPS certificate »: the address now, its certificate, when it ends and the public IP in a frame, then the two kinds of name and their certificate (also when the seedbox is installed).
 - Frames: a line is no longer cut before « : » or inside « … » (French). The questions in French end with « : ».
 - Menu, home screen: the block Firewall also turns yellow (« warning ») or red (« problem ») when something around it goes wrong: Docker or another program that blocks the VPN clients, rules for Docker that a restart removes, nftables that empties the rules at boot, ufw on. The reason is below the blocks.
-- Menu, screen Firewall, and `seedtunnel firewall status`: what is wrong is said in full, in a frame, with what to do; for Docker, the two commands of this server under it. The line « Firewall on — open: … » is cut between words.
-- `seedtunnel doctor` and the guide: `"ip-forward-no-drop"` is for Docker 28 or later (an older Docker does not know it, and would refuse to start).
+- Menu, screen Firewall, and `seedtunnel firewall status`: what is wrong is said in full, in a frame, with what to do. The line « Firewall on — open: … » is cut between words.
 - Deleting the last backup made by the server says « the only backup made by this server » (one copied into a home folder may be older, or of another server).
 - French: « Utilisation » for the help of `seedtunnel firewall` (it said « Usage »). The help says that `restore` without a file lists the backups in a terminal only.
 

@@ -46,6 +46,9 @@ load() {
     i18n_load en
     # never the backups of the machine that runs the tests (/root, /home)
     BACKUP_COPIED=()
+    # nor its Docker (the machines of GitHub have one): tests that need one
+    # play it
+    docker_installed() { return 1; }
     # the tests do not run as root: the command, as the current user
     runuser() {
         while [[ $1 != -- ]]; do shift; done
@@ -4696,24 +4699,24 @@ firewall_findings_cases() (
     DOCKER_DAEMON_CONFIG="$WORK/daemon-findings.json"
     rm -f "$DOCKER_DAEMON_CONFIG"
     nft() { if [[ $* == "list ruleset" ]]; then docker_ruleset; else printf 'type filter hook input priority 0; policy drop;\n'; fi; }
-    # nothing wrong: green, nothing said
+    vpn_docker_on() { return 1; }
+    # nothing wrong: green, nothing said (rules of seedtunnel for Docker)
     DOCKER_USER_RULES=yes
-    printf '{ "ip-forward-no-drop": true }\n' >"$DOCKER_DAEMON_CONFIG"
+    vpn_docker_on() { return 0; }
     firewall_findings
-    ((${#FW_LEVELS[@]} == 0)) || return 1
+    ((${#FW_LEVELS[@]} == 0 && FW_DOCKER == 0)) || return 1
     ui_status_reset
     home_firewall
     [[ ${UI_STATUS_LEVELS[*]} == ok && ${UI_STATUS_STATES[*]} == on ]] || return 1
-    # Docker blocks: red, the commands of this server under the frame
+    vpn_docker_on() { return 1; }
+    # Docker blocks: red, with the entry of the menu that lets the VPN through
     DOCKER_USER_RULES=no
-    rm -f "$DOCKER_DAEMON_CONFIG"
     firewall_status >"$WORK/findings.out" 2>&1
     cat "$WORK/findings.out"
     grep -q "✔ Firewall on — open: SSH (22/tcp), VPN (51820/udp)" "$WORK/findings.out" \
         && grep -q "┌─ ! Docker blocks the VPN ─" "$WORK/findings.out" \
-        && grep -q "Docker 28 or later" "$WORK/findings.out" \
-        && grep -qxF '    iptables -I DOCKER-USER -i wg0 -o ens3 -j ACCEPT' "$WORK/findings.out" \
-        && grep -qxF '    iptables -I DOCKER-USER -i ens3 -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED,DNAT -j ACCEPT' "$WORK/findings.out" || return 1
+        && grep -q "To put it right: \[4\] Let the VPN through Docker (2 rules in" "$WORK/findings.out" \
+        && ((FW_DOCKER == 1)) && ! grep -q "iptables" "$WORK/findings.out" || return 1
     ui_status_reset
     home_firewall
     [[ ${UI_STATUS_LEVELS[*]} == bad && ${UI_STATUS_STATES[*]} == problem && ${UI_STATUS_DETAILS[*]} == "firewall: Docker blocks the VPN" && ${UI_STATUS_SHORT[*]} == "Docker blocks the VPN" ]] || {
@@ -4722,6 +4725,8 @@ firewall_findings_cases() (
     }
     # let through by rules typed by hand: yellow « warning »
     DOCKER_USER_RULES=yes
+    firewall_findings
+    [[ ${FW_TEXTS[0]} == *"To keep them: [4] Let the VPN through Docker (2 rules"* ]] && ((FW_DOCKER == 1)) || return 1
     ui_status_reset
     home_firewall
     [[ ${UI_STATUS_LEVELS[*]} == warn && ${UI_STATUS_STATES[*]} == warning && ${UI_STATUS_DETAILS[*]} == "firewall: rules for Docker temporary" ]] || return 1
@@ -4767,35 +4772,154 @@ firewall_findings_cases() (
     firewall_status >"$WORK/findings.out" 2>&1
     cat "$WORK/findings.out"
     grep -qx "✘ The SSH port is closed" "$WORK/findings.out" && grep -q "seedtunnel firewall enable opens it" "$WORK/findings.out" \
-        && ! grep -q "┌─" "$WORK/findings.out"
+        && ! grep -q "┌─" "$WORK/findings.out" || return 1
+    # Docker, for the command: « seedtunnel apply » lets it through
+    firewall_rules_missing_list() { :; }
+    DOCKER_USER_RULES=no
+    nft() { if [[ $* == "list ruleset" ]]; then docker_ruleset; else printf 'type filter hook input priority 0; policy drop;\n'; fi; }
+    firewall_findings
+    [[ ${FW_TEXTS[0]} == *"To put it right: seedtunnel apply (2 rules"* ]]
+)
+
+# The VPN through Docker: a service that puts the two rules in DOCKER-USER
+# after each start of Docker (and takes them away when it stops), written for
+# the interface to the Internet; written, turned on and run when Docker is
+# there; nothing done again when all is in place; the rules of an old
+# interface taken away first; without Docker, the service goes
+vpn_docker_rules() (
+    load
+    local unit
+    VPN_DOCKER_UNIT="$WORK/docker-unit/seedtunnel-docker.service"
+    mkdir -p "$WORK/docker-unit"
+    rm -f "$VPN_DOCKER_UNIT" "$WORK/docker-rules" "$WORK/docker-calls"
+    VPN_OUT_INTERFACE=ens3
+    chown() { :; }
+    # the unit: its rules, limited to the VPN, the open ports of the clients
+    # (DNAT) kept; after Docker, with it
+    unit=$(vpn_generate_docker_unit ens3)
+    grep -qxF 'After=docker.service' <<<"$unit" && grep -qxF 'PartOf=docker.service' <<<"$unit" && grep -qxF 'WantedBy=docker.service' <<<"$unit" \
+        && grep -qF 'iptables -w -C DOCKER-USER -i wg0 -o ens3 -s 10.8.0.0/24 -j ACCEPT 2>/dev/null || iptables -w -I DOCKER-USER -i wg0 -o ens3 -s 10.8.0.0/24 -j ACCEPT' <<<"$unit" \
+        && grep -qF 'iptables -w -I DOCKER-USER -i ens3 -o wg0 -d 10.8.0.0/24 -m conntrack --ctstate RELATED,ESTABLISHED,DNAT -j ACCEPT' <<<"$unit" \
+        && grep -qF 'while iptables -w -D DOCKER-USER -i wg0 -o ens3 -s 10.8.0.0/24 -j ACCEPT 2>/dev/null; do :; done' <<<"$unit" || {
+        printf '%s\n' "$unit"
+        return 1
+    }
+    # a Docker that runs; the service puts the rules of the interface written
+    # in it when it starts, takes them away when it stops
+    docker_installed() { [[ $(systemctl show -p LoadState --value docker.service 2>/dev/null) == loaded ]]; }
+    DOCKER=loaded
+    systemctl() {
+        echo "systemctl $*" >>"$WORK/docker-calls"
+        case "$*" in
+            "show -p LoadState --value docker.service") echo "$DOCKER" ;;
+            "is-active --quiet docker.service") [[ $DOCKER == loaded ]] ;;
+            "is-enabled --quiet seedtunnel-docker.service") [[ -e $WORK/docker-enabled ]] ;;
+            "enable --quiet seedtunnel-docker.service") touch "$WORK/docker-enabled" ;;
+            "is-active --quiet seedtunnel-docker.service") [[ -e $WORK/docker-active ]] ;;
+            "restart seedtunnel-docker.service")
+                grep -o 'iptables -w -I DOCKER-USER [^;]*' "$VPN_DOCKER_UNIT" | sed "s/iptables -w -I DOCKER-USER //; s/'\$//" | sort -u >"$WORK/docker-rules"
+                touch "$WORK/docker-active"
+                ;;
+            "stop seedtunnel-docker.service" | "disable --now seedtunnel-docker.service")
+                rm -f "$WORK/docker-rules" "$WORK/docker-active"
+                ;;
+        esac
+    }
+    iptables() {
+        if [[ $2 == -C ]]; then
+            shift 3
+            grep -qxF -- "$*" "$WORK/docker-rules" 2>/dev/null
+        fi
+    }
+    vpn_apply_docker >"$WORK/docker.out" 2>&1 || {
+        cat "$WORK/docker.out"
+        return 1
+    }
+    cat "$WORK/docker.out"
+    [[ -e $VPN_DOCKER_UNIT && -e $WORK/docker-enabled ]] && grep -q "Letting the VPN through Docker (DOCKER-USER)… ok" "$WORK/docker.out" \
+        && docker_rules_present ens3 || return 1
+    # again: nothing to do, nothing said
+    : >"$WORK/docker-calls"
+    vpn_apply_docker >"$WORK/docker.out" 2>&1 || return 1
+    [[ ! -s $WORK/docker.out ]] && ! grep -q "restart\|stop" "$WORK/docker-calls" || return 1
+    # the rules taken away by hand: put back
+    rm -f "$WORK/docker-rules"
+    vpn_apply_docker >"$WORK/docker.out" 2>&1 && docker_rules_present ens3 || return 1
+    # another interface: the service stopped first (its rules go), then
+    # written for the new one
+    VPN_OUT_INTERFACE=eth1
+    : >"$WORK/docker-calls"
+    vpn_apply_docker >"$WORK/docker.out" 2>&1 || return 1
+    grep -q "systemctl stop seedtunnel-docker.service" "$WORK/docker-calls" && docker_rules_present eth1 && ! docker_rules_present ens3 || return 1
+    # Docker stopped: written and on, its start will put the rules
+    rm -f "$VPN_DOCKER_UNIT" "$WORK/docker-enabled" "$WORK/docker-rules" "$WORK/docker-active"
+    DOCKER=stopped-but-loaded
+    systemctl() {
+        echo "systemctl $*" >>"$WORK/docker-calls"
+        case "$*" in
+            "show -p LoadState --value docker.service") echo loaded ;;
+            "is-active --quiet docker.service") return 1 ;;
+            "enable --quiet seedtunnel-docker.service") touch "$WORK/docker-enabled" ;;
+            "is-enabled --quiet seedtunnel-docker.service") [[ -e $WORK/docker-enabled ]] ;;
+        esac
+    }
+    : >"$WORK/docker-calls"
+    vpn_apply_docker >"$WORK/docker.out" 2>&1 || return 1
+    [[ -e $VPN_DOCKER_UNIT && -e $WORK/docker-enabled ]] && ! grep -q "restart" "$WORK/docker-calls" || return 1
+    # no Docker any more: the service goes
+    systemctl() {
+        echo "systemctl $*" >>"$WORK/docker-calls"
+        [[ $* == "show -p LoadState --value docker.service" ]] && echo not-found
+        return 0
+    }
+    : >"$WORK/docker-calls"
+    vpn_apply_docker >"$WORK/docker.out" 2>&1 || return 1
+    [[ ! -e $VPN_DOCKER_UNIT ]] && grep -q "disable --now seedtunnel-docker.service" "$WORK/docker-calls" || return 1
+    # removed with the VPN; part of vpn_apply
+    declare -f vpn_uninstall | grep -q vpn_remove_docker && declare -f vpn_apply | grep -q vpn_apply_docker || return 1
+    # the menu Firewall: [4] only when Docker blocks the VPN; what it does
+    # said first, then done
+    declare -f firewall_menu | grep -q 'if ((FW_DOCKER)); then' || return 1
+    colors_init off
+    INTERACTIVE=1
+    clear() { :; }
+    pause() { :; }
+    confirm() { return 0; }
+    vpn_apply_docker() { echo "applied" >>"$WORK/docker-calls"; }
+    docker_rules_present() { return 0; }
+    : >"$WORK/docker-calls"
+    vpn_docker_menu >"$WORK/docker.out" 2>&1 || return 1
+    cat "$WORK/docker.out"
+    grep -q "What seedtunnel does" "$WORK/docker.out" && grep -q "goes to the Internet (eth1) is accepted" "$WORK/docker.out" \
+        && grep -qx applied "$WORK/docker-calls" && grep -q "The VPN goes through Docker" "$WORK/docker.out"
 )
 
 doctor_sees_vpn_traffic_blocked() (
     load
     colors_init off
-    default_interface() { echo ens3; }
     nft() { [[ $* == "list ruleset" ]] && docker_ruleset; }
     DOCKER_DAEMON_CONFIG="$WORK/daemon.json"
     rm -f "$DOCKER_DAEMON_CONFIG"
-    # blocked: red, with what to type right now and for good
+    vpn_docker_on() { return 1; }
+    # blocked: red, with what puts it right
     DOCTOR_ERRORS=0 DOCTOR_WARNINGS=0
     doctor_vpn_forward >"$WORK/fwd.out"
     cat "$WORK/fwd.out"
     ((DOCTOR_ERRORS == 1)) && grep -q "Docker blocks the traffic of the clients" "$WORK/fwd.out" \
-        && grep -qF 'iptables -I DOCKER-USER -i wg0 -o ens3 -j ACCEPT' "$WORK/fwd.out" \
-        && grep -qF 'iptables -I DOCKER-USER -i ens3 -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED,DNAT -j ACCEPT' "$WORK/fwd.out" \
-        && grep -qF '"ip-forward-no-drop": true  to '"$DOCKER_DAEMON_CONFIG" "$WORK/fwd.out" || return 1
-    # the setting of Docker is there, but counts only from its next start
-    echo '{ "ip-forward-no-drop": true }' >"$DOCKER_DAEMON_CONFIG"
-    DOCTOR_ERRORS=0
-    doctor_vpn_forward >"$WORK/fwd.out"
-    ((DOCTOR_ERRORS == 1)) && grep -q "Already in" "$WORK/fwd.out" || return 1
-    # let through by rules typed by hand: yellow while Docker is not set
+        && grep -q "→ seedtunnel apply (2 rules in DOCKER-USER" "$WORK/fwd.out" || return 1
+    # let through by rules typed by hand: yellow while seedtunnel does not put
+    # them back itself
     DOCKER_USER_RULES=yes
-    rm -f "$DOCKER_DAEMON_CONFIG"
     DOCTOR_ERRORS=0 DOCTOR_WARNINGS=0
     doctor_vpn_forward >"$WORK/fwd.out"
     ((DOCTOR_ERRORS == 0 && DOCTOR_WARNINGS == 1)) && grep -q "disappear at the next restart" "$WORK/fwd.out" || return 1
+    # the service of seedtunnel on: allowed, said so
+    vpn_docker_on() { return 0; }
+    docker_installed() { return 0; }
+    DOCTOR_WARNINGS=0
+    [[ $(doctor_vpn_forward) == *"allowed (through Docker: rules of seedtunnel in DOCKER-USER)"* ]] && ((DOCTOR_WARNINGS == 0)) || return 1
+    # or the setting of Docker itself
+    vpn_docker_on() { return 1; }
     printf '{\n  "log-level": "warn",\n  "ip-forward-no-drop" : true\n}\n' >"$DOCKER_DAEMON_CONFIG"
     DOCTOR_WARNINGS=0
     [[ $(doctor_vpn_forward) == *"Traffic of the clients to the Internet: allowed"* ]] && ((DOCTOR_WARNINGS == 0)) || return 1
@@ -8790,6 +8914,7 @@ check "SFTP password: warning once there is a key, yellow in the menus" sftp_pas
 
 check "diagnostics: traffic of the VPN blocked by Docker or another firewall" doctor_sees_vpn_traffic_blocked
 check "firewall: what is wrong around it (Docker, another program, nftables, ufw, SSH port) on the home screen and in frames" firewall_findings_cases
+check "VPN through Docker: two rules in DOCKER-USER, put back by a service at each start of Docker, removed with the VPN" vpn_docker_rules
 check "diagnostics: IPv4 routing off for the VPN or the way out" doctor_sees_routing_off_for_an_interface
 check "lock: « sudo kill » for whoever came in by sudo" lock_message_says_sudo_kill
 check "firewall: rules gone (or refusing nothing) → apply loads them again" firewall_rules_put_back_when_gone
