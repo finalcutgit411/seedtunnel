@@ -346,8 +346,18 @@ docker_apply_again_test() {
 # « Docker » restarted: the service of seedtunnel restarted with it, the rules
 # back once, the client through again
 docker_restart_test() {
+    local tries=0
     systemctl restart docker.service || return 1
-    systemctl is-active --quiet seedtunnel-docker.service && docker_rules_once && docker_client_reach
+    # restarted after « Docker » (PartOf, After): its own job, which
+    # « systemctl restart docker » does not wait for
+    until systemctl is-active --quiet seedtunnel-docker.service; do
+        ((++tries <= 50)) || {
+            systemctl status seedtunnel-docker.service --no-pager
+            return 1
+        }
+        sleep 0.2
+    done
+    docker_rules_once && docker_client_reach
 }
 
 # « Docker » gone: « apply » takes the service of seedtunnel and its rules away
