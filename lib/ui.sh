@@ -468,7 +468,7 @@ ui_level() {
         ok | good) UI_COLOR=$C_GREEN ;;
         info) UI_COLOR=$C_BRAND ;;
         warn) UI_COLOR=$C_YELLOW ;;
-        bad) UI_COLOR=$C_RED ;;
+        bad | stop) UI_COLOR=$C_RED ;;
         *)
             UI_COLOR=$C_GREY
             UI_MARK="○"
@@ -863,9 +863,10 @@ ui_table() {
     done
 }
 
-# ui_box LEVEL TITLE [LINE…] — framed message: bad (red, « ! »), ok (green,
-# « ✔ »: it is done), good (green, « ● »: a card, a summary before an
-# action), warn (yellow), info (pink). Long lines are wrapped, never before a
+# ui_box LEVEL TITLE [LINE…] — framed message: bad (red, « ! »), stop (red,
+# « ✘ »: seedtunnel stops, nothing done), ok (green, « ✔ »: it is done), good
+# (green, « ● »: a card, a summary before an action), warn (yellow), info
+# (pink). Long lines are wrapped, never before a
 # « : » nor inside « … » (ui_glue).
 ui_box() {
     local level=$1 title=$2 mark line part width inner
@@ -873,6 +874,7 @@ ui_box() {
     ui_level "$level"
     case $level in
         ok) mark="✔" ;;
+        stop) mark="✘" ;;
         bad | warn) mark="!" ;;
         *) mark="●" ;;
     esac
@@ -990,4 +992,35 @@ danger() {
         return 0
     fi
     for line in "$@"; do printf '%s!%s %s\n' "$C_YELLOW" "$C_RESET" "$line" >&2; done
+}
+
+# refuse TITLE LINE… — seedtunnel stops before changing anything, because of
+# something on the server (another program, the system): what it is, why
+# seedtunnel stops, « To go on: … ». A red frame in the menus (and when the
+# menu is starting), red lines for the commands (texts already translated).
+# Never returns.
+refuse() {
+    local title=$1 line part
+    shift
+    if ((INTERACTIVE)) || { ((APP_MENU_START)) && [[ -t 1 ]]; }; then
+        ui_width
+        # in the menus, under the title of the screen (its empty line);
+        # at the start, under the command
+        if ((!INTERACTIVE)); then echo; fi
+        ui_box stop "$title" "$@"
+        exit 1
+    fi
+    printf '%s✘ %s%s\n' "$C_RED" "$title" "$C_RESET" >&2
+    if [[ -t 2 ]]; then
+        # on a terminal: each line cut between words, under itself
+        ui_width
+        for line in "$@"; do
+            ui_glue "$line"
+            ui_wrap "$UI_GLUED" $((UI_WIDTH - 2))
+            for part in "${UI_LINES[@]}"; do printf '  %s\n' "${part//$'\x01'/ }" >&2; done
+        done
+    else
+        for line in "$@"; do printf '  %s\n' "$line" >&2; done
+    fi
+    exit 1
 }

@@ -3,6 +3,18 @@
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versions follow [Semantic Versioning](https://semver.org/): MAJOR.MINOR.PATCH.
 
+## [1.0.7] - 2026-11-14
+
+### Added
+- Hosting panels: on a server with Plesk, cPanel, DirectAdmin, HestiaCP, VestaCP, CloudPanel, aaPanel, CyberPanel, Virtualmin or ISPConfig, seedtunnel installs nothing (VPN, seedbox, firewall, restore): these panels already run the web, the certificates and the security of the server, and rewrite their settings. `seedtunnel doctor` says it in red, and so does the block Firewall of the home screen when the panel came after seedtunnel.
+- Another WireGuard VPN on the server (a file `/etc/wireguard/wg0.conf` not written by seedtunnel, an interface `wg0`, or the addresses `10.8.0.0/24` used by another interface): the VPN is neither installed nor restored. seedtunnel wrote over that file before, and the devices of the other VPN lost their access.
+- A Transmission that seedtunnel did not install, or swizzin: the seedbox is neither installed nor restored. seedtunnel wrote over its settings (download folder, password, ports) before.
+
+### Changed
+- What stops seedtunnel before it changes anything is said the same way everywhere: what is in the way, why seedtunnel stops (« nothing was changed »), and « To go on: … ». A red frame « ✘ » in the menus, the same lines for the commands. This covers the hosting panels, another VPN, another Transmission, ufw, a system not supported (and Debian 11), a kernel without WireGuard (container VPS), ports 80/443 or the UDP port of the VPN taken; for the ports, each program is named with its ports (« a container of Docker » for docker-proxy).
+- The pages of the server are no longer in French and in English at once. « Access denied » and « Nothing here », which anyone can see, are in English only (they say nothing of the language of the administrator). « Link already used or expired » and « Transmission is not responding », which only the administrator or someone who got one of the links sees, are in the language of seedtunnel, and follow it when it changes.
+- Guide: a server without a hosting panel, the firewall of the provider to open, and « NAT » or IPv6-only VPS among the known limits.
+
 ## [1.0.6] - 2026-11-14
 
 ### Security

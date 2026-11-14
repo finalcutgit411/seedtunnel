@@ -44,7 +44,7 @@ apt update && apt full-upgrade -y
 **3.** Download SeedTunnel, check it and start it:
 
 ```bash
-V=1.0.6
+V=1.0.7
 cd "$(mktemp -d)"
 curl -fLO https://github.com/finalcutgit411/seedtunnel/releases/download/v$V/seedtunnel-$V.tar.gz \
   && curl -fLO https://github.com/finalcutgit411/seedtunnel/releases/download/v$V/SHA256SUMS \

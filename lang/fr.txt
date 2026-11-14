@@ -356,12 +356,6 @@ fr: Ce script doit être lancé en root :  sudo %s
 en: Unknown system (no /etc/os-release file).
 fr: Système non reconnu (fichier /etc/os-release absent).
 
-en: Debian 11 has had no security updates since 31 August 2026: seedtunnel no longer supports it. Upgrade to Debian 12, then to Debian 13:  https://www.debian.org/releases/bookworm/releasenotes
-fr: Debian 11 n'a plus de correctifs de sécurité depuis le 31 août 2026 : seedtunnel ne le prend plus en charge. Passez à Debian 12, puis à Debian 13 :  https://www.debian.org/releases/bookworm/releasenotes
-
-en: Supported systems: Debian 12/13, Ubuntu 24.04/26.04 — detected: %s.
-fr: Systèmes pris en charge : Debian 12/13, Ubuntu 24.04/26.04 — système détecté : %s.
-
 en: systemd is required.
 fr: systemd est requis.
 
@@ -942,9 +936,6 @@ fr: %s existe mais n'est pas un dossier.
 en: %s must belong to root and be writable only by root (needed by the locked SFTP).
 fr: %s doit appartenir à root et n'être modifiable que par lui (exigence du SFTP enfermé).
 
-en: Ports 80/443 are already used by another program:\n%s\n  Stop it (apache2 for example) before installing the seedbox.
-fr: Les ports 80/443 sont déjà utilisés par un autre logiciel :\n%s\n  Arrêtez-le (apache2 par exemple) avant d'installer la seedbox.
-
 en: User name (web and SFTP)
 fr: Nom d'utilisateur (web et SFTP)
 
@@ -1482,9 +1473,6 @@ fr: Nom de client invalide : « %s ».
 
 en: Client "%s" not found (seedtunnel vpn list).
 fr: Client « %s » introuvable (seedtunnel vpn list).
-
-en: The kernel cannot create a WireGuard interface.\n  On a container VPS (OpenVZ, LXC), ask the provider to enable WireGuard,\n  or choose a KVM plan.
-fr: Le noyau ne permet pas de créer une interface WireGuard.\n  Sur un VPS en conteneur (OpenVZ, LXC), demandez à l'hébergeur d'activer\n  WireGuard, ou choisissez une offre KVM.
 
 en: Main network interface not found (no default route?).
 fr: Interface réseau principale introuvable (pas de route par défaut ?).
@@ -2163,9 +2151,6 @@ fr: Paquets introuvables par APT : %s. Activez le dépôt « universe » d'Ubunt
 en: Packages not found by APT: %s. Check the repositories of APT (/etc/apt/sources.list and /etc/apt/sources.list.d), then start again.
 fr: Paquets introuvables par APT : %s. Vérifiez les dépôts d'APT (/etc/apt/sources.list et /etc/apt/sources.list.d), puis relancez.
 
-en: ufw (the firewall of Ubuntu) is on: it would block the VPN and the seedbox, and seedtunnel does not change its rules. Turn it off, then start again:  sudo ufw disable   (the firewall of seedtunnel then protects the server: seedtunnel firewall enable)
-fr: ufw (le pare-feu d'Ubuntu) est actif : il bloquerait le VPN et la seedbox, et seedtunnel ne touche pas à ses règles. Désactivez-le, puis relancez :  sudo ufw disable   (le pare-feu de seedtunnel protège ensuite le serveur : seedtunnel firewall enable)
-
 en: ufw (the firewall of Ubuntu) is on: it blocks the VPN and the seedbox   → sudo ufw disable, then seedtunnel firewall enable
 fr: ufw (le pare-feu d'Ubuntu) est actif : il bloque le VPN et la seedbox   → sudo ufw disable, puis seedtunnel firewall enable
 
@@ -2726,9 +2711,6 @@ fr: Installer le site des liens ? (ouvre les ports 80 et 443)
 en: Removing the site of the links
 fr: Retrait du site des liens
 
-en: Ports 80/443 are already used by another program:\n%s\n  Stop it (apache2 for example) before installing the site of the links.
-fr: Les ports 80/443 sont déjà utilisés par un autre programme :\n%s\n  Arrêtez-le (apache2 par exemple) avant d'installer le site des liens.
-
 en: The site of the links goes too (nginx, ports 80 and 443).
 fr: Le site des liens est retiré aussi (nginx, ports 80 et 443).
 
@@ -2925,12 +2907,6 @@ fr: [1] Activer / mettre à jour le pare-feu
 en: ufw is on
 fr: ufw est actif
 
-en: The firewall of Ubuntu blocks the VPN and the seedbox.
-fr: Le pare-feu d'Ubuntu bloque le VPN et la seedbox.
-
-en: sudo ufw disable, then %s.
-fr: sudo ufw disable, puis %s.
-
 en: see its rules
 fr: voir ses règles
 
@@ -3058,3 +3034,149 @@ fr: Pour les garder : %s (2 règles dans la chaîne DOCKER-USER, celle que Docke
 
 en: To put it right: %s (2 rules in the chain DOCKER-USER, the one Docker keeps for your own rules, put back each time Docker starts).
 fr: Pour le régler : %s (2 règles dans la chaîne DOCKER-USER, celle que Docker réserve à vos propres règles, remises à chaque démarrage de Docker).
+
+# --- 1.0.7 : ce qui empêche seedtunnel de s'installer (cadres rouges) ---------------
+
+en: Debian 11 has had no security updates since 31 August 2026.
+fr: Debian 11 n'a plus de mises à jour de sécurité depuis le 31 août 2026.
+
+en: So seedtunnel no longer installs on it: nothing was changed.
+fr: seedtunnel ne s'installe donc plus dessus : rien n'a été changé.
+
+en: To go on: upgrade to Debian 12, then to Debian 13: %s
+fr: Pour continuer : passez à Debian 12, puis à Debian 13 : %s
+
+en: System not supported
+fr: Système non pris en charge
+
+en: This server runs: %s.
+fr: Ce serveur a : %s.
+
+en: seedtunnel is made and tested for Debian 12/13 and Ubuntu 24.04/26.04: nothing was changed.
+fr: seedtunnel est fait et testé pour Debian 12/13 et Ubuntu 24.04/26.04 : rien n'a été changé.
+
+en: To go on: install one of these systems on the server (from the panel of your provider).
+fr: Pour continuer : réinstallez le serveur avec l'un de ces systèmes (depuis le panneau de votre hébergeur).
+
+en: ufw (the firewall of Ubuntu) would block the VPN and the seedbox.
+fr: ufw (le pare-feu d'Ubuntu) bloquerait le VPN et la seedbox.
+
+en: seedtunnel does not change its rules: nothing was changed.
+fr: seedtunnel ne change pas ses règles : rien n'a été changé.
+
+en: To go on: sudo ufw disable, then start again (the firewall of seedtunnel will then protect the server: %s).
+fr: Pour continuer : sudo ufw disable, puis recommencez (le pare-feu de seedtunnel protégera ensuite le serveur : %s).
+
+en: ufw (the firewall of Ubuntu) blocks the VPN and the seedbox, and seedtunnel does not change its rules.
+fr: ufw (le pare-feu d'Ubuntu) bloque le VPN et la seedbox, et seedtunnel ne change pas ses règles.
+
+en: To put it right: sudo ufw disable, then %s.
+fr: Pour le régler : sudo ufw disable, puis %s.
+
+en: %s is installed
+fr: %s est installé
+
+en: %s is a hosting panel: it already runs the web (nginx or Apache, certificates) and the security (bans, firewall) of this server.
+fr: %s est un panneau d'hébergement : il gère déjà le web (nginx ou Apache, certificats) et la sécurité (bannissements, pare-feu) de ce serveur.
+
+en: seedtunnel cannot install next to it without risking to break its sites: nothing was changed.
+fr: seedtunnel ne peut pas s'installer à côté sans risquer de casser ses sites : rien n'a été changé.
+
+en: To go on: a separate server for seedtunnel.
+fr: Pour continuer : un serveur à part pour seedtunnel.
+
+en: To put it right: a separate server for seedtunnel.
+fr: Pour le régler : un serveur à part pour seedtunnel.
+
+en: %s is installed: this hosting panel runs the web, the certificates and the security of this server, seedtunnel cannot share it   → a separate server for seedtunnel
+fr: %s est installé : ce panneau d'hébergement gère le web, les certificats et la sécurité de ce serveur, seedtunnel ne peut pas cohabiter avec lui   → un serveur à part pour seedtunnel
+
+en: %s already exists and does not come from seedtunnel.
+fr: %s existe déjà et ne vient pas de seedtunnel.
+
+en: The interface %s already exists.
+fr: L'interface %s existe déjà.
+
+en: seedtunnel would take its place, and its devices would lose their access: nothing was changed.
+fr: seedtunnel prendrait sa place, et ses appareils perdraient leur accès : rien n'a été changé.
+
+en: To go on: remove the other VPN, or keep it and use a separate server for seedtunnel.
+fr: Pour continuer : retirez l'autre VPN, ou gardez-le et utilisez un serveur à part pour seedtunnel.
+
+en: The addresses %s are already used on this server (interface %s).
+fr: Les adresses %s sont déjà utilisées sur ce serveur (interface %s).
+
+en: The VPN of seedtunnel needs them: nothing was changed.
+fr: Le VPN de seedtunnel en a besoin : rien n'a été changé.
+
+en: To go on: free these addresses (another VPN, a network of Docker…), or use a separate server for seedtunnel.
+fr: Pour continuer : libérez ces adresses (un autre VPN, un réseau Docker…), ou utilisez un serveur à part pour seedtunnel.
+
+en: Another program uses it: %s.
+fr: Un autre programme l'utilise : %s.
+
+en: The VPN needs it: nothing was changed.
+fr: Le VPN en a besoin : rien n'a été changé.
+
+en: To go on: choose another port (VPN_PORT in the configuration file), or stop this program.
+fr: Pour continuer : choisissez un autre port (VPN_PORT dans le fichier de configuration), ou arrêtez ce programme.
+
+en: Its kernel cannot create a WireGuard interface: it is often so on a container VPS (OpenVZ, LXC).
+fr: Son noyau ne peut pas créer d'interface WireGuard : c'est souvent le cas des VPS en conteneur (OpenVZ, LXC).
+
+en: To go on: ask the provider to enable WireGuard, or choose a KVM plan.
+fr: Pour continuer : demandez à l'hébergeur d'activer WireGuard, ou prenez une offre KVM.
+
+en: %s runs its own torrent programs, web server and accounts.
+fr: %s gère ses propres logiciels de torrent, son serveur web et ses comptes.
+
+en: seedtunnel would replace them: nothing was changed.
+fr: seedtunnel les remplacerait : rien n'a été changé.
+
+en: It was not installed by seedtunnel: its settings (download folder, password, ports) may be yours.
+fr: Il n'a pas été installé par seedtunnel : ses réglages (dossier des téléchargements, mot de passe, ports) sont peut-être les vôtres.
+
+en: To go on: put your files in a safe place and remove it yourself (sudo apt purge transmission-daemon), or use a separate server for seedtunnel.
+fr: Pour continuer : mettez vos fichiers à l'abri et retirez-le vous-même (sudo apt purge transmission-daemon), ou utilisez un serveur à part pour seedtunnel.
+
+en: Another program uses them: %s.
+fr: Un autre programme les utilise : %s.
+
+en: The site of the links needs them: nothing was changed.
+fr: Le site des liens en a besoin : rien n'a été changé.
+
+en: The seedbox needs them for its web interface: nothing was changed.
+fr: La seedbox en a besoin pour son interface web : rien n'a été changé.
+
+en: To go on: stop this program and keep it from starting again (for example: sudo systemctl disable --now apache2), then start again.
+fr: Pour continuer : arrêtez ce programme et empêchez-le de redémarrer (par exemple : sudo systemctl disable --now apache2), puis recommencez.
+
+en: a container of Docker
+fr: un conteneur Docker
+
+en: a program not named
+fr: un programme sans nom
+
+en: Debian 11: end of support
+fr: Debian 11 : fin du support
+
+en: Another VPN is installed
+fr: Un autre VPN est installé
+
+en: VPN addresses already taken
+fr: Adresses du VPN déjà prises
+
+en: UDP port %s already taken
+fr: Port UDP %s déjà pris
+
+en: WireGuard cannot run here
+fr: WireGuard impossible ici
+
+en: Transmission already there
+fr: Transmission déjà installé
+
+en: Port %s already taken
+fr: Port %s déjà pris
+
+en: Ports 80, 443 already taken
+fr: Ports 80 et 443 déjà pris

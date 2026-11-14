@@ -19,6 +19,8 @@ This guide goes straight to the point: each part says what to do, in the menu. T
 - **SSH access**: the address of the server, an account and its password (or its key), given by the provider. On Windows, PuTTY or the Terminal will do: `ssh debian@SERVER-ADDRESS`.
 - **A domain name**, if you can. It gives a real HTTPS certificate and a VPN that follows the server if its address changes. No domain? Most providers give one (for example `vps-1234abcd.vps.ovh.net`): SeedTunnel offers it if it points to the server.
 - **ufw** (the firewall of Ubuntu) must be off. While it is on, SeedTunnel installs nothing and tells you so: type `ufw disable`, then turn on the firewall of SeedTunnel (see [Firewall](#firewall)).
+- **A server without a hosting panel** (Plesk, cPanel, DirectAdmin, HestiaCP, CloudPanel, aaPanel, CyberPanel, Virtualmin, ISPConfig): these panels already run the web, the certificates and the security of the server. SeedTunnel does not install next to one: use a separate server. The same goes for another WireGuard VPN or a Transmission already installed: SeedTunnel would replace them, so it stops first and says so.
+- **The firewall of the provider**, if it has one (OVH, Hetzner, Oracle…): open 51820/udp there for the VPN, 80 and 443 for the seedbox, and the ports from 60000 on (TCP and UDP) for BitTorrent and the open ports of the devices.
 
 ## 2. Install
 
@@ -27,7 +29,7 @@ Log in with SSH, then:
 ```bash
 sudo -i
 apt update && apt full-upgrade -y
-V=1.0.6
+V=1.0.7
 cd "$(mktemp -d)"
 curl -fLO https://github.com/finalcutgit411/seedtunnel/releases/download/v$V/seedtunnel-$V.tar.gz \
   && curl -fLO https://github.com/finalcutgit411/seedtunnel/releases/download/v$V/SHA256SUMS \
@@ -273,6 +275,7 @@ Run again, the installation only changes what needs to change. A file changed by
 - **The VPN is IPv4.** The IPv6 of the devices is blocked in the tunnel rather than leaking.
 - **The devices of the VPN do not see each other**: a laptop cannot reach a phone through the tunnel. Each one reaches the server and the Internet.
 - **One person per seedbox.**
+- **« NAT » or IPv6-only VPS** (an IPv4 address shared with other customers, and only a range of ports): the seedbox and Let's Encrypt need ports 80 and 443, and the VPN a UDP port of your own. SeedTunnel is not made for them.
 - **Docker on the same server** refuses by default the traffic that crosses the server: left alone, the devices would connect to the VPN without having the Internet. SeedTunnel puts it right by itself: when the VPN is installed, and at each `seedtunnel apply`, it adds two rules to `DOCKER-USER`, the chain Docker keeps for your own rules. They only concern the VPN: what leaves it for the Internet; back, the answers and the connections to the open ports of the clients. A small service, `seedtunnel-docker`, puts them back each time Docker starts, and they go away with the VPN. The protection of Docker stays: SeedTunnel changes neither its settings nor its own rules. Docker installed after SeedTunnel: the home screen shows it (block Firewall in red), and Firewall → `[4] Let the VPN through Docker` puts it right.
 
 ### Other ways to install

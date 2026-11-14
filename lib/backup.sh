@@ -95,6 +95,9 @@ restore_check_server() {
     if seedbox_installed && [[ ! -f $settings/seedbox.conf ]]; then
         die 'This server has a seedbox, the backup has none: it would keep running without seedtunnel knowing it. Remove it first (seedtunnel seedbox uninstall, the downloads are kept), or restore on a new server.'
     fi
+    # another VPN or another seedbox on this server: never written over
+    if [[ -f $settings/vpn.conf ]]; then vpn_foreign_refuse; fi
+    if [[ -f $settings/seedbox.conf ]]; then seedbox_foreign_refuse; fi
     if [[ ! -f $settings/seedbox.conf ]]; then
         # the site of the links of the backup: nginx on 80 and 443, as for a
         # seedbox
@@ -982,8 +985,8 @@ backup_menu_restore() {
     local file
     banner
     section 'Restore a backup'
-    # ufw on: said before the choice of the file, not after
-    ufw_refuse
+    # a hosting panel, ufw: said before the choice of the file, not after
+    conflicts_refuse
     backup_pick_file file || return 0
     restore_main "$file"
     if ((!WENT_BACK)); then pause; fi
@@ -1442,8 +1445,8 @@ restore_cli() {
         INTERACTIVE=1
         banner
         section 'Restore a backup'
-        # ufw on: said before the choice of the file, not after it
-        ufw_refuse
+        # a hosting panel, ufw: said before the choice of the file, not after it
+        conflicts_refuse
         backup_pick_file file || return 0
     fi
     restore_main "$file"
@@ -1457,7 +1460,7 @@ restore_main() {
     [[ -r $file ]] || die 'File not found: %s' "$file"
     banner
     section 'Restore a backup'
-    ufw_refuse
+    conflicts_refuse
     if ! backup_read_passphrase 0; then
         WENT_BACK=1
         return 0

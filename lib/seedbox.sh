@@ -245,19 +245,50 @@ seedbox_check_data_dir() {
     return 0
 }
 
+# Another seedbox, before the one of seedtunnel is installed or restored:
+# swizzin, or a Transmission that seedtunnel did not install (its settings
+# would be written over)
+seedbox_foreign_refuse() {
+    seedbox_installed && return 0
+    if [[ -d $CONFLICT_ROOT/etc/swizzin ]]; then
+        refuse "$(t '%s is installed' swizzin)" \
+            "$(t '%s runs its own torrent programs, web server and accounts.' swizzin)" \
+            "$(t 'seedtunnel would replace them: nothing was changed.')" \
+            "$(t 'To go on: a separate server for seedtunnel.')"
+    fi
+    if package_installed transmission-daemon && ! package_recorded transmission-daemon; then
+        refuse "$(t 'Transmission already there')" \
+            "$(t 'It was not installed by seedtunnel: its settings (download folder, password, ports) may be yours.')" \
+            "$(t 'seedtunnel would replace them: nothing was changed.')" \
+            "$(t 'To go on: put your files in a safe place and remove it yourself (sudo apt purge transmission-daemon), or use a separate server for seedtunnel.')"
+    fi
+}
+
 # seedbox_check_web_ports [links] — no other program on 80 or 443 (links:
 # for the site of the links)
 # shellcheck disable=SC2120 # « links » comes from lib/share.sh and lib/backup.sh
 seedbox_check_web_ports() {
-    local out
+    local out ports programs title needs
     out=$(ss -Hltnp '( sport = :80 or sport = :443 )' 2>/dev/null || true)
     # each listening line: nginx on one port does not cover another program on the other
     out=$(grep -v nginx <<<"$out" || true)
-    if [[ -n $out && ${1-} == links ]]; then
-        die 'Ports 80/443 are already used by another program:\n%s\n  Stop it (apache2 for example) before installing the site of the links.' "$out"
-    elif [[ -n $out ]]; then
-        die 'Ports 80/443 are already used by another program:\n%s\n  Stop it (apache2 for example) before installing the seedbox.' "$out"
+    [[ -n $out ]] || return 0
+    ports=$(awk '{ n = split($4, a, ":"); print a[n] }' <<<"$out" | LC_ALL=C sort -nu | paste -sd ' ')
+    programs=$(listening_programs <<<"$out")
+    case $ports in
+        80) title=$(t 'Port %s already taken' 80) ;;
+        443) title=$(t 'Port %s already taken' 443) ;;
+        *) title=$(t 'Ports 80, 443 already taken') ;;
+    esac
+    if [[ ${1-} == links ]]; then
+        needs=$(t 'The site of the links needs them: nothing was changed.')
+    else
+        needs=$(t 'The seedbox needs them for its web interface: nothing was changed.')
     fi
+    refuse "$title" \
+        "$(t 'Another program uses them: %s.' "$programs")" \
+        "$needs" \
+        "$(t 'To go on: stop this program and keep it from starting again (for example: sudo systemctl disable --now apache2), then start again.')"
 }
 
 # --- Passwords (hashes only) -------------------------------------------------------
@@ -960,7 +991,7 @@ nginx_generate_stopped_page() {
     location = /seedtunnel/transmission-stopped.html {
         auth_basic off;
         internal;
-        alias $APP_DIR/$NGINX_STOPPED_PAGE;
+        alias $APP_DIR/$(web_page "$NGINX_STOPPED_PAGE");
         default_type text/html;
     }
 EOF
@@ -1923,7 +1954,8 @@ seedbox_install_interactive() {
     local ip
     banner
     section 'Seedbox installation'
-    ufw_refuse
+    conflicts_refuse
+    seedbox_foreign_refuse
     seedbox_check_web_ports
     base_setup
     apt_install bind9-dnsutils
@@ -1956,7 +1988,8 @@ seedbox_install_interactive() {
 seedbox_install_from_config() {
     local password password_file ip generated=0 first=1 keys current_user=$SEEDBOX_USER
     if seedbox_installed; then first=0; fi
-    ufw_refuse
+    conflicts_refuse
+    seedbox_foreign_refuse
     base_setup
     apt_install bind9-dnsutils
 

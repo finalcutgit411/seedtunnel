@@ -83,9 +83,12 @@ certificate_days_left() {
 }
 
 doctor_system() {
-    local free synced started
+    local free synced started panel
     doctor_title 'System'
     doctor_ok '%s, seedtunnel %s' "$APP_OS_DESCRIPTION" "$APP_VERSION"
+    if panel=$(hosting_panel); then
+        doctor_error '%s is installed: this hosting panel runs the web, the certificates and the security of this server, seedtunnel cannot share it   → a separate server for seedtunnel' "$panel"
+    fi
     free=$(disk_free_gb /)
     if [[ -z $free ]]; then
         doctor_warn 'Free space of / unreadable'

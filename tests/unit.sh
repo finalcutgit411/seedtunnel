@@ -49,6 +49,10 @@ load() {
     # nor its Docker (the machines of GitHub have one): tests that need one
     # play it
     docker_installed() { return 1; }
+    # nor its hosting panel, its WireGuard file, its Transmission: tests that
+    # need one play it
+    CONFLICT_ROOT="$WORK/no-panel"
+    WIREGUARD_CONF="$WORK/wireguard/wg0.conf"
     # the tests do not run as root: the command, as the current user
     runuser() {
         while [[ $1 != -- ]]; do shift; done
@@ -3640,7 +3644,7 @@ restore_refuses_existing_account() (
     vpn_installed() { return 0; }
     seedbox_installed() { return 1; }
     ss() { printf '%s\n' 'LISTEN 0 511 0.0.0.0:80 0.0.0.0:* users:(("apache2",pid=1,fd=4))'; }
-    restore_refused_first webports "Ports 80/443 are already used by another program"
+    restore_refused_first webports "Port 80 already taken" && grep -qF "Another program uses them: apache2 (80)." "$WORK/webports.out"
 )
 
 restore_refuses_missing_parts() (
@@ -5181,7 +5185,7 @@ services_line_never_cut() (
         for colors in 1 0; do
             if ((colors)); then C_GREEN=$'\e[1;32m' C_RED=$'\e[1;31m' C_DIM=$'\e[2m' C_RESET=$'\e[0m'; else C_GREEN="" C_RED="" C_DIM="" C_RESET=""; fi
             for case in all nginx-stopped fail2ban-missing disk-full narrow; do
-                STATE=() FULL=0 UI_WIDTH=79 SEEDBOX_DOMAIN=vps-1234abcd.vps.ovh.ca
+                STATE=() FULL=0 UI_WIDTH=79 SEEDBOX_DOMAIN=vps-1234abcd.vps.ovh.net
                 case $case in
                     all) expected="Transmission ● · nginx ● · fail2ban ●" ;;
                     nginx-stopped) STATE[nginx]=inactive expected="nginx ● $(t 'stopped') · fail2ban ●" ;;
@@ -5449,7 +5453,11 @@ denied_page_discreet() (
     # the page stands alone (no script, nothing fetched elsewhere) and names nothing
     local page=$ROOT/web/unauthorized.html
     if grep -qiE 'https?:|src=|href=|<script|transmission|seedtunnel|seedbox|password|mot de passe' "$page"; then return 1; fi
-    grep -q "Accès refusé" "$page" && grep -q "Access denied" "$page" && ! grep -qE '^web( |/)' "$ROOT/.gitattributes"
+    # anyone may see it: in English only, whatever the language of seedtunnel
+    grep -q '<html lang="en">' "$page" && grep -q "<h1>Access denied</h1>" "$page" && ! grep -q "Accès refusé" "$page" \
+        && [[ ! -e $ROOT/web/unauthorized.fr.html ]] && ! grep -qE '^web( |/)' "$ROOT/.gitattributes" || return 1
+    i18n_load fr
+    nginx_generate_site | grep -qF "alias $ROOT/web/unauthorized.html;"
 )
 
 # Transmission stopped (disk almost full) or starting again: a page in the
@@ -5476,10 +5484,16 @@ stopped_page_instead_of_502() (
     [[ -z $(sed -n '/location \/transmission\/ {/,/^    }/p' "$WORK/site-stopped" | grep error_page) ]] || return 1
     # page missing: nginx as before
     if (APP_DIR=$WORK/elsewhere nginx_generate_site | grep -q "error_page 502"); then return 1; fi
-    local page=$ROOT/web/transmission-stopped.html
-    if grep -qiE 'https?:|src=|href=|<script' "$page"; then return 1; fi
-    grep -q "Transmission ne répond pas" "$page" && grep -q "Transmission is not responding" "$page" \
-        && grep -q "sudo seedtunnel doctor" "$page" && ! grep -qE '^web( |/)' "$ROOT/.gitattributes"
+    local page=$ROOT/web/transmission-stopped.html fr=$ROOT/web/transmission-stopped.fr.html
+    if grep -qiE 'https?:|src=|href=|<script' "$page" "$fr"; then return 1; fi
+    # only the administrator sees it: in the language of seedtunnel, one page
+    # per language
+    grep -q '<html lang="en">' "$page" && grep -q "Transmission is not responding" "$page" && ! grep -q "ne répond pas" "$page" \
+        && grep -q '<html lang="fr">' "$fr" && grep -q "Transmission ne répond pas" "$fr" && ! grep -q "is not responding" "$fr" \
+        && grep -q "sudo seedtunnel doctor" "$page" && grep -q "sudo seedtunnel doctor" "$fr" \
+        && ! grep -qE '^web( |/)' "$ROOT/.gitattributes" || return 1
+    i18n_load fr
+    nginx_generate_site | grep -qF "alias $ROOT/web/transmission-stopped.fr.html;"
 )
 
 # --- pages of the one-time links ----------------------------------------------
@@ -5547,10 +5561,14 @@ share_gone_page() (
     # page missing: the 404 of nginx, as before
     if (APP_DIR=$WORK/elsewhere nginx_generate_site | grep -q "link-gone"); then return 1; fi
     # the page stands alone and names nothing; its lifetime is the real one
-    local page=$ROOT/web/link-gone.html
-    if grep -qiE 'https?:|src=|href=|url\(|<script|transmission|seedtunnel|seedbox' "$page"; then return 1; fi
-    grep -q "Lien déjà utilisé ou expiré" "$page" && grep -q "Link already used or expired" "$page" \
-        && (($(grep -c "pendant $((SHARE_LIFETIME / 60))&nbsp;minutes\|for $((SHARE_LIFETIME / 60))&nbsp;minutes" "$page") == 2))
+    local page=$ROOT/web/link-gone.html fr=$ROOT/web/link-gone.fr.html
+    if grep -qiE 'https?:|src=|href=|url\(|<script|transmission|seedtunnel|seedbox' "$page" "$fr"; then return 1; fi
+    # only someone who got a link sees it: in the language of seedtunnel
+    grep -q "Link already used or expired" "$page" && ! grep -q "Lien déjà" "$page" \
+        && grep -q "Lien déjà utilisé ou expiré" "$fr" && ! grep -q "Link already" "$fr" \
+        && grep -q "for $((SHARE_LIFETIME / 60))&nbsp;minutes" "$page" && grep -q "pendant $((SHARE_LIFETIME / 60))&nbsp;minutes" "$fr" || return 1
+    i18n_load fr
+    nginx_generate_site | grep -qF "alias $ROOT/web/link-gone.fr.html;"
 )
 
 # The folder of the links (/share/) was the grey 403 of nginx: now a 404 with
@@ -5762,7 +5780,7 @@ systems_supported() (
         os_release "$id" "$version" "$pretty"
         if out=$( (os_check) 2>&1); then return 1; fi
         echo "$out"
-        [[ $out == *"Debian 12/13, Ubuntu 24.04/26.04"*"$pretty"* ]] || return 1
+        [[ $out == *"System not supported"*"This server runs: $pretty."*"Debian 12/13 and Ubuntu 24.04/26.04: nothing was changed."*"To go on:"* ]] || return 1
     done
 )
 
@@ -5772,10 +5790,10 @@ debian11_refused_with_the_way_up() (
     os_release debian 11 "Debian GNU/Linux 11 (bullseye)"
     if out=$( (os_check) 2>&1); then return 1; fi
     echo "$out"
-    [[ $out == *"no longer supports it"*"Debian 12, then to Debian 13"*"debian.org"* ]] || return 1
+    [[ $out == *"Debian 11: end of support"*"Debian 12, then to Debian 13"*"debian.org"* ]] || return 1
     i18n_load fr
     out=$( (os_check) 2>&1) || true
-    [[ $out == *"ne le prend plus en charge"*"Debian 12, puis à Debian 13"* ]]
+    [[ $out == *"Debian 11 : fin du support"*"rien n'a été changé"*"Debian 12, puis à Debian 13"* ]]
 )
 
 header_names_ubuntu() (
@@ -5995,6 +6013,261 @@ ufw_stops_the_installations() (
     # « Status: inactive »: no refusal (only the start is looked at, in English)
     ufw() { printf 'Status: inactive\n'; }
     ! ufw_active && (ufw_refuse)
+)
+
+# --- 1.0.7: what stops seedtunnel before it changes anything -----------------
+
+# A refusal: a red frame « ✘ » in the menus, red lines for the commands; never
+# goes on
+refusal_frame_or_lines() (
+    load
+    colors_init off
+    local out
+    INTERACTIVE=1
+    UI_COLUMNS=60
+    if out=$( (refuse "Something is in the way" "What it is." "Why: nothing was changed." "To go on: this.") 2>&1); then return 1; fi
+    printf '%s\n' "$out"
+    [[ $out == *"┌─ ✘ Something is in the way ─"* && $out == *"│ Why: nothing was changed."* && $out == *"└──"* ]] || return 1
+    # by command: the title, then the lines, on the error output
+    INTERACTIVE=0
+    if out=$( (refuse "Something is in the way" "What it is." "To go on: this.") 2>&1 >/dev/null); then return 1; fi
+    [[ $out == $'✘ Something is in the way\n  What it is.\n  To go on: this.' ]] || {
+        printf '%s\n' "$out"
+        return 1
+    }
+    # the menu starting (system not supported): a frame, if it is a terminal
+    APP_MENU_START=1
+    out=$( (refuse "Title" "Line.") 2>&1) || true
+    [[ $out == *"✘ Title"* ]]
+)
+
+# Each hosting panel recognised by one of its files; none: nothing found
+hosting_panels_recognised() (
+    load
+    CONFLICT_ROOT="$WORK/panels-root"
+    local entry name file
+    if hosting_panel; then return 1; fi
+    for entry in "${HOSTING_PANELS[@]}"; do
+        name=${entry%%|*}
+        for file in ${entry#*|}; do
+            rm -rf "$CONFLICT_ROOT"
+            mkdir -p "$CONFLICT_ROOT${file%/*}"
+            touch "$CONFLICT_ROOT$file"
+            [[ $(hosting_panel) == "$name" ]] || {
+                echo "$file: $(hosting_panel)"
+                return 1
+            }
+        done
+    done
+)
+
+# A hosting panel (here Plesk): nothing installed, restored nor enabled, and
+# said in the colors of the refusals
+panel_stops_everything() (
+    load
+    CONFLICT_ROOT="$WORK/plesk-root"
+    local out step
+    mkdir -p "$CONFLICT_ROOT/etc/psa" && touch "$CONFLICT_ROOT/etc/psa/psa.conf"
+    apt_install() { echo "apt_install $*" >>"$WORK/panel-calls"; }
+    apt-get() { echo "apt-get $*" >>"$WORK/panel-calls"; }
+    nft() { echo "nft $*" >>"$WORK/panel-calls"; }
+    base_setup() { echo base_setup >>"$WORK/panel-calls"; }
+    backup_pick_file() { echo picked >>"$WORK/panel-calls"; }
+    backup_read_passphrase() { echo passphrase >>"$WORK/panel-calls"; }
+    banner() { :; }
+    vpn_check_kernel() { :; }
+    seedbox_check_web_ports() { :; }
+    public_ipv4() { echo 203.0.113.10; }
+    touch "$WORK/panel.enc"
+    INTERACTIVE=0
+    SEEDBOX_USER=lancelot
+    for step in vpn_install_interactive vpn_install_from_config seedbox_install_interactive seedbox_install_from_config \
+        firewall_enable backup_menu_restore "restore_main $WORK/panel.enc"; do
+        rm -f "$WORK/panel-calls"
+        if out=$( ($step) 2>&1 </dev/null); then
+            echo "$step went on"
+            return 1
+        fi
+        if [[ $out != *"Plesk is installed"*"Plesk is a hosting panel"*"nothing was changed"*"To go on: a separate server for seedtunnel."* || -s $WORK/panel-calls ]]; then
+            echo "$step: $out"
+            cat "$WORK/panel-calls" 2>/dev/null
+            return 1
+        fi
+    done
+    # in French
+    i18n_load fr
+    out=$( (panel_refuse) 2>&1) || true
+    [[ $out == *"Plesk est installé"*"Plesk est un panneau d'hébergement"*"Pour continuer : un serveur à part pour seedtunnel."* ]]
+)
+
+# doctor: a hosting panel said in red; none: nothing
+doctor_says_hosting_panel() (
+    load
+    CONFLICT_ROOT="$WORK/hestia-root"
+    local out
+    DOCTOR_ERRORS=0
+    disk_free_gb() { echo 30; }
+    doctor_system >"$WORK/panel-doctor.out" 2>&1
+    out=$(<"$WORK/panel-doctor.out")
+    ((DOCTOR_ERRORS == 0)) && [[ $out != *"hosting panel"* ]] || return 1
+    mkdir -p "$CONFLICT_ROOT/usr/local/hestia/conf" && touch "$CONFLICT_ROOT/usr/local/hestia/conf/hestia.conf"
+    doctor_system >"$WORK/panel-doctor.out" 2>&1
+    out=$(<"$WORK/panel-doctor.out")
+    printf '%s\n' "$out"
+    ((DOCTOR_ERRORS == 1)) && [[ $out == *"HestiaCP is installed: this hosting panel runs the web"*"→ a separate server for seedtunnel"* ]]
+)
+
+# Firewall: a hosting panel installed after seedtunnel said on the home
+# screen (red) and in its screen
+firewall_says_hosting_panel() (
+    load
+    CONFLICT_ROOT="$WORK/cpanel-root"
+    vpn_installed() { return 0; }
+    firewall_enabled() { return 1; }
+    ufw_active() { return 1; }
+    nft() { return 1; }
+    systemctl() { return 1; }
+    NFTABLES_CONF=$WORK/no-nftables.conf
+    mkdir -p "$CONFLICT_ROOT/usr/local/cpanel" && touch "$CONFLICT_ROOT/usr/local/cpanel/version"
+    firewall_findings
+    [[ ${FW_LEVELS[0]} == bad && ${FW_SHORTS[0]} == "cPanel is installed" && ${FW_TITLES[0]} == "cPanel is installed" &&
+        ${FW_TEXTS[0]} == *"To put it right: a separate server for seedtunnel."* ]] || {
+        declare -p FW_LEVELS FW_SHORTS FW_TITLES FW_TEXTS
+        return 1
+    }
+)
+
+# Another WireGuard VPN: its file (not written by seedtunnel), its interface,
+# or the addresses of the VPN used elsewhere; the file of seedtunnel and a
+# wider route are no reason
+another_vpn_refused() (
+    load
+    local out
+    ip() { return 1; }
+    vpn_installed() { return 1; }
+    mkdir -p "${WIREGUARD_CONF%/*}"
+    # nothing there
+    (vpn_foreign_refuse) || return 1
+    # the file of another VPN: kept, refused
+    printf '[Interface]\nPrivateKey = mine\n' >"$WIREGUARD_CONF"
+    if out=$( (vpn_foreign_refuse) 2>&1); then return 1; fi
+    printf '%s\n' "$out"
+    [[ $out == *"Another VPN is installed"*"$WIREGUARD_CONF already exists and does not come from seedtunnel."*"its devices would lose their access"* ]] || return 1
+    grep -qx "PrivateKey = mine" "$WIREGUARD_CONF" || return 1
+    # the file of seedtunnel (its first line), or one in the list of the
+    # files it wrote: no reason
+    printf '# Written by seedtunnel — use the menu rather than editing this file.\n[Interface]\n' >"$WIREGUARD_CONF"
+    (vpn_foreign_refuse) || return 1
+    printf '[Interface]\n' >"$WIREGUARD_CONF"
+    mkdir -p "$APP_STATE_DIR"
+    written_remember "$WIREGUARD_CONF"
+    (vpn_foreign_refuse) || return 1
+    rm -f "$WIREGUARD_CONF" "$(written_list)"
+    # its interface wg0, without a file
+    ip() { [[ $* == "link show wg0" ]]; }
+    if out=$( (vpn_foreign_refuse) 2>&1); then return 1; fi
+    [[ $out == *"The interface wg0 already exists."* ]] || return 1
+    # the addresses of the VPN: an address in them, or a route to a part of
+    # them; not a wider route, nor the interface of the VPN itself
+    IP_ADDRESSES=$'1: lo    inet 127.0.0.1/8 scope host lo\n2: eth0    inet 10.1.0.4/16 brd 10.1.255.255 scope global eth0'
+    IP_ROUTES=$'default via 10.1.0.1 dev eth0\n10.0.0.0/8 via 10.1.0.1 dev eth0\n10.1.0.0/16 dev eth0 proto kernel scope link src 10.1.0.4\n10.8.0.0/24 dev wg0 proto kernel scope link src 10.8.0.1'
+    ip() {
+        case "$*" in
+            "-4 -o addr show") printf '%s\n' "$IP_ADDRESSES" ;;
+            "-4 route show") printf '%s\n' "$IP_ROUTES" ;;
+            *) return 1 ;;
+        esac
+    }
+    (vpn_foreign_refuse) || return 1
+    IP_ADDRESSES+=$'\n5: br-1234    inet 10.8.0.1/16 brd 10.8.255.255 scope global br-1234'
+    if out=$( (vpn_foreign_refuse) 2>&1); then return 1; fi
+    [[ $out == *"VPN addresses already taken"*"The addresses 10.8.0.0/24 are already used on this server (interface br-1234)."* ]] || return 1
+    IP_ADDRESSES=${IP_ADDRESSES%$'\n'*}
+    IP_ROUTES+=$'\n10.8.0.0/24 dev wg1 proto kernel scope link src 10.8.0.1'
+    if out=$( (vpn_foreign_refuse) 2>&1); then return 1; fi
+    [[ $out == *"(interface wg1)"* ]] || return 1
+    # the VPN of seedtunnel already there: nothing looked at
+    vpn_installed() { return 0; }
+    (vpn_foreign_refuse)
+)
+
+# Another seedbox: a Transmission that seedtunnel did not install, swizzin
+another_seedbox_refused() (
+    load
+    CONFLICT_ROOT="$WORK/swizzin-root"
+    local out
+    seedbox_installed() { return 1; }
+    package_installed() { [[ $1 == transmission-daemon ]]; }
+    mkdir -p "$APP_STATE_DIR"
+    : >"$APP_STATE_DIR/packages"
+    if out=$( (seedbox_foreign_refuse) 2>&1); then return 1; fi
+    printf '%s\n' "$out"
+    [[ $out == *"Transmission already there"*"It was not installed by seedtunnel"*"seedtunnel would replace them: nothing was changed."*"sudo apt purge transmission-daemon"* ]] || return 1
+    # installed by seedtunnel (an installation stopped halfway): no reason
+    printf 'nginx\ntransmission-daemon\n' >"$APP_STATE_DIR/packages"
+    (seedbox_foreign_refuse) || return 1
+    # swizzin
+    mkdir -p "$CONFLICT_ROOT/etc/swizzin"
+    if out=$( (seedbox_foreign_refuse) 2>&1); then return 1; fi
+    [[ $out == *"swizzin is installed"*"swizzin runs its own torrent programs"* ]] || return 1
+    # the seedbox of seedtunnel already there: nothing looked at
+    seedbox_installed() { return 0; }
+    (seedbox_foreign_refuse) || return 1
+    # wired in: both installations, and the restore of a backup with them
+    declare -f seedbox_install_interactive | grep -q seedbox_foreign_refuse \
+        && declare -f seedbox_install_from_config | grep -q seedbox_foreign_refuse \
+        && declare -f vpn_install_interactive | grep -q vpn_foreign_refuse \
+        && declare -f vpn_install_from_config | grep -q vpn_foreign_refuse \
+        && declare -f restore_check_server | grep -q vpn_foreign_refuse \
+        && declare -f restore_check_server | grep -q seedbox_foreign_refuse
+)
+
+# Ports taken: each program and its ports, a container of Docker said as such
+ports_taken_named() (
+    load
+    local out
+    ss() {
+        printf '%s\n' 'LISTEN 0 511 0.0.0.0:80 0.0.0.0:* users:(("apache2",pid=812,fd=4),("apache2",pid=811,fd=4))' \
+            'LISTEN 0 511 [::]:80 [::]:* users:(("apache2",pid=812,fd=5))' \
+            'LISTEN 0 4096 0.0.0.0:443 0.0.0.0:* users:(("docker-proxy",pid=99,fd=7))'
+    }
+    if out=$( (seedbox_check_web_ports) 2>&1); then return 1; fi
+    printf '%s\n' "$out"
+    [[ $out == *"Ports 80, 443 already taken"*"Another program uses them: apache2 (80), a container of Docker (443)."*"The seedbox needs them"*"sudo systemctl disable --now apache2"* ]] || return 1
+    # nginx (the one of seedtunnel): no reason
+    ss() { printf '%s\n' 'LISTEN 0 511 0.0.0.0:443 0.0.0.0:* users:(("nginx",pid=1,fd=6))'; }
+    (seedbox_check_web_ports) || return 1
+    # the UDP port of the VPN, by --config
+    ss() { printf '%s\n' 'UNCONN 0 0 0.0.0.0:51820 0.0.0.0:* users:(("wg-easy",pid=5,fd=3))'; }
+    if out=$( (vpn_port_refuse 51820) 2>&1); then return 1; fi
+    [[ $out == *"UDP port 51820 already taken"*"Another program uses it: wg-easy (51820)."*"VPN_PORT"* ]]
+)
+
+# The pages of the server follow the language of seedtunnel when it changes
+# (only those the administrator sees), the nginx site written again
+pages_follow_the_language() (
+    load
+    seedbox_installed() { return 0; }
+    seedbox_apply_nginx() { echo "nginx $APP_LANG" >>"$WORK/pages-calls"; }
+    language_cli fr >/dev/null 2>&1
+    [[ $(cat "$WORK/pages-calls") == "nginx fr" ]] || return 1
+    [[ $(web_page web/link-gone.html) == web/link-gone.fr.html && $(web_page web/unauthorized.html) == web/unauthorized.html ]] || return 1
+    language_cli en >/dev/null 2>&1
+    [[ $(web_page web/link-gone.html) == web/link-gone.html ]] || return 1
+    # from the menu too
+    rm -f "$WORK/pages-calls"
+    INTERACTIVE=1
+    language_menu <<<'2' >/dev/null 2>&1
+    INTERACTIVE=0
+    [[ $(cat "$WORK/pages-calls") == "nginx fr" ]] || return 1
+    # the site of the links (VPN without a seedbox)
+    seedbox_installed() { return 1; }
+    links_site_on() { return 0; }
+    VPN_PUBLIC_ADDRESS=203.0.113.7
+    LINKS_CERTIFICATE=selfsigned
+    rm -f "$WORK/pages-calls"
+    language_cli en >/dev/null 2>&1
+    [[ $(cat "$WORK/pages-calls") == "nginx en" ]]
 )
 
 doctor_says_ufw() (
@@ -8399,7 +8672,9 @@ links_site_serves_only_links() (
     if (APP_DIR=$WORK/elsewhere links_run links_generate_site | grep -q "nothing-here"); then return 1; fi
     # the page stands alone and names nothing
     if grep -qiE 'https?:|src=|href=|url\(|<script|transmission|seedtunnel|seedbox' "$ROOT/web/nothing-here.html"; then return 1; fi
-    grep -q "Rien ici" "$ROOT/web/nothing-here.html" && grep -q "Nothing here" "$ROOT/web/nothing-here.html" || return 1
+    # anyone may see it: in English only
+    grep -q "<h1>Nothing here</h1>" "$ROOT/web/nothing-here.html" && ! grep -q "Rien ici" "$ROOT/web/nothing-here.html" \
+        && [[ ! -e $ROOT/web/nothing-here.fr.html ]] || return 1
     # the variables of the seedbox untouched
     [[ $SEEDBOX_DOMAIN == seed.example.org && $SEEDBOX_CERTIFICATE == letsencrypt && -z ${NGINX_SITE_GENERATOR-} ]] || return 1
     # Let's Encrypt: its certificate, and HSTS (in the links too)
@@ -8667,7 +8942,7 @@ restore_and_the_links_site() (
     vpn_installed() { return 0; }
     seedbox_installed() { return 1; }
     ss() { printf '%s\n' 'LISTEN 0 511 0.0.0.0:80 0.0.0.0:* users:(("apache2",pid=1,fd=4))'; }
-    restore_refused_first linksports "before installing the site of the links"
+    restore_refused_first linksports "The site of the links needs them: nothing was changed."
 )
 
 # Wired in: apply, a new address of the VPN, removal of the VPN, a seedbox
@@ -8956,6 +9231,15 @@ check "AppArmor (Ubuntu 26.04): Transmission allowed in the data folder, reloade
 check "diagnostics: Transmission kept out of the data folder by AppArmor" doctor_sees_transmission_apparmor
 check "ufw on: VPN, seedbox and firewall not installed" ufw_stops_the_installations
 check "doctor: ufw on is said" doctor_says_ufw
+check "refusal: a red frame « ✘ » in the menus, red lines for the commands" refusal_frame_or_lines
+check "hosting panels: each one recognised by one of its files" hosting_panels_recognised
+check "hosting panel (Plesk): VPN, seedbox, firewall and restore refused, nothing changed" panel_stops_everything
+check "doctor: a hosting panel said in red" doctor_says_hosting_panel
+check "firewall: a hosting panel said on the home screen and in its screen" firewall_says_hosting_panel
+check "another WireGuard VPN (file, interface, addresses): refused, its file kept" another_vpn_refused
+check "another seedbox (Transmission not installed by seedtunnel, swizzin): refused" another_seedbox_refused
+check "ports taken: each program named with its ports (a container of Docker said so)" ports_taken_named
+check "pages of the server: those of the administrator follow the language" pages_follow_the_language
 check "restore: a backup of another system is said, nothing asked (tested on real servers)" restore_from_another_system_said
 check "backup: noting the system is not a setting changed meanwhile (one archive only)" backup_system_noted_without_second_archive
 check "backup: without the fingerprints of the files nor the copies changed by hand" backup_without_fingerprints

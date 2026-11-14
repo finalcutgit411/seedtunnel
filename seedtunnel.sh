@@ -131,6 +131,7 @@ if ((MAX_ARGUMENTS && $# > MAX_ARGUMENTS)); then
 fi
 if [[ ${1-} == update && -n ${2-} && ${2-} != back ]]; then die 'Usage: seedtunnel update [back]'; fi
 
+if [[ -z ${1-} ]]; then APP_MENU_START=1; fi
 check_system
 # Commands that change nothing (or only add a backup file) do not wait for the
 # lock: they work even if a menu was left open in another window.

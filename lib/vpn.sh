@@ -200,6 +200,92 @@ vpn_port_is_free() {
     ! port_in_use udp "$1"
 }
 
+# Another VPN on this server, before the VPN of seedtunnel is installed or
+# restored: its file /etc/wireguard/wg0.conf (seedtunnel would write over it),
+# its interface wg0, or the addresses 10.8.0.0/24 used elsewhere (an address
+# in them, or a route to a part of them; a wider route, such as 10.0.0.0/8,
+# stays behind the one of the VPN, more precise).
+
+# vpn_file_ours FILE — written by seedtunnel: its first line says it, or the
+# list of the files it wrote has it
+vpn_file_ours() {
+    local first="" list
+    IFS= read -r first <"$1" 2>/dev/null || true
+    [[ $first == *seedtunnel* ]] && return 0
+    list=$(written_list)
+    [[ -f $list ]] && awk -v file="$1" '{ sub(/^[^ ]+ /, "") } $0 == file { found = 1 } END { exit !found }' "$list"
+}
+
+# ipv4_number ADDRESS → the address as one number
+ipv4_number() {
+    local IFS=.
+    local -a part
+    read -r -a part <<<"$1"
+    printf '%s' "$(((part[0] << 24) + (part[1] << 16) + (part[2] << 8) + part[3]))"
+}
+
+# vpn_subnet_user → the interface (other than the one of the VPN) that uses
+# the addresses of the VPN; status 1 if none
+vpn_subnet_user() {
+    local base dev address line length
+    base=$(ipv4_number "$VPN_SUBNET.0")
+    # « 2: eth0    inet 10.8.0.5/24 brd … »
+    while read -r _ dev _ address _; do
+        [[ $dev != "$VPN_INTERFACE" && $address =~ ^[0-9.]+/[0-9]+$ ]] || continue
+        if ((($(ipv4_number "${address%/*}") & 0xFFFFFF00) == base)); then
+            printf '%s' "$dev"
+            return 0
+        fi
+    done < <(ip -4 -o addr show 2>/dev/null || true)
+    # « 10.8.0.0/24 dev wg1 proto kernel scope link src 10.8.0.1 » (also
+    # « unreachable 10.8.0.0/24 »)
+    while read -r line; do
+        address=$(awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(\/[0-9]+)?$/) { print $i; exit } }' <<<"$line")
+        [[ -n $address ]] || continue
+        dev=$(awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit } }' <<<"$line")
+        [[ $dev != "$VPN_INTERFACE" ]] || continue
+        length=32
+        if [[ $address == */* ]]; then length=${address#*/}; fi
+        ((length >= 24)) || continue
+        if ((($(ipv4_number "${address%/*}") & 0xFFFFFF00) == base)); then
+            printf '%s' "${dev:-?}"
+            return 0
+        fi
+    done < <(ip -4 route show 2>/dev/null || true)
+    return 1
+}
+
+# vpn_foreign_refuse → stops before the VPN is installed or restored when
+# another VPN is there
+vpn_foreign_refuse() {
+    local found="" dev
+    vpn_installed && return 0
+    if [[ -e $WIREGUARD_CONF ]]; then
+        vpn_file_ours "$WIREGUARD_CONF" || found=$(t '%s already exists and does not come from seedtunnel.' "$WIREGUARD_CONF")
+    elif ip link show "$VPN_INTERFACE" &>/dev/null; then
+        found=$(t 'The interface %s already exists.' "$VPN_INTERFACE")
+    fi
+    if [[ -n $found ]]; then
+        refuse "$(t 'Another VPN is installed')" "$found" \
+            "$(t 'seedtunnel would take its place, and its devices would lose their access: nothing was changed.')" \
+            "$(t 'To go on: remove the other VPN, or keep it and use a separate server for seedtunnel.')"
+    fi
+    if dev=$(vpn_subnet_user); then
+        refuse "$(t 'VPN addresses already taken')" \
+            "$(t 'The addresses %s are already used on this server (interface %s).' "$VPN_SUBNET.0/24" "$dev")" \
+            "$(t 'The VPN of seedtunnel needs them: nothing was changed.')" \
+            "$(t 'To go on: free these addresses (another VPN, a network of Docker…), or use a separate server for seedtunnel.')"
+    fi
+}
+
+# vpn_port_refuse PORT — the UDP port asked in --config is taken: who takes it
+vpn_port_refuse() {
+    refuse "$(t 'UDP port %s already taken' "$1")" \
+        "$(t 'Another program uses it: %s.' "$(ss -Hlunp "sport = :$1" 2>/dev/null | listening_programs)")" \
+        "$(t 'The VPN needs it: nothing was changed.')" \
+        "$(t 'To go on: choose another port (VPN_PORT in the configuration file), or stop this program.')"
+}
+
 # Can the kernel create a WireGuard interface? (fails in some OpenVZ/LXC
 # containers, like the TUN/TAP module used to)
 vpn_check_kernel() {
@@ -207,7 +293,10 @@ vpn_check_kernel() {
     # left by a check cut short: « add » would fail on it
     ip link del dev st-wgtest &>/dev/null || true
     if ! ip link add dev st-wgtest type wireguard 2>/dev/null; then
-        die 'The kernel cannot create a WireGuard interface.\n  On a container VPS (OpenVZ, LXC), ask the provider to enable WireGuard,\n  or choose a KVM plan.'
+        refuse "$(t 'WireGuard cannot run here')" \
+            "$(t 'Its kernel cannot create a WireGuard interface: it is often so on a container VPS (OpenVZ, LXC).')" \
+            "$(t 'The VPN needs it: nothing was changed.')" \
+            "$(t 'To go on: ask the provider to enable WireGuard, or choose a KVM plan.')"
     fi
     ip link del dev st-wgtest
 }
@@ -989,7 +1078,8 @@ vpn_install_interactive() {
     local first
     banner
     section 'WireGuard VPN installation'
-    ufw_refuse
+    conflicts_refuse
+    vpn_foreign_refuse
     vpn_check_kernel
     base_setup
     echo
@@ -1020,7 +1110,8 @@ vpn_install_interactive() {
 vpn_install_from_config() {
     local name port dns
     local -a names=()
-    ufw_refuse
+    conflicts_refuse
+    vpn_foreign_refuse
     vpn_check_kernel
     base_setup
     VPN_PUBLIC_ADDRESS=$(config_get VPN_PUBLIC_ADDRESS "$VPN_PUBLIC_ADDRESS")
@@ -1028,7 +1119,7 @@ vpn_install_from_config() {
     vpn_is_valid_address "$VPN_PUBLIC_ADDRESS" || die 'Invalid VPN_PUBLIC_ADDRESS: "%s"' "$VPN_PUBLIC_ADDRESS"
     port=$(config_get VPN_PORT "$VPN_PORT")
     is_valid_port "$port" || die 'Invalid VPN_PORT: "%s"' "$port"
-    vpn_port_is_free "$port" || die 'UDP port %s is already used on this server.' "$port"
+    vpn_port_is_free "$port" || vpn_port_refuse "$port"
     VPN_PORT=$port
     # quad9, cloudflare, dns4eu, adguard, or addresses
     dns=$(vpn_dns_value "$(config_get VPN_DNS "$VPN_DNS")")

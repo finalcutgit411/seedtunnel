@@ -596,7 +596,7 @@ firewall_enable() {
     local -a undo
     banner
     section 'Enable / update the firewall'
-    ufw_refuse
+    conflicts_refuse
     apt_install nftables
     if firewall_enabled && [[ -s $FIREWALL_RULES ]]; then was_on=1; fi
     # the new rules go to their own file: the rules in use, loaded at boot,
@@ -739,7 +739,7 @@ fw_finding() {
 # firewall_findings — FW_LEVELS, FW_SHORTS, FW_TITLES, FW_TEXTS: what is
 # wrong, the worst first in its kind (nothing: all is right)
 firewall_findings() {
-    local rules missing ruleset family name allowed docker fix docker_fix
+    local rules missing ruleset family name allowed docker fix docker_fix panel
     FW_LEVELS=() FW_SHORTS=() FW_TITLES=() FW_TEXTS=()
     # 1: Docker blocks the VPN, or only rules typed by hand let it through
     # (the menu offers to let it through for good)
@@ -753,10 +753,15 @@ firewall_findings() {
         fix="seedtunnel firewall enable"
         docker_fix="seedtunnel apply"
     fi
+    if { vpn_installed || seedbox_installed; } && panel=$(hosting_panel); then
+        fw_finding bad "$(t '%s is installed' "$panel")" "$(t '%s is installed' "$panel")" \
+            "$(t '%s is a hosting panel: it already runs the web (nginx or Apache, certificates) and the security (bans, firewall) of this server.' "$panel")" \
+            "$(t 'To put it right: a separate server for seedtunnel.')"
+    fi
     if { vpn_installed || seedbox_installed; } && ufw_active; then
         fw_finding bad "$(t 'ufw is on')" "$(t 'ufw is on')" \
-            "$(t 'The firewall of Ubuntu blocks the VPN and the seedbox.')" \
-            "$(t 'sudo ufw disable, then %s.' "$fix")"
+            "$(t 'ufw (the firewall of Ubuntu) blocks the VPN and the seedbox, and seedtunnel does not change its rules.')" \
+            "$(t 'To put it right: sudo ufw disable, then %s.' "$fix")"
     fi
     if firewall_enabled; then
         rules=$(nft list table inet "$FIREWALL_TABLE" 2>/dev/null || true)

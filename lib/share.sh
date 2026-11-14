@@ -77,6 +77,26 @@ EOF
 }
 
 SHARE_GONE_PAGE="web/link-gone.html"
+
+# web_page FILE → the page in the language of seedtunnel (« web/x.fr.html »
+# beside « web/x.html »), or FILE (English). Only for the pages that only the
+# administrator, or someone who got one of the links, can see: the others
+# (refused password, nothing here) stay in English, whoever comes.
+web_page() {
+    local translated="${1%.html}.$APP_LANG.html"
+    if [[ $APP_LANG != en && -r $APP_DIR/$translated ]]; then printf '%s' "$translated"; else printf '%s' "$1"; fi
+}
+
+# web_pages_follow_language — after a change of language: the pages of the
+# server in the new one (the nginx site written again and reloaded if it
+# changed)
+web_pages_follow_language() {
+    if seedbox_installed; then
+        seedbox_apply_nginx
+    elif links_site_on; then
+        links_run seedbox_apply_nginx
+    fi
+}
 # An address that is no link: the folder of the links, any other address of
 # the site of the links, and of the site of the seedbox once the password is
 # given
@@ -96,7 +116,7 @@ share_generate_gone_page() {
     location = /seedtunnel/link-gone.html {
         auth_basic off;
         internal;
-        alias $APP_DIR/$SHARE_GONE_PAGE;
+        alias $APP_DIR/$(web_page "$SHARE_GONE_PAGE");
         default_type text/html;
         access_log /var/log/nginx/access.log seedtunnel_share;
         add_header Cache-Control "no-store" always;

@@ -165,6 +165,7 @@ language_cli() {
         en | fr)
             language_save "$1"
             ok 'Language: %s.' "$(t 'English')"
+            web_pages_follow_language
             ;;
         *) die 'Usage: seedtunnel language en|fr' ;;
     esac
@@ -184,10 +185,12 @@ language_menu() {
         case ${choice,,} in
             1)
                 language_save en
+                ui_action web_pages_follow_language
                 return 0
                 ;;
             2)
                 language_save fr
+                ui_action web_pages_follow_language
                 return 0
                 ;;
             "" | b) return 0 ;;

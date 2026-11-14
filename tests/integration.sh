@@ -292,6 +292,26 @@ tunnel_test() {
 }
 
 # --- Docker on the same server (a fake one) -----------------------------------
+# Nothing of seedtunnel on the server: no settings, none of its packages
+nothing_installed() {
+    ! { test -e /etc/seedtunnel/vpn.conf || test -e /etc/seedtunnel/seedbox.conf \
+        || dpkg-query -W -f='${Status}\n' wireguard-tools nginx fail2ban 2>/dev/null | grep -q ' installed$'; }
+}
+
+# Another WireGuard VPN, played by its file only
+foreign_wireguard_put() {
+    install -d -m 700 /etc/wireguard
+    printf '[Interface]\nPrivateKey = kept-by-the-test\n' >/etc/wireguard/wg0.conf
+}
+
+# A Transmission installed by hand before seedtunnel, then removed by hand
+transmission_by_hand() {
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends transmission-daemon >/dev/null
+}
+transmission_removed_by_hand() {
+    DEBIAN_FRONTEND=noninteractive apt-get purge -y -q --auto-remove transmission-daemon >/dev/null
+}
+
 # What Docker does to the traffic that crosses the server, without Docker: its
 # chain DOCKER-USER read first in FORWARD, then everything refused (policy
 # drop). seedtunnel must let the VPN through with two rules in DOCKER-USER,
@@ -1340,6 +1360,23 @@ EOF
         # installed but off, as on Ubuntu Server: no longer in the way
         check "ufw turned off" ufw disable
     fi
+
+    step "Hosting panel, another VPN, a Transmission of its own: nothing installed (played by the tests)"
+    check "Plesk (its file of settings) put" install -D -m 644 /dev/null /etc/psa/psa.conf
+    check "Plesk: VPN refused" output_has "Plesk is installed" app vpn install --config "$W/ci.conf"
+    check "Plesk: seedbox refused" output_has "Plesk is installed" app seedbox install --config "$W/ci.conf"
+    check "Plesk: firewall refused" output_has "Plesk is installed" app firewall enable --yes
+    check "Plesk: restore refused" output_has "Plesk is installed" app restore "$W/ci.conf"
+    check "Plesk: said by the diagnostics" output_has "Plesk is installed: this hosting panel" app doctor
+    rm -rf /etc/psa
+    check "another WireGuard VPN (its file) put" foreign_wireguard_put
+    check "another VPN: VPN refused" output_has "Another VPN is installed" app vpn install --config "$W/ci.conf"
+    check "another VPN: its file kept" grep -qx "PrivateKey = kept-by-the-test" /etc/wireguard/wg0.conf
+    rm -f /etc/wireguard/wg0.conf
+    check "Transmission installed by hand" transmission_by_hand
+    check "Transmission of its own: seedbox refused" output_has "Transmission already there" app seedbox install --config "$W/ci.conf"
+    check "Transmission removed by hand" transmission_removed_by_hand
+    check "nothing installed by seedtunnel" nothing_installed
 
     step "VPN: installation from a configuration file"
     install -m 644 "$W/ci.conf" "$W/open.conf"

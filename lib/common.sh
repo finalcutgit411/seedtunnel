@@ -7,7 +7,7 @@
 # =============================================================================
 
 APP_NAME="seedtunnel"
-APP_VERSION="1.0.6"
+APP_VERSION="1.0.7"
 # Format of the settings in /etc/seedtunnel, and so of the backups that hold
 # them: 1 up to now. Raised by a version that writes its settings another
 # way; a backup of a format newer than this version knows is refused.
@@ -30,6 +30,9 @@ APP_APT_UPDATED=0
 
 # Command line options (set by seedtunnel.sh)
 INTERACTIVE=0
+# 1 when seedtunnel was started for its menu: a refusal at the start (system
+# not supported) is shown in a frame, as in the menus
+APP_MENU_START=0
 OPT_YES=0
 OPT_CONFIG_FILE=""
 OPT_STAGING=0
@@ -660,9 +663,17 @@ os_check() {
     os_read
     case "$APP_OS_ID $APP_OS_VERSION" in
         "debian 12" | "debian 13" | "ubuntu 24.04" | "ubuntu 26.04") return 0 ;;
-        "debian 11") die 'Debian 11 has had no security updates since 31 August 2026: seedtunnel no longer supports it. Upgrade to Debian 12, then to Debian 13:  https://www.debian.org/releases/bookworm/releasenotes' ;;
+        "debian 11")
+            refuse "$(t 'Debian 11: end of support')" \
+                "$(t 'Debian 11 has had no security updates since 31 August 2026.')" \
+                "$(t 'So seedtunnel no longer installs on it: nothing was changed.')" \
+                "$(t 'To go on: upgrade to Debian 12, then to Debian 13: %s' https://www.debian.org/releases/bookworm/releasenotes)"
+            ;;
     esac
-    die 'Supported systems: Debian 12/13, Ubuntu 24.04/26.04 — detected: %s.' "$APP_OS_DESCRIPTION"
+    refuse "$(t 'System not supported')" \
+        "$(t 'This server runs: %s.' "$APP_OS_DESCRIPTION")" \
+        "$(t 'seedtunnel is made and tested for Debian 12/13 and Ubuntu 24.04/26.04: nothing was changed.')" \
+        "$(t 'To go on: install one of these systems on the server (from the panel of your provider).')"
 }
 
 check_system() {
@@ -746,6 +757,11 @@ packages_record_init() {
     } >"$APP_STATE_DIR/packages"
 }
 
+# package_recorded PACKAGE — installed by seedtunnel (in its list)
+package_recorded() {
+    [[ -f $APP_STATE_DIR/packages ]] && grep -qxF -- "$1" "$APP_STATE_DIR/packages"
+}
+
 # Names of the installed packages, sorted
 packages_installed_list() {
     dpkg-query -W -f='${db:Status-Status} ${Package}\n' 2>/dev/null | awk '$1 == "installed" { print $2 }' | LC_ALL=C sort -u
@@ -801,8 +817,64 @@ ufw_active() {
 
 # ufw_refuse → stops before anything is installed while ufw is on
 ufw_refuse() {
+    local enable="seedtunnel firewall enable"
     ufw_active || return 0
-    die 'ufw (the firewall of Ubuntu) is on: it would block the VPN and the seedbox, and seedtunnel does not change its rules. Turn it off, then start again:  sudo ufw disable   (the firewall of seedtunnel then protects the server: seedtunnel firewall enable)'
+    if ((INTERACTIVE)); then enable="[3] $(t 'Firewall')"; fi
+    refuse "$(t 'ufw is on')" \
+        "$(t 'ufw (the firewall of Ubuntu) would block the VPN and the seedbox.')" \
+        "$(t 'seedtunnel does not change its rules: nothing was changed.')" \
+        "$(t 'To go on: sudo ufw disable, then start again (the firewall of seedtunnel will then protect the server: %s).' "$enable")"
+}
+
+# Hosting panels: each one runs the web (nginx or Apache, certificates) and
+# the security (bans, firewall) of its server, and rewrites their settings:
+# seedtunnel does not install next to one. « NAME|FILE FILE… »: one of the
+# files is enough (CONFLICT_ROOT: for the tests).
+HOSTING_PANELS=(
+    "Plesk|/etc/psa/psa.conf /usr/local/psa/version /opt/psa/version"
+    "cPanel|/usr/local/cpanel/version /usr/local/cpanel/cpanel"
+    "DirectAdmin|/usr/local/directadmin/directadmin /usr/local/directadmin/conf/directadmin.conf"
+    "HestiaCP|/usr/local/hestia/conf/hestia.conf /usr/local/hestia/bin"
+    "VestaCP|/usr/local/vesta/conf/vesta.conf /usr/local/vesta/bin"
+    "CloudPanel|/usr/bin/clpctl /home/clp/htdocs/app"
+    "aaPanel|/www/server/panel/class /www/server/panel/data"
+    "CyberPanel|/usr/local/CyberCP"
+    "Virtualmin|/etc/webmin/virtual-server"
+    "ISPConfig|/usr/local/ispconfig/server /usr/local/ispconfig/interface"
+)
+CONFLICT_ROOT=""
+
+# hosting_panel → the name of the hosting panel installed on this server, if
+# there is one (status 1 otherwise)
+hosting_panel() {
+    local entry file
+    for entry in "${HOSTING_PANELS[@]}"; do
+        for file in ${entry#*|}; do
+            if [[ -e $CONFLICT_ROOT$file ]]; then
+                printf '%s' "${entry%%|*}"
+                return 0
+            fi
+        done
+    done
+    return 1
+}
+
+# panel_refuse → stops before anything is installed when a hosting panel is
+# there
+panel_refuse() {
+    local panel
+    panel=$(hosting_panel) || return 0
+    refuse "$(t '%s is installed' "$panel")" \
+        "$(t '%s is a hosting panel: it already runs the web (nginx or Apache, certificates) and the security (bans, firewall) of this server.' "$panel")" \
+        "$(t 'seedtunnel cannot install next to it without risking to break its sites: nothing was changed.')" \
+        "$(t 'To go on: a separate server for seedtunnel.')"
+}
+
+# conflicts_refuse → what stops any installation, restore or firewall: a
+# hosting panel, ufw
+conflicts_refuse() {
+    panel_refuse
+    ufw_refuse
 }
 
 # apt_install PACKAGE… — installs only what is missing. The package list is
@@ -1129,6 +1201,29 @@ ssh_session_source() {
 # real problem to someone reading it)
 nft_delete_table() {
     if nft list table "$1" "$2" &>/dev/null; then nft delete table "$1" "$2" >>"$APP_LOG" 2>&1 || true; fi
+}
+
+# listening_programs < LINES OF « ss -p » → « apache2 (80, 443), … »: each
+# program and its ports (docker-proxy said as a container of Docker), or « a
+# program not named » when ss gives no name
+listening_programs() {
+    local line name list=""
+    while IFS= read -r line; do
+        [[ -n $line ]] || continue
+        name=${line%% (*}
+        if [[ $name == docker-proxy ]]; then line="$(t 'a container of Docker') ${line#"$name" }"; fi
+        list+="${list:+, }$line"
+    done < <(awk '{
+        n = split($4, a, ":"); port = a[n]; rest = $0
+        while (match(rest, /\("[^"]+"/)) {
+            name = substr(rest, RSTART + 2, RLENGTH - 3); rest = substr(rest, RSTART + RLENGTH)
+            if (!((name, port) in seen)) {
+                seen[name, port] = 1
+                if (name in ports) ports[name] = ports[name] ", " port; else ports[name] = port
+            }
+        }
+    } END { for (name in ports) print name " (" ports[name] ")" }' | LC_ALL=C sort)
+    printf '%s' "${list:-$(t 'a program not named')}"
 }
 
 # Is a port already in use?  port_in_use tcp|udp PORT
