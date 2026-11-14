@@ -331,8 +331,9 @@ docker_rules_once() {
     local interface
     interface=$(ip -4 route show default | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i+1); exit } }')
     iptables -w -S DOCKER-USER
-    (($(iptables -w -S DOCKER-USER | grep -c -- "-i wg0 -o $interface -s 10.8.0.0/24 -j ACCEPT") == 1)) \
-        && (($(iptables -w -S DOCKER-USER | grep -c -- "-i $interface -o wg0 -d 10.8.0.0/24 .*RELATED,ESTABLISHED,DNAT.* -j ACCEPT") == 1))
+    # each rule as « iptables -S » writes it (its own order of the options)
+    (($(iptables -w -S DOCKER-USER | grep -c -x -F -- "-A DOCKER-USER -s 10.8.0.0/24 -i wg0 -o $interface -j ACCEPT") == 1)) \
+        && (($(iptables -w -S DOCKER-USER | grep -c -x -F -- "-A DOCKER-USER -d 10.8.0.0/24 -i $interface -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED,DNAT -j ACCEPT") == 1))
 }
 
 # « apply » again: nothing said, the rules still once each
