@@ -557,6 +557,12 @@ update_end_to_end_signed_release() (
     (release_tag_check "$src" 1.0.1) || return 1
     (release_build "$src" 1.0.1 "$dir/release" "$WORK/release-key") 2>/dev/null || return 1
     (release_verify "$dir/release" 1.0.1) || return 1
+    # the command shown to publish: the right repository, the notes of the
+    # tag given as text (gh refuses --notes-from-tag together with --repo)
+    published=$(release_publish_command "$APP_REPO" "$src" 1.0.1 "$dir/release")
+    [[ $published == *" --repo $APP_REPO "* && $published == *' --notes seedtunnel\ 1.0.1 '* &&
+        $published == *"$dir/release/seedtunnel-1.0.1.tar.gz $dir/release/SHA256SUMS $dir/release/SHA256SUMS.sig" &&
+        $published != *notes-from-tag* ]] || return 1
     # the tag check of tools/release.sh refuses a tag not signed by the key
     update_test_tag "$src" v1.0.2 "$WORK/other-key" || return 1
     if (release_tag_check "$src" 1.0.2) 2>/dev/null; then return 1; fi
@@ -11915,7 +11921,7 @@ check "update: Git uses the published fetched commit despite unrelated or moved 
 check "update: Git tag lightweight, unsigned, signed by another key or for another version refused; checkout intact" update_git_unsigned_tags_refused
 check "update: archive with absolute, .. or foreign entries, links, special files or nothing refused before extraction" update_archive_entries_refused
 check "update: interruption while the folders are renamed waits until both are in place; caller traps restored" update_switch_ignores_interruption
-check "update: end to end over local HTTPS, release built and signed by tools/release.sh; unsigned, other key, changed sums or archive, http redirect refused" update_end_to_end_signed_release
+check "update: end to end over local HTTPS, release built and signed by tools/release.sh, gh command shown; unsigned, other key, changed sums or archive, http redirect refused" update_end_to_end_signed_release
 check "update: status, dirty tree, fetch and missing ref fail, no release is up to date; checkout left intact" update_git_errors_preserve_checkout
 check "update: update child borrows non-exported operation scope, keeps parent locks and returns its status" update_child_inherits_operation_scope_and_main_lock
 check "update: failed saved-version move never deletes source or an unrelated slot for an absent source" update_retention_move_failure_keeps_source_code

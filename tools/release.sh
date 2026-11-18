@@ -78,6 +78,17 @@ release_verify() {
     rm -rf "$check"
 }
 
+# release_publish_command GITHUB_REPO REPOSITORY VERSION FOLDER — the gh
+# command that publishes the release. The notes are the message of the tag,
+# read here: gh refuses --notes-from-tag together with --repo.
+release_publish_command() {
+    local repo=$1 root=$2 version=$3 out=$4 notes
+    notes=$(git -C "$root" tag -l --format='%(contents:subject)' "v$version")
+    printf '  gh release create v%s --repo %s --verify-tag --title "seedtunnel %s" --notes %q \\\n' \
+        "$version" "$repo" "$version" "$notes"
+    printf '    %q %q %q\n' "$out/seedtunnel-$version.tar.gz" "$out/SHA256SUMS" "$out/SHA256SUMS.sig"
+}
+
 release_main() {
     set -Eeuo pipefail
     (($# == 2 || $# == 3)) || release_fail 'usage: tools/release.sh X.Y.Z SIGNING_KEY [FOLDER]'
@@ -94,8 +105,7 @@ release_main() {
     repo=$(awk -F'"' '/^APP_REPO="/ { print $2; exit }' "$RELEASE_ROOT/lib/common.sh")
     printf '\nRelease %s built, signed and checked in %s.\n' "$version" "$out"
     printf 'Once the tag is pushed, publish it with:\n\n'
-    printf '  gh release create v%s --repo %s --verify-tag --title "seedtunnel %s" --notes-from-tag \\\n' "$version" "$repo" "$version"
-    printf '    %q %q %q\n' "$out/seedtunnel-$version.tar.gz" "$out/SHA256SUMS" "$out/SHA256SUMS.sig"
+    release_publish_command "$repo" "$RELEASE_ROOT" "$version" "$out"
 }
 
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then release_main "$@"; fi
