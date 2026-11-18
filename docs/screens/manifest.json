@@ -1,0 +1,109 @@
+{
+  "version": "1.0.0",
+  "source_sha": "5cfe47bd290ad12277bcaeb655e2c17ad2e1e11f",
+  "columns": 90,
+  "preview_sha256": "a27900695eea108a2117deff0da98004c6a1fc1d8104540b7115f547ccad3b65",
+  "data": "fictional, independent preview states",
+  "images": {
+    "en-home.png": {
+      "screen": "home",
+      "text_sha256": "2f99932b0e356042637af3637fda7cf7afc4ab3f2c17a1518c659277acb7d30c",
+      "png_sha256": "df0d625c8a2773b13ed744663da155b0eeab83662c98d99ea79837f753e64e0d"
+    },
+    "en-vpn.png": {
+      "screen": "vpn",
+      "text_sha256": "5a10ad76799ceffba01fd3dc5601e798b624700c4f076c018115b65d1b9992df",
+      "png_sha256": "a1640d9cc36d94743fdc1b334f7b5702a1cbcfd08e80311ffff0eb00adb41e1a"
+    },
+    "en-seedbox.png": {
+      "screen": "seedbox",
+      "text_sha256": "3fe54f12bfba6bf2237f972a619d3cdf948ec454010077b09ee89f8f378576e2",
+      "png_sha256": "12b27f1e6fb869c300942883e506d7c922e9b3b9186749fe12d345341228c7e6"
+    },
+    "en-access.png": {
+      "screen": "ssh",
+      "text_sha256": "ed7d30633018807672fae877340b61edaaa4a38fff36b0e2969bebe0fad69d99",
+      "png_sha256": "20b944cbe8659919dd4aec63d4c70ee296cbcd175875b6d6284f1b7ca6780d68"
+    },
+    "en-ssh.png": {
+      "screen": "keys",
+      "text_sha256": "a342082cc161301c6b7cfd0fe6baf160f35bd8009c19f52f87e1a4a0c1f80fdb",
+      "png_sha256": "611648594506321c261a9e11276d1996e19b5c9ae523ac8f9368b6599c57def0"
+    },
+    "en-sftp.png": {
+      "screen": "sftp",
+      "text_sha256": "03a1bf35c605f8029b92e243bfd3c747e5dffa368eeb629633f0c1ad5a01fb14",
+      "png_sha256": "23dd154eb181beb276a438d7f54a8cf233bc5400193c2e602c35d1a3acca937f"
+    },
+    "en-policy.png": {
+      "screen": "policy",
+      "text_sha256": "aa92fa95a179c05e07c8c266fa6c84a88d6f029c0f241b31f421c27043fb45a6",
+      "png_sha256": "53d1daf1a22a5da5cb1971832195a4c63962c39423e4efc00275e57a4c966d04"
+    },
+    "en-protection.png": {
+      "screen": "protection",
+      "text_sha256": "39c766580b57aa7e9ae129df926aa742423cfcf1bbe7e6245ef552bc004a1774",
+      "png_sha256": "b5808bb52f0752f2e6d139db61c34c19bf69405d392f21b23f27417f8f747e26"
+    },
+    "en-maintenance.png": {
+      "screen": "maintenance",
+      "text_sha256": "ac9087cb14ff806a537a6d19ab68f0233d578e7fb7eb4b87e90af8c9c0d5f979",
+      "png_sha256": "3748b3614df1d2ef1618d118049a3cf5e3340bf7b615f822dc8e90a7b91381cb"
+    },
+    "en-backup.png": {
+      "screen": "backup",
+      "text_sha256": "4fa718bb1261de8a93cd1a7b84bd7eb1cf02f615131899ddce63fb1e09f065b2",
+      "png_sha256": "a0f83005dc3e726cfad54e49052ba962a4094b4ea449b19e253798a15036175b"
+    },
+    "fr-home.png": {
+      "screen": "home",
+      "text_sha256": "d43244c7ad4c4e196ebf44a9e5c6077983aff16e2f9705848326c75be6ceada2",
+      "png_sha256": "bfbe790326c75e78a1c09e3f7e363e8083aaaec56a74c83c859697f3200d72ed"
+    },
+    "fr-vpn.png": {
+      "screen": "vpn",
+      "text_sha256": "e58924199e43d653d1153148c2e62169f1371cfaed34c092ffc65417b9bbdf6f",
+      "png_sha256": "56d39e112fff499116ef19bee9aba2e527f1b4a0a67e5732611b274580fbf1ef"
+    },
+    "fr-seedbox.png": {
+      "screen": "seedbox",
+      "text_sha256": "c0a0b2c7978c6916f12a3059c86d7db372fcccd67193d8bcbc91a36a329462e2",
+      "png_sha256": "364fdee1015f28773f6db9bacb77ea8dfab72e9ceaf38fc8362056e29f1d9ed4"
+    },
+    "fr-access.png": {
+      "screen": "ssh",
+      "text_sha256": "4416a5c448cbc59d98fd59651f3ac605cc91dcd1628dd4830872da58fc627008",
+      "png_sha256": "368e765fd24974bce13ae0ac444f89b86239a9a6f3d27821b4225e2ee6ab9d91"
+    },
+    "fr-ssh.png": {
+      "screen": "keys",
+      "text_sha256": "98458311633862c6437119ae91f43356ed0fa994fa1849fe90f044d0a8378934",
+      "png_sha256": "4e8739eb769f7d98dfc602387ad3f96e087e689d39685f0cf5a5f3fc2eea2601"
+    },
+    "fr-sftp.png": {
+      "screen": "sftp",
+      "text_sha256": "9c444b8fedcc4c71290afeeb9ae9b5fd48b9fdb05c9fd751a6067f74a340af45",
+      "png_sha256": "a932ccec51ed42cbdfc6548778f7525d28786bf2cc89793eaa285eb84978ac2f"
+    },
+    "fr-policy.png": {
+      "screen": "policy",
+      "text_sha256": "df0a29c2e6eeb74ce852bc91e5c03c42c00751c022b240796984b6b7bd7044e9",
+      "png_sha256": "51332b60211593415d0dd73fa87cded524c88d1a0ba29b4978f4e4e8b280e5eb"
+    },
+    "fr-protection.png": {
+      "screen": "protection",
+      "text_sha256": "d72b3eaa1714c1c3e5f55d8a23800bf7cb51a643be9ca29a2de7b449f469eb39",
+      "png_sha256": "35c86bf6ddb75996030db9353e4ccbeb740f48ebab73dcf6450a0e563ea438c0"
+    },
+    "fr-maintenance.png": {
+      "screen": "maintenance",
+      "text_sha256": "a514a841d88587425951a0e75ff180329a50d54876370d36573697b31989f266",
+      "png_sha256": "fc59b79eaf00e596c6ab9228bc271cca7d08edf38d2c28088972c4f46d092267"
+    },
+    "fr-backup.png": {
+      "screen": "backup",
+      "text_sha256": "48b86fb1fe615f0db0cfd13da01f28d6274858608f954184cba44d3f69ba7bdd",
+      "png_sha256": "39ab259b069b0ee4c240d0f4a72ed817e8022ea8a78f385ab241604ed3c7e8d7"
+    }
+  }
+}

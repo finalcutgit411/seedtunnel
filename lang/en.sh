@@ -1,0 +1,261 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# =============================================================================
+#  seedtunnel — long texts in English
+#  Each text is a function text_en_<name>, shown with « text <name> ».
+#  lang/fr.sh has the same functions in French (text_fr_<name>).
+#  Variables are those of the function that shows the text.
+# =============================================================================
+
+text_en_usage() {
+    cat <<EOF
+seedtunnel $APP_VERSION — WireGuard VPN + seedbox for Debian 13
+
+Usage: seedtunnel [command] [options]       (no command: interactive menu)
+
+VPN
+  vpn install [--config FILE]        install (or put back in order with --config)
+  vpn add NAME [--qr]                add a client
+  vpn remove NAME [--yes]            revoke a client
+  vpn list                           clients and connections
+  vpn show NAME                      QR code and file of a client
+  vpn share NAME                     one-time download link for the file
+  vpn dns [quad9|cloudflare|dns4eu|adguard|IP,IP]
+                                     DNS of the clients: shown, or changed
+  vpn links [on|off] [--yes]         HTTPS site of the links without a seedbox: state, on, off
+  vpn restart | uninstall [--yes]
+
+Seedbox
+  seedbox install [--config FILE] [--staging]
+  seedbox password [--user NAME]     change the password (and the name)
+                                     (read from standard input without a terminal)
+  seedbox domain NAME [--staging]    change the domain / request the certificate again
+  seedbox sftp-config [winscp|filezilla]
+                                     SFTP settings; profile to import (one-time link)
+  seedbox sftp-key add FILE.pub | list | remove N
+  seedbox sftp-key new               key for WinSCP / FileZilla (one-time link)
+  seedbox sftp-password on|off       allow the password in SFTP
+  seedbox bans | unban IP            addresses banned by fail2ban
+  seedbox restart | uninstall [--yes] [--purge-data]
+
+SSH access (administrators; root never logs in by SSH)
+  ssh                                accounts, keys, passwords (in a terminal: the menu)
+  ssh rules                          what sshd really does, and where it is set
+  ssh key add FILE.pub [ACCOUNT]     add a public key (OpenSSH, or saved by PuTTYgen)
+  ssh key new [ACCOUNT]              make a key on the server (one-time link)
+  ssh key list [ACCOUNT]             the keys, numbered
+  ssh key remove NUMBER [ACCOUNT]    remove a key
+  ssh root off                       refuse root: tried for 2 minutes, from a terminal
+  ssh password off                   keys only, root refused: tried for 2 minutes
+  ssh password on                    accept the passwords again (root stays refused)
+
+Server
+  firewall enable|disable|status     firewall (everything refused but the needed)
+  firewall rules                     the rules loaded right now, in words
+  doctor                             full diagnostics (status 1 if a problem)
+  doctor --link                      report without private details, one-time link
+  backup [--output FILE] [--passphrase-file FILE]
+  backup list                        the backups, numbered
+  backup share [NUMBER]              one-time download link (the latest, or NUMBER)
+  backup delete NUMBER [--yes]       delete a backup of the list
+  backup auto on|off|status          weekly encrypted backup (off: --yes without a terminal)
+  restore [FILE] [--passphrase-file FILE] [--yes]
+                                     without FILE, in a terminal: the list of the backups found
+  restore clean [--yes]              delete the settings kept by finished restores
+  update                             go to the latest published version
+  update back [--yes]                back to the version before the last update
+  apply                              apply the saved configuration again
+  uninstall [--yes] [--purge-data] [--purge-backups]
+                                     remove seedtunnel entirely (backups kept)
+  language en|fr                     language of the messages
+  version | help                     also --version, --help
+
+Options
+  -c, --config FILE      settings read from a file (see examples/seedtunnel.conf)
+  -y, --yes              answer yes to the confirmations
+  --staging              Let's Encrypt test servers (higher limits, untrusted certificate)
+EOF
+}
+
+text_en_vpn_client_help() {
+    cat <<EOF
+Phone    : WireGuard app → « + » → « Scan from QR code ».
+Computer : WireGuard app → « Import tunnel(s) from file », with the file
+           $VPN_CLIENTS_DIR/$name.conf
+           To get it onto the computer:  seedtunnel vpn share $name
+
+Open port for this client: ${C_BOLD}$port${C_RESET} (TCP and UDP)
+  Incoming connections on $VPN_PUBLIC_ADDRESS:$port reach this client while
+  it is connected: set this port in your torrent program.
+
+If the tunnel drops, the device goes out without it, with its real address.
+To block everything outside the tunnel (kill switch):
+  Windows     : WireGuard app → Edit the tunnel → tick « Block untunneled traffic (kill-switch) ».
+  Android     : Settings → VPN → WireGuard (gear) → « Always-on VPN » and « Block connections without VPN ».
+  qBittorrent : Options → Advanced → Network interface → the WireGuard tunnel.
+EOF
+}
+
+text_en_share_steps_vpn() {
+    cat <<'EOF'
+<li>Computer: WireGuard app → import a tunnel from a file → choose this file.</li>
+<li>Phone: WireGuard app → « + » → import from a file.</li>
+<li>If the tunnel drops, the device goes out without it. To block everything outside the tunnel (kill switch): on Windows, edit the tunnel and tick « Block untunneled traffic (kill-switch) »; on Android, Settings → VPN → WireGuard → « Always-on VPN » and « Block connections without VPN »; in qBittorrent, Options → Advanced → Network interface → the WireGuard tunnel.</li>
+EOF
+}
+
+text_en_letsencrypt_failed_help() {
+    cat <<EOF
+  Common causes: port 80 blocked by the firewall of the provider, DNS not
+  propagated yet, or more than 5 certificates requested this week for this
+  name (for your tests, use --staging). Details in $APP_LOG.
+  To try again:  $1
+EOF
+}
+
+text_en_seedbox_summary() {
+    cat <<EOF
+${C_BOLD}Web interface${C_RESET} : https://$SEEDBOX_DOMAIN/   (certificate $(seedbox_certificate_label))
+${C_BOLD}SFTP${C_RESET}          : $SEEDBOX_DOMAIN, port $port (WinSCP, FileZilla, Cyberduck: SFTP protocol)
+                settings ready to import:  seedtunnel seedbox sftp-config
+${C_BOLD}User${C_RESET}          : $SEEDBOX_USER
+EOF
+    if [[ -n $SEEDBOX_NEW_PASSWORD ]]; then
+        printf '%sPassword%s      : %s\n' "$C_BOLD" "$C_RESET" "$SEEDBOX_NEW_PASSWORD"
+    fi
+    cat <<'EOF'
+
+Folders (seen in SFTP):
+  watch/       drop a .torrent here, the download starts by itself
+  incomplete/  downloads in progress
+  complete/    finished downloads
+  documents/   personal space
+
+EOF
+    if [[ $SEEDBOX_CERTIFICATE == selfsigned ]]; then
+        echo "Self-signed certificate: the browser will show a warning to accept once."
+        echo
+    fi
+    if [[ -n $SEEDBOX_NEW_PASSWORD ]]; then
+        echo "Write this down: the password is not saved anywhere in clear."
+    fi
+}
+
+text_en_sftp_config_help() {
+    cat <<EOF
+${C_BOLD}WinSCP${C_RESET}: in the login window, « New Site », paste this address into
+« Host name », then « Save »:
+
+$url
+
+The fingerprint of the server is inside the address: WinSCP checks by itself
+that it is really your server, without a question at the first connection.
+EOF
+}
+
+text_en_share_steps_winscp() {
+    cat <<EOF
+<li>WinSCP: in the login window, « Tools » → « Import Sites… » → « Import from »: « INI file » → « Browse… »: choose this file → tick the site → « OK ».</li>
+EOF
+    if ((${key_in_profile:-0})); then
+        cat <<EOF
+<li>The site « Seedbox $SEEDBOX_DOMAIN » shows in the list. It uses the SSH key made by seedtunnel, the file seedbox-$SEEDBOX_USER.ppk: keep it, without renaming it, in the .ssh folder of your personal folder (C:\Users\YOUR-NAME\.ssh, create it if needed). Saved somewhere else? Edit the site → « Advanced… » → « SSH » → « Authentication » → « Private key file ».</li>
+EOF
+    elif [[ $SEEDBOX_SFTP_PASSWORD == no ]]; then
+        cat <<EOF
+<li>The site « Seedbox $SEEDBOX_DOMAIN » shows in the list. One step is left: this server accepts SSH keys only, so give the site your private key: edit the site → « Advanced… » → « SSH » → « Authentication » → « Private key file »: choose your key → « OK » → « Save ». No key yet? Menu Access and keys › SFTP access and client profiles, choice 2.</li>
+EOF
+    else
+        cat <<EOF
+<li>The site « Seedbox $SEEDBOX_DOMAIN » shows in the list. The password is asked when connecting.</li>
+EOF
+    fi
+    if [[ -n $fingerprint ]]; then
+        cat <<EOF
+<li>The fingerprint of the server is in the file: WinSCP checks by itself that it is really your server, without a question at the first connection.</li>
+EOF
+    fi
+}
+
+text_en_share_steps_filezilla() {
+    cat <<EOF
+<li>FileZilla: « File » → « Import… » → choose this file.</li>
+EOF
+    if [[ $SEEDBOX_SFTP_PASSWORD == no ]]; then
+        cat <<EOF
+<li>The site « Seedbox $SEEDBOX_DOMAIN » shows in the Site Manager. One step is left: this server accepts SSH keys only, so give the site your private key: « Logon Type »: « Key file » → choose your key. No key yet? Menu Access and keys › SFTP access and client profiles, choice 2.</li>
+EOF
+    else
+        cat <<EOF
+<li>The site « Seedbox $SEEDBOX_DOMAIN » shows in the Site Manager. The password is asked when connecting.</li>
+EOF
+    fi
+    cat <<EOF
+<li>At the first connection, the fingerprint of the server must be: <code>$fingerprint</code></li>
+EOF
+}
+
+text_en_share_steps_sftp_key() {
+    cat <<'EOF'
+<li>Keep this file on your computer without renaming it, in a folder you keep (not in Downloads). On Windows: the .ssh folder of your personal folder, C:\Users\YOUR-NAME\.ssh (create it if needed).</li>
+<li>WinSCP: the profile of seedtunnel (Access and keys › SFTP access and client profiles, choice 4) finds this key by itself in that folder. For another site: in the login window, on the site (for a saved site, edit it first): « Advanced… » → « SSH » → « Authentication » → « Private key file »: choose this file → « OK » → « Save ».</li>
+<li>FileZilla: « Site Manager » → your site → « Logon Type »: « Key file » → choose this file.</li>
+EOF
+}
+
+text_en_share_steps_ssh_key() {
+    cat <<'EOF'
+<li>Keep this file on your computer, in a folder you keep (not in Downloads).</li>
+<li>PuTTY: « Connection » → « SSH » → « Auth » → « Credentials » → « Private key file for authentication »: choose this file. Then « Session » → your session → « Save ».</li>
+<li>Log in once with it, in a new window: then you can refuse the passwords and root (menu Access and keys).</li>
+EOF
+}
+
+text_en_seedbox_uninstall_help() {
+    cat <<EOF
+Will be removed: Transmission, nginx, certbot, the certificate and
+the user $SEEDBOX_USER (fail2ban too, unless the VPN stays).
+The data in $SEEDBOX_DATA_DIR is kept, unless --purge-data
+is given (or you ask for it below).
+EOF
+}
+
+text_en_backup_contents() {
+    cat <<'EOF'
+Content: keys and clients of the VPN, settings and password hashes of the
+seedbox, firewall, certificates, list of torrents. Downloaded files are not
+included.
+EOF
+}
+
+text_en_backup_after() {
+    cat <<'EOF'
+  Get it onto your computer, outside this server:  seedtunnel backup share
+  Without the passphrase, it cannot be recovered.
+EOF
+}
+
+text_en_share_steps_report() {
+    cat <<'EOF'
+<li>Send this file to the person who helps you (forum, e-mail…): it opens with any text editor.</li>
+<li>Your domain, the name and the addresses of your server, your SFTP account, your SSH keys and the names of your VPN clients were replaced by generic words. It holds no password and no key.</li>
+<li>To make a new one: <code>seedtunnel doctor --link</code>.</li>
+EOF
+}
+
+text_en_share_steps_backup() {
+    cat <<EOF
+<li>Keep this file on your computer, or on a USB drive.</li>
+<li>Its size must be <b>$size</b>. If the download stopped before the end, the link is used up anyway: create a new one with <code>seedtunnel backup share</code>.</li>
+<li>To restore it on a new server: install seedtunnel, copy the file onto it, then run <code>seedtunnel restore FILE</code>.</li>
+EOF
+}
+
+text_en_restore_after() {
+    cat <<EOF
+  The downloaded files are not in the backup. Copy them back, for example:
+    rsync -a --info=progress2 old-server:$SEEDBOX_DATA_DIR/complete/ $SEEDBOX_DATA_DIR/complete/
+  then, in the web interface: select the torrents, right-click → « Verify Local Data ».
+  (Copied before the restore, they are found by Transmission by itself.)
+EOF
+}

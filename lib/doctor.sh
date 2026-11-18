@@ -1,0 +1,1210 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# =============================================================================
+#  seedtunnel — diagnostics (« seedtunnel doctor »)
+#
+#  Checks in one go what causes most breakdowns: stopped services, DNS not
+#  pointing to the server, certificate about to expire, closed port, full
+#  disk, wrong clock, missing backups… Each line says what to do.
+#  Exit status: 0 if there is no problem, 1 otherwise (usable in a script).
+#  It changes nothing, so it also runs while a menu is open elsewhere.
+# =============================================================================
+
+DOCTOR_ERRORS=0
+DOCTOR_WARNINGS=0
+# left by Ubuntu and unattended-upgrades when a restart is needed; where the
+# kernels are; the file that says when the server started
+REBOOT_REQUIRED_FILE="/run/reboot-required"
+BOOT_DIR="/boot"
+PROC_STAT="/proc/stat"
+
+doctor_ok() { ok "$@"; }
+
+# A kernel installed since the server started, other than the one running.
+# /run/reboot-required is left by Ubuntu and by unattended-upgrades, but not
+# on a new Debian whose first « apt full-upgrade » ran before seedtunnel
+# installed unattended-upgrades. The ctime of a kernel is when it was
+# installed. A kernel not taken from /boot (given by the host, or in a
+# container) is left alone: restarting would not change it.
+kernel_installed_since_boot() {
+    local boot file running
+    boot=$(awk '$1 == "btime" { print $2 }' "$PROC_STAT" 2>/dev/null || true)
+    [[ $boot =~ ^[0-9]+$ ]] || return 1
+    running=$(uname -r)
+    [[ -f $BOOT_DIR/vmlinuz-$running ]] || return 1
+    for file in "$BOOT_DIR"/vmlinuz-*; do
+        [[ -f $file && ${file#"$BOOT_DIR"/vmlinuz-} != "$running" ]] || continue
+        if (($(stat -c %Z -- "$file") > boot)); then return 0; fi
+    done
+    return 1
+}
+doctor_warn() {
+    DOCTOR_WARNINGS=$((DOCTOR_WARNINGS + 1))
+    printf '%s!%s %s\n' "$C_YELLOW" "$C_RESET" "$(t "$@")"
+}
+doctor_error() {
+    DOCTOR_ERRORS=$((DOCTOR_ERRORS + 1))
+    printf '%s✘%s %s\n' "$C_RED" "$C_RESET" "$(t "$@")"
+}
+doctor_title() { printf '\n%s%s%s\n' "$C_BOLD" "$(t "$@")" "$C_RESET"; }
+
+# doctor_service SERVICE "Name shown" [boot] — with « boot » (the services that
+# « seedtunnel apply » enables), it must also start by itself at boot
+doctor_service() {
+    # Optional observed state/boot avoid rereading a shared snapshot. Other
+    # diagnostics retain their existing live service check.
+    local state=${4-} boot=${5-}
+    if [[ -z $state ]]; then
+        if systemctl is-active --quiet "$1"; then state=active; else state=stopped; fi
+    fi
+    if [[ $state == unknown ]]; then
+        doctor_warn '%s: state unavailable (systemd could not be queried)' "$2"
+    elif [[ $state == active ]]; then
+        if [[ ${3-} == boot ]]; then
+            if [[ -z $boot ]]; then
+                if systemctl is-enabled --quiet "$1" 2>/dev/null; then boot=on; else boot=off; fi
+            fi
+            if [[ $boot == unknown ]]; then
+                doctor_warn '%s: running; startup at boot could not be checked' "$2"
+            elif [[ $boot == off ]]; then
+                doctor_warn '%s: running, but not started at boot: it will not come back after a restart of the server   → seedtunnel apply' "$2"
+            else
+                doctor_ok '%s: running' "$2"
+            fi
+        else
+            doctor_ok '%s: running' "$2"
+        fi
+    else
+        doctor_error '%s: stopped   → journalctl -u %s -n 30' "$2" "$1"
+    fi
+}
+
+# SSH started on demand by systemd (ssh.socket, Ubuntu): ssh.service only
+# runs once someone has connected
+doctor_ssh() {
+    if ! systemctl is-active --quiet ssh.service && systemctl is-active --quiet ssh.socket; then
+        doctor_ok 'SSH / SFTP: waiting for connections (ssh.socket)'
+    else
+        doctor_service ssh.service 'SSH / SFTP'
+    fi
+}
+
+# Days left before a certificate expires (empty if unreadable)
+certificate_days_left() {
+    local end expires now
+    end=$(openssl x509 -in "$1" -noout -enddate 2>/dev/null | cut -d= -f2 || true)
+    [[ -n $end ]] || return 0
+    expires=$(date -d "$end" +%s 2>/dev/null) || return 0
+    now=$(date +%s)
+    printf '%s' "$(((expires - now) / 86400))"
+}
+
+doctor_system() {
+    local free synced started panel
+    doctor_title 'System'
+    doctor_ok '%s, seedtunnel %s' "$APP_OS_DESCRIPTION" "$APP_VERSION"
+    if panel=$(hosting_panel); then
+        doctor_error '%s is installed: this hosting panel runs the web, the certificates and the security of this server, seedtunnel cannot share it   → a separate server for seedtunnel' "$panel"
+    fi
+    free=$(disk_free_gb /)
+    if [[ -z $free ]]; then
+        doctor_warn 'Free space of / unreadable'
+    elif ((free < 2)); then
+        doctor_error 'Disk almost full: %s GB free on /' "$free"
+    else
+        doctor_ok 'Free space on /: %s GB' "$free"
+    fi
+    if grep -qs 'Unattended-Upgrade "1"' /etc/apt/apt.conf.d/20auto-upgrades; then
+        doctor_ok 'Automatic security updates on'
+    else
+        doctor_warn 'Automatic security updates off'
+    fi
+    if [[ -f $NET_HARDENING_FILE ]]; then
+        if net_hardening_in_force; then
+            doctor_ok 'Kernel network settings hardened'
+        else
+            doctor_warn 'Kernel network settings not applied   → seedtunnel apply'
+        fi
+    fi
+    # left by an update cut short (power cut…): the next update refuses to run
+    if [[ -e $APP_DIR.previous ]]; then
+        doctor_warn 'An update did not finish: %s is still there. If seedtunnel works, delete it:  rm -rf %s' "$APP_DIR.previous" "$APP_DIR.previous"
+    fi
+    doctor_restore_interrupted
+    doctor_restore_leftovers
+    doctor_changed_by_hand
+    doctor_packages_unfinished
+    if [[ -e $REBOOT_REQUIRED_FILE ]]; then
+        doctor_warn 'Restart advised (update of the kernel or of a library)'
+    elif kernel_installed_since_boot; then
+        doctor_warn 'Restart advised: a kernel installed since the server started is not used yet   → reboot'
+    fi
+    synced=$(timedatectl show -p NTPSynchronized --value 2>/dev/null || true)
+    if [[ $synced == yes ]]; then
+        doctor_ok 'Clock synchronized'
+    elif started=$(server_started_minutes_ago) && ((started < 10)); then
+        # it takes a little while after a start: nothing to worry about yet
+        doctor_ok 'Clock being synchronized (the server started %s min ago)' "$started"
+    else
+        doctor_warn 'Clock not synchronized: certificates and WireGuard depend on it (timedatectl)'
+    fi
+}
+
+# Minutes since the server started (« btime » of /proc/stat). Status 1:
+# unknown.
+server_started_minutes_ago() {
+    local boot now
+    boot=$(awk '$1 == "btime" { print $2 }' "$PROC_STAT" 2>/dev/null || true)
+    [[ $boot =~ ^[0-9]+$ ]] || return 1
+    printf -v now '%(%s)T' -1
+    ((now >= boot)) || return 1
+    printf '%s' "$(((now - boot) / 60))"
+}
+
+doctor_vpn() {
+    local ip=$1 ips
+    doctor_title 'WireGuard VPN'
+    doctor_service "wg-quick@$VPN_INTERFACE" 'WireGuard service' boot
+    if [[ $(wg show "$VPN_INTERFACE" listen-port 2>/dev/null || true) == "$VPN_PORT" ]]; then
+        doctor_ok 'Listening on port %s/udp' "$VPN_PORT"
+    else
+        doctor_error 'WireGuard is not listening on port %s/udp   → seedtunnel vpn restart' "$VPN_PORT"
+    fi
+    doctor_vpn_routing
+    doctor_vpn_nat
+    doctor_vpn_forward
+    if is_ipv4 "$VPN_PUBLIC_ADDRESS"; then
+        if [[ $VPN_PUBLIC_ADDRESS == "$ip" ]]; then
+            doctor_ok 'Address of the clients (%s) = public IP of the server' "$VPN_PUBLIC_ADDRESS"
+        else
+            doctor_warn 'The clients connect to %s, but the public IP is %s' "$VPN_PUBLIC_ADDRESS" "${ip:-$(t 'unknown')}"
+        fi
+    else
+        ips=$(dns_ipv4_addresses "$VPN_PUBLIC_ADDRESS")
+        if [[ -n $ip ]] && grep -qxF "$ip" <<<"$ips"; then
+            doctor_ok '"%s" points to this server' "$VPN_PUBLIC_ADDRESS"
+        else
+            doctor_warn '"%s" points to %s and not to %s' "$VPN_PUBLIC_ADDRESS" "${ips:-$(t 'nothing')}" "${ip:-$(t 'this server')}"
+        fi
+    fi
+    doctor_ok 'Clients: %s, %s connected right now' "$(vpn_count_clients)" "$(vpn_connected_count)"
+    say "  (the UDP port cannot be tested from outside by the server itself: if in"
+    say "   doubt, check the firewall in the control panel of the provider)"
+}
+
+# Left by a restore cut short (power cut…): the settings may be half there.
+# Back to those from before it, if there were some; otherwise, restore again.
+# Files written by seedtunnel and changed by hand since: the next apply puts
+# its version back (and keeps a copy of the other one)
+doctor_changed_by_hand() {
+    local list _sum file
+    list=$(written_list)
+    [[ -f $list ]] || return 0
+    while read -r _sum file; do
+        if written_changed "$file"; then
+            doctor_warn '%s changed by hand: « seedtunnel apply » puts the version of seedtunnel back (and keeps a copy of yours)' "$file"
+        fi
+    done <"$list"
+}
+
+# Left half-installed or half-configured by an installation cut short
+# (Ctrl+C, closed session): the next one of APT finishes them, or by hand
+doctor_packages_unfinished() {
+    local unfinished
+    unfinished=$(packages_unfinished) || unfinished=""
+    [[ -n $unfinished ]] || return 0
+    doctor_warn 'Packages left half-installed (an installation was cut short): %s   → dpkg --configure -a' "${unfinished//$'\n'/ }"
+}
+
+doctor_restore_interrupted() {
+    local previous
+    restore_interrupted || return 0
+    previous=$(restore_interrupted_previous)
+    if [[ -n $previous && -f $previous.undo ]]; then
+        # also when it stopped halfway: it can be run again
+        doctor_error 'A restore did not finish: the settings of seedtunnel may be incomplete. To go back to what was there before it:  bash %s.undo' "$previous"
+    elif [[ -n $previous && -d $previous ]]; then
+        doctor_error 'A restore did not finish: the settings of seedtunnel may be incomplete. To go back to those from before it:  test -d %s && rm -rf %s && mv -T %s %s && seedtunnel apply && rm -f %s' \
+            "$previous" "$APP_STATE_DIR" "$previous" "$APP_STATE_DIR" "$RESTORE_MARKER"
+    else
+        doctor_error 'A restore did not finish: the settings of seedtunnel may be incomplete. Run it again:  seedtunnel restore FILE'
+    fi
+}
+
+# The settings replaced by a finished restore stay in /etc with the old keys,
+# password hashes and passphrase, until deleted (a restore cut short needs
+# them: said above, not here)
+doctor_restore_leftovers() {
+    local -a kept
+    restore_interrupted && return 0
+    mapfile -t kept < <(restore_leftovers)
+    ((${#kept[@]})) || return 0
+    if ((${#kept[@]} == 1)); then
+        doctor_warn 'Settings replaced by a restore still kept in %s (old keys, passwords, passphrase). Once everything works:  seedtunnel restore clean' "${kept[0]}"
+    else
+        doctor_warn 'Settings replaced by %s restores still kept (old keys, passwords, passphrase). Once everything works:  seedtunnel restore clean' "${#kept[@]}"
+    fi
+}
+
+# The clients go out to the Internet through the masquerade rule: it must be
+# there, for the network of the VPN, and use the network interface the server
+# uses now (it may have changed: new server, other name after an upgrade).
+# The rules that protect the clients must be there too (rules loaded by an
+# older version, until the next apply).
+doctor_vpn_nat() {
+    local rules interface
+    rules=$(nft list table ip seedtunnel 2>/dev/null || true)
+    interface=$(default_interface)
+    if [[ -z $rules ]]; then
+        doctor_error 'NAT rules missing   → seedtunnel vpn restart'
+    elif ! grep -qF "ip saddr $VPN_SUBNET.0/24 oifname \"$interface\" masquerade" <<<"$rules"; then
+        doctor_error 'NAT rules not made for the network interface of the server (%s): the clients have no Internet   → seedtunnel apply' "${interface:-?}"
+    elif ! grep -qF "iifname \"$VPN_INTERFACE\" oifname \"$VPN_INTERFACE\" drop" <<<"$rules" \
+        || ! grep -qxE "[[:space:]]*oifname \"$VPN_INTERFACE\" drop" <<<"$rules"; then
+        doctor_warn 'Clients of the VPN not protected: they can reach each other, and be reached from outside the tunnel   → seedtunnel apply'
+    else
+        doctor_ok 'NAT rules in place, clients of the VPN protected'
+    fi
+}
+
+# Routing must be on for the server, and for the two interfaces the traffic of
+# the clients crosses: the VPN and the way out to the Internet. (In the names
+# of sysctl, the dot of an interface such as eth0.100 is written « / ».)
+doctor_vpn_routing() {
+    local dev key off=0
+    if [[ $(sysctl -n net.ipv4.ip_forward 2>/dev/null) != 1 ]]; then
+        doctor_error 'IPv4 routing off: the clients will have no Internet   → seedtunnel apply'
+        return 0
+    fi
+    for dev in "$VPN_INTERFACE" "$(default_interface)"; do
+        [[ -n $dev ]] || continue
+        key="net.ipv4.conf.${dev//./\/}.forwarding"
+        if [[ $(sysctl -n "$key" 2>/dev/null) == 0 ]]; then
+            doctor_error 'IPv4 routing off for %s: the clients will have no Internet   → sysctl -w %s=1' "$dev" "$key"
+            off=1
+        fi
+    done
+    if ((off == 0)); then doctor_ok 'IPv4 routing on'; fi
+}
+
+# Read by Docker when it starts. With « "ip-forward-no-drop": true », Docker
+# no longer refuses by default the traffic that crosses the server.
+DOCKER_DAEMON_CONFIG="/etc/docker/daemon.json"
+docker_forward_drop_off() { grep -Eqs '"ip-forward-no-drop"[[:space:]]*:[[:space:]]*true' "$DOCKER_DAEMON_CONFIG"; }
+
+# forward_drop_tables INTERFACE <RULESET — the tables whose forward hook
+# refuses by default (« policy drop »), one per line: « FAMILY NAME ALLOWED
+# DOCKER ». ALLOWED is 1 when rules of the table accept what comes in by
+# INTERFACE and what goes back to it (or any established connection); DOCKER
+# is 1 for the table of Docker (it has a chain DOCKER-USER).
+forward_drop_tables() {
+    awk -v dev="\"$1\"" '
+        /^table / { table = $2 " " $3; next }
+        /^[ \t]*chain / { if ($2 == "DOCKER-USER") docker[table] = 1; next }
+        /hook forward/ && /policy drop;/ { drop[table] = 1; next }
+        !/[ \t]accept([ \t]|$)/ { next }
+        index($0, "iifname " dev) { out[table] = 1 }
+        index($0, "oifname " dev) { back[table] = 1 }
+        /ct state [{ ]*(established, ?related|related, ?established)/ && !/(iif|oif)name/ { back[table] = 1 }
+        END { for (t in drop) print t, ((out[t] && back[t]) ? 1 : 0), (docker[t] ? 1 : 0) }'
+}
+
+# The traffic of the clients crosses the server (forward hook). Another
+# program, Docker most of all, may refuse it by default: the clients then
+# connect, but nothing comes back from the Internet. A rule that refuses
+# wins over any other table that accepts: it must be the program that set it
+# that lets the VPN through.
+doctor_vpn_forward() {
+    local ruleset family name allowed docker blocked=0
+    ruleset=$(nft list ruleset 2>/dev/null) || return 0
+    while read -r family name allowed docker; do
+        if ((allowed)) && { ((docker == 0)) || docker_forward_drop_off || vpn_docker_on; }; then continue; fi
+        blocked=1
+        if ((allowed)); then
+            doctor_warn 'Docker blocks the traffic that crosses the server; rules typed by hand let the clients through for now, but they disappear at the next restart   → seedtunnel apply (puts them back at each start of Docker)'
+        elif ((docker)); then
+            doctor_error 'Docker blocks the traffic of the clients: they connect, but have no Internet   → seedtunnel apply (2 rules in DOCKER-USER, put back at each start of Docker)'
+        else
+            doctor_error 'The firewall rules of another program (table %s) block the traffic of the clients: they connect, but have no Internet. They must accept what comes in by %s and what goes back to it.' "$family $name" "$VPN_INTERFACE"
+        fi
+    done < <(forward_drop_tables "$VPN_INTERFACE" <<<"$ruleset")
+    if ((blocked == 0)); then
+        if vpn_docker_on && docker_installed; then
+            doctor_ok 'Traffic of the clients to the Internet: allowed (through Docker: rules of seedtunnel in DOCKER-USER)'
+        else
+            doctor_ok 'Traffic of the clients to the Internet: allowed'
+        fi
+    fi
+}
+
+# --- SSH access ---------------------------------------------------------------------
+# What sshd really does for the administrators and root (lib/ssh.sh): said
+# for a connection from the Internet. A warning when a password still gets in
+# besides a key, when root is not refused, or when the file of seedtunnel was
+# changed.
+
+doctor_ssh_access() {
+    local user settings
+    command -v sshd >/dev/null || return 0
+    doctor_title 'SSH access'
+    while IFS= read -r user; do doctor_ssh_account "$user"; done < <(ssh_admin_accounts)
+    doctor_ssh_root
+    doctor_ssh_access_file
+    # fail2ban with the VPN alone (with the seedbox: its section says it)
+    if vpn_installed && ! seedbox_installed; then
+        doctor_service fail2ban 'fail2ban' boot
+        settings=$(fail2ban-client status 2>/dev/null || true)
+        if [[ $settings == *sshd* && $settings == *recidive* ]]; then
+            doctor_ok 'fail2ban watches SSH and repeat offenders'
+        else
+            doctor_warn 'fail2ban rules incomplete   → seedtunnel apply'
+        fi
+    fi
+}
+
+doctor_ssh_account() {
+    ssh_account_state "$1"
+    if ((SSH_STATE_COMMAND)); then
+        doctor_ok 'SSH of %s: keys given by a program (AuthorizedKeysCommand), not checked by seedtunnel' "$1"
+    elif ((SSH_STATE_KEYS && SSH_STATE_PASSWORD)); then
+        doctor_warn 'SSH of %s: its password still gets in, besides its key(s)   → seedtunnel ssh password off' "$1"
+    elif ((SSH_STATE_KEYS)); then
+        doctor_ok 'SSH of %s: key only (%s key(s))' "$1" "$SSH_STATE_KEYS"
+    elif ((SSH_STATE_PASSWORD)); then
+        doctor_ok 'SSH of %s: password (no SSH key yet)' "$1"
+        printf '  %s\n' "$(t '(a key is safer: menu Access and keys, or seedtunnel ssh key add FILE.pub)')"
+    else
+        doctor_ok 'SSH of %s: neither key nor password (no SSH login)' "$1"
+    fi
+}
+
+# Root never logs in by SSH: anything but « refused » is a warning
+doctor_ssh_root() {
+    ssh_account_state root
+    if [[ $SSH_STATE_ROOT == no ]]; then
+        doctor_ok 'SSH of root: refused'
+    elif ((SSH_STATE_PASSWORD)); then
+        doctor_warn 'root can log in by SSH with its password   → seedtunnel ssh root off'
+    elif ((SSH_STATE_KEYS || SSH_STATE_COMMAND)); then
+        doctor_warn 'root can log in by SSH with a key   → seedtunnel ssh root off'
+    else
+        doctor_warn 'root is not refused in SSH (no key nor password today)   → seedtunnel ssh root off'
+    fi
+}
+
+# The file of seedtunnel as its state wants it (changed or removed: apply
+# writes it again)
+doctor_ssh_access_file() {
+    local SSH_ACCESS=""
+    state_read "$SSH_ACCESS_STATE" seedtunnel_access
+    [[ $SSH_ACCESS == keys || $SSH_ACCESS == root ]] || return 0
+    if [[ ! -f $SSH_ADMIN_CONF ]] || ! cmp -s <(ssh_generate_admin_conf "$SSH_ACCESS") "$SSH_ADMIN_CONF"; then
+        doctor_warn 'Setting of seedtunnel for SSH changed or removed   → seedtunnel apply'
+    fi
+}
+
+# --- Rights, log, tokens of the links ------------------------------------------------
+
+# Under the title System: what root keeps is for root only, what root runs is
+# changed by root only (rights_* of common.sh), the log of seedtunnel cut.
+doctor_files() {
+    local open files list
+    open=$(rights_secrets_open)
+    if [[ -n $open ]]; then
+        list=$(paste -sd ' ' <<<"$open")
+        doctor_error 'Other accounts than root can open the secrets of seedtunnel (keys, passwords): %s   → seedtunnel apply' "$list"
+    else
+        doctor_ok 'Settings and secrets of seedtunnel readable by root only'
+    fi
+    files=$(rights_app_open)
+    if [[ -n $files ]]; then
+        doctor_error '%s file(s) of seedtunnel, run by root, can be changed by another account (%s…)   → seedtunnel apply' \
+            "$(wc -l <<<"$files")" "$(head -n 1 <<<"$files")"
+    else
+        doctor_ok 'Files of seedtunnel: only root can change them'
+    fi
+    if vpn_installed || seedbox_installed; then doctor_log_rotation; fi
+}
+
+# logrotate takes the rule of seedtunnel and cuts its log (Ubuntu: /var/log can
+# be written by the group syslog, and without « su » the log is skipped).
+# Debug mode: nothing cut, nothing written.
+doctor_log_rotation() {
+    local out
+    if [[ ! -f $LOGROTATE_FILE ]] || ! command -v logrotate >/dev/null; then
+        doctor_warn 'Log of seedtunnel never cut (rule of logrotate missing): it grows without end   → seedtunnel apply'
+        return 0
+    fi
+    out=$(timeout 20 logrotate -d "$LOGROTATE_FILE" 2>&1 || true)
+    if [[ $out == *"$APP_LOG"* && $out != *"error:"* ]]; then
+        doctor_ok 'Log of seedtunnel cut every month (logrotate)'
+    elif [[ $(log_rotation_generate) != "$(cat "$LOGROTATE_FILE" 2>/dev/null)" ]]; then
+        doctor_warn 'logrotate refuses the rule of seedtunnel (changed by hand?): its log grows without end   → seedtunnel apply'
+    else
+        doctor_warn 'logrotate refuses the rule of seedtunnel: its log grows without end   → logrotate -d %s (says why)' "$LOGROTATE_FILE"
+    fi
+}
+
+# The logs of nginx of now (it cuts them each day): the site writes
+# « /share/<token> » in place of the token of a link, its password
+NGINX_LOG_FILES=(/var/log/nginx/access.log /var/log/nginx/error.log)
+
+# share_tokens_logged — how many lines of these logs show the token of a link
+share_tokens_logged() {
+    local file lines count=0
+    for file in "${NGINX_LOG_FILES[@]}"; do
+        [[ -f $file ]] || continue
+        lines=$(grep -Ec "$SHARE_URL_PATH/[0-9a-f]{32}" -- "$file" 2>/dev/null || true)
+        count=$((count + ${lines:-0}))
+    done
+    printf '%s' "$count"
+}
+
+doctor_share_tokens() {
+    local count
+    count=$(share_tokens_logged)
+    if ((count > 0)); then
+        doctor_warn 'The logs of nginx show the token of a link in clear (%s line(s)): whoever reads them can open a link still valid   → seedtunnel apply (the lines already written go within a day)' "$count"
+    else
+        doctor_ok 'Tokens of the links hidden in the logs of nginx'
+    fi
+}
+
+# When the installed profile confines the engine, AppArmor must allow its
+# data folder. The rules
+# in place, and no refusal since they were written (refused, it cannot
+# download, whatever the permissions of the folder).
+doctor_transmission_apparmor() {
+    local -A facts=()
+    engine_inspect apparmor "$SEEDBOX_DATA_DIR" facts
+    case ${facts[state]} in
+        not_applicable) ;;
+        rules) doctor_error 'AppArmor keeps %s out of %s: downloads fail   → seedtunnel apply' "$(engine_display_name)" "$SEEDBOX_DATA_DIR" ;;
+        denied) doctor_error 'AppArmor refused %s %s time(s) since its rules were written   → journalctl -k -b | grep %s' "$(engine_display_name)" "${facts[refused]}" "$(engine_service_name)" ;;
+        ok) doctor_ok 'AppArmor lets %s write to %s' "$(engine_display_name)" "$SEEDBOX_DATA_DIR" ;;
+        *) doctor_warn 'Engine AppArmor rules or denial journal could not be checked' ;;
+    esac
+}
+
+# The settings of Transmission hold the hash of the password, its folder the
+# names of the downloads: closed to the other accounts. No program run by it
+# (one may have been set through the web interface; written in its settings
+# when it stops).
+doctor_transmission_settings() {
+    local -A facts=()
+    engine_inspect settings "$SEEDBOX_DATA_DIR" facts
+    case ${facts[state]} in
+        scripts) doctor_warn '%s runs a program that seedtunnel did not set (%s): set through the web interface?   → seedtunnel apply' "$(engine_display_name)" "${facts[scripts]}" ;;
+        public) doctor_warn 'The settings of %s (hash of the password) or its folder can be read by every account   → seedtunnel apply' "$(engine_display_name)" ;;
+        executable) doctor_warn '%s could run a program put in %s (its lock of systemd is not in force)   → seedtunnel apply' "$(engine_display_name)" "$SEEDBOX_DATA_DIR" ;;
+        ok) doctor_ok 'Settings of %s private, no program run by it' "$(engine_display_name)" ;;
+        *) doctor_warn 'Engine settings or execution confinement could not be checked' ;;
+    esac
+}
+
+# The files Transmission downloads: never writable by every account. Its umask
+# comes from its settings (Transmission 3 writes 0 in place of a umask it does
+# not read: settings of Transmission 4 restored on Debian 12). Said only when
+# wrong.
+doctor_transmission_umask() {
+    local -A facts=()
+    engine_inspect umask "" facts
+    case ${facts[state]} in
+        ok | not_running) ;;
+        unsafe) doctor_warn '%s makes its downloads writable by every account (umask %s)   → seedtunnel apply' "$(engine_display_name)" "${facts[umask]}" ;;
+        *) doctor_warn 'Engine process umask could not be checked' ;;
+    esac
+}
+
+# The .torrent files of watch/ that Transmission cannot read are never added:
+# only « Permission denied » again and again in its journal (a file copied
+# there by root keeps the rights of its original, 600). Said, not changed:
+# root does not touch by itself the files of a folder where the SFTP user
+# writes (a file there can be swapped for a link to another one), and does not
+# advise a command that would (chmod and chgrp follow links): adding them again
+# through the web interface or by SFTP gives them the right owner.
+doctor_watch_unreadable() {
+    local -A facts=()
+    engine_inspect watch "$SEEDBOX_DATA_DIR" facts
+    if ((${facts[count]} > 0)); then
+        doctor_warn '%s .torrent file(s) of %s unreadable by %s, never added   → add them again through the web interface or by SFTP' \
+            "${facts[count]}" "${facts[path]}/" "$(engine_display_name)"
+    fi
+    if [[ ${facts[state]} == unknown ]]; then
+        doctor_warn 'Some watched torrent files could not be checked in %s' "${facts[path]}"
+    fi
+}
+
+# Transmission, or why the full disk protection keeps it stopped
+doctor_transmission() {
+    local -A _doctor_fresh=()
+    local _doctor_result=${1:-_doctor_fresh}
+    if [[ -z ${1-} ]]; then seedbox_observe _doctor_fresh; fi
+    local -n _doctor_view=$_doctor_result
+    local free=${_doctor_view[free_gb]}
+    if [[ ${_doctor_view[restore_hold]:-no} == yes ]]; then
+        doctor_warn 'Engine automatic recovery suspended: a restore is unfinished.'
+        return 0
+    fi
+    if [[ ${_doctor_view[disk_state_invalid]:-no} == yes ]]; then
+        doctor_warn 'Invalid disk guard record %s; automatic restart suspended.' "$DISKGUARD_MARKER"
+        return 0
+    fi
+    if [[ ${_doctor_view[disk_halt]} == no ]]; then
+        doctor_service "${_doctor_view[engine_service]}" "${_doctor_view[engine_name]}" boot "${_doctor_view[engine_state]}" "${_doctor_view[engine_boot]}"
+        return 0
+    fi
+    if [[ ${_doctor_view[disk_resume_unknown]:-no} == yes ]]; then
+        doctor_warn 'Automatic restart of %s could not be confirmed; disk guard state kept.' "${_doctor_view[engine_name]}"
+    elif [[ ${_doctor_view[disk_resume_failed]} == yes ]]; then
+        if [[ $free =~ ^[0-9]+$ ]] && ((free >= DISKGUARD_START_ABOVE_GB)); then
+            doctor_error 'Transmission does not start again although there is room (%s GB free)   → journalctl -u transmission-daemon -n 30' "$free"
+        else
+            doctor_warn 'Last automatic restart of %s failed; waiting for %s GB free (%s GB measured now).' "${_doctor_view[engine_name]}" "$DISKGUARD_START_ABOVE_GB" "${free:-?}"
+        fi
+    else
+        doctor_error 'Transmission stopped: disk almost full (%s GB free). Free some space: it restarts by itself above %s GB.' \
+            "${free:-?}" "$DISKGUARD_START_ABOVE_GB"
+    fi
+}
+
+# The certificate served, as a browser sees it through the public IP: chain,
+# name and dates checked (no -k). A valid certificate on the disk is not
+# enough: nginx may still serve an older one, or another one. Only for Let's
+# Encrypt (the self-signed one and the test servers are refused by design).
+doctor_certificate_served() {
+    local ip=$1 rc=0
+    [[ $SEEDBOX_CERTIFICATE == letsencrypt ]] || return 0
+    curl -s -o /dev/null --max-time 8 --resolve "$SEEDBOX_DOMAIN:443:$ip" "https://$SEEDBOX_DOMAIN/" 2>/dev/null || rc=$?
+    case $rc in
+        0) doctor_ok 'Certificate accepted by browsers for %s' "$SEEDBOX_DOMAIN" ;;
+        # TLS failures: handshake, name, certificate, chain
+        35 | 51 | 58 | 60) doctor_error 'The certificate served for %s is refused by browsers (curl code %s)   → seedtunnel seedbox domain %s' "$SEEDBOX_DOMAIN" "$rc" "$SEEDBOX_DOMAIN" ;;
+        # connection refused, timeout…: the certificate could not be seen
+        *) doctor_warn 'Certificate served for %s not checked: HTTPS unreachable through the public IP (curl code %s)' "$SEEDBOX_DOMAIN" "$rc" ;;
+    esac
+}
+
+# doctor_name_certificate IP — the name of the seedbox and its certificate.
+# With an IP address, one warning, and what changes it: a domain name (the
+# same IP again would give the same certificate).
+doctor_name_certificate() {
+    local ip=$1 crt days
+    if is_ipv4 "$SEEDBOX_DOMAIN"; then
+        doctor_warn 'No domain name: access by IP, self-signed certificate (browser warning)   → with a domain name pointing to this server:  seedtunnel seedbox domain NAME'
+    elif dns_points_here "$SEEDBOX_DOMAIN" "$ip"; then
+        doctor_ok '"%s" points to this server (%s)' "$SEEDBOX_DOMAIN" "$ip"
+    else
+        doctor_error '"%s" does not point to this server (%s): check the DNS' "$SEEDBOX_DOMAIN" "${ip:-$(t 'IP unknown')}"
+    fi
+
+    if [[ $SEEDBOX_CERTIFICATE == selfsigned ]]; then crt="$WEB_SSL_DIR/selfsigned.crt"; else crt="$LETSENCRYPT_DIR/cert.pem"; fi
+    days=$(certificate_days_left "$crt")
+    if [[ -z $days ]]; then
+        doctor_error 'Certificate unreadable: %s   → seedtunnel seedbox domain %s' "$crt" "$SEEDBOX_DOMAIN"
+    elif [[ $SEEDBOX_CERTIFICATE == selfsigned ]]; then
+        if ! is_ipv4 "$SEEDBOX_DOMAIN"; then
+            doctor_warn 'Self-signed certificate (browser warning)   → seedtunnel seedbox domain %s' "$SEEDBOX_DOMAIN"
+        fi
+    elif ((days < 7)); then
+        doctor_error "Let's Encrypt certificate: expires in %s day(s), the renewal fails   → certbot renew" "$days"
+    elif ((days < 21)); then
+        doctor_warn "Let's Encrypt certificate: expires in %s days (it should have been renewed)" "$days"
+    else
+        doctor_ok 'Certificate %s: %s days left' "$(seedbox_certificate_label)" "$days"
+    fi
+    if [[ $SEEDBOX_CERTIFICATE != selfsigned ]]; then
+        if systemctl is-active --quiet certbot.timer; then
+            doctor_ok 'Automatic renewal scheduled (certbot.timer)'
+        else
+            doctor_error 'certbot.timer inactive: the certificate will not be renewed   → systemctl enable --now certbot.timer'
+        fi
+    fi
+}
+
+doctor_seedbox() {
+    local ip=$1 code free settings
+    local -A observation=()
+    seedbox_observe observation
+    doctor_title 'Seedbox'
+    doctor_transmission observation
+    doctor_engine_rpc
+    doctor_service nginx 'nginx' boot "${observation[nginx_state]}" "${observation[nginx_boot]}"
+    doctor_service fail2ban 'fail2ban' boot "${observation[fail2ban_state]}" "${observation[fail2ban_boot]}"
+    doctor_ssh
+    if [[ ${observation[restore_hold]:-no} == yes ]]; then
+        doctor_warn 'Full disk protection paused: a restore is unfinished.'
+    elif systemctl is-active --quiet seedtunnel-diskguard.timer; then
+        doctor_ok 'Full disk protection on (Transmission stopped under %s GB free)' "$DISKGUARD_STOP_BELOW_GB"
+    else
+        doctor_warn 'Full disk protection off   → seedtunnel apply'
+    fi
+
+    doctor_name_certificate "$ip"
+
+    code=$(seedbox_http_code "$(engine_web_path)")
+    if [[ $(http_access_state "$code" protected) == protected ]]; then
+        doctor_ok 'Web interface online and protected by a password'
+    else
+        doctor_error 'Web interface: unexpected answer (code %s) on %s' "${code:-$(t 'none')}" "https://$SEEDBOX_DOMAIN/"
+    fi
+    if [[ -n $ip ]]; then
+        code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 8 \
+            --resolve "$SEEDBOX_DOMAIN:443:$ip" "https://$SEEDBOX_DOMAIN$(engine_web_path)" 2>/dev/null || true)
+        if [[ $(http_access_state "$code" protected) == protected ]]; then
+            doctor_ok 'HTTPS reachable through the public IP (tested from the server itself)'
+        else
+            doctor_warn 'HTTPS unreachable through the public IP %s (code %s): firewall?' "$ip" "${code:-$(t 'none')}"
+        fi
+        doctor_certificate_served "$ip"
+    fi
+    doctor_share_tokens
+
+    if seedbox_sftp_rule_applies; then
+        doctor_ok 'SFTP locked in %s' "$SEEDBOX_DATA_DIR"
+    else
+        doctor_error 'SFTP rule inactive for %s   → seedtunnel apply' "$SEEDBOX_USER"
+    fi
+    doctor_sftp_password
+    doctor_torrent_port
+    if storage_check_chroot_path "$SEEDBOX_DATA_DIR" 2>/dev/null; then
+        doctor_ok 'Permissions of the data folder correct'
+    else
+        doctor_error 'Permissions of the folder %s incompatible with the locked SFTP' "$SEEDBOX_DATA_DIR"
+    fi
+    doctor_transmission_apparmor
+    doctor_transmission_settings
+    doctor_transmission_umask
+    doctor_watch_unreadable
+    free=${observation[free_gb]}
+    if [[ -z $free ]]; then
+        doctor_warn 'Free space for downloads unreadable (%s)' "$SEEDBOX_DATA_DIR"
+    elif ((free < 5)); then
+        doctor_warn 'Little space left for downloads: %s GB free' "$free"
+    else
+        doctor_ok 'Free space for downloads: %s GB' "$free"
+    fi
+    settings=$(fail2ban-client status 2>/dev/null || true)
+    if [[ $settings == *sshd* && $settings == *nginx-http-auth* && $settings == *recidive* ]]; then
+        doctor_ok 'fail2ban watches SSH, the web interface and repeat offenders'
+    else
+        doctor_warn 'fail2ban rules incomplete   → seedtunnel seedbox restart'
+    fi
+}
+
+# doctor_links IP — the site of the links of the VPN (without a seedbox)
+doctor_links() {
+    local ip=$1 domain=${VPN_PUBLIC_ADDRESS,,} crt days code rc=0 test
+    doctor_title 'Site of the links'
+    doctor_service nginx 'nginx' boot
+    if [[ $LINKS_CERTIFICATE == selfsigned ]]; then crt="$WEB_SSL_DIR/selfsigned.crt"; else crt="$LETSENCRYPT_DIR/cert.pem"; fi
+    days=$(certificate_days_left "$crt")
+    if [[ -z $days ]]; then
+        doctor_error 'Certificate unreadable: %s   → seedtunnel vpn links on' "$crt"
+    elif [[ $LINKS_CERTIFICATE == selfsigned ]]; then
+        if is_ipv4 "$domain"; then
+            doctor_ok 'Self-signed certificate (IP address): each link comes with its fingerprint'
+        else
+            doctor_warn "Self-signed certificate (browser warning): Let's Encrypt did not issue one for %s   → seedtunnel vpn links on" "$domain"
+        fi
+    elif ((days < 7)); then
+        doctor_error "Let's Encrypt certificate: expires in %s day(s), the renewal fails   → certbot renew" "$days"
+    elif ((days < 21)); then
+        doctor_warn "Let's Encrypt certificate: expires in %s days (it should have been renewed)" "$days"
+    else
+        doctor_ok "Let's Encrypt certificate: %s days left" "$days"
+    fi
+    if [[ $LINKS_CERTIFICATE != selfsigned ]]; then
+        if systemctl is-active --quiet certbot.timer; then
+            doctor_ok 'Automatic renewal scheduled (certbot.timer)'
+        else
+            doctor_error 'certbot.timer inactive: the certificate will not be renewed   → systemctl enable --now certbot.timer'
+        fi
+    fi
+    # a link that does not exist: the site answers 404 (the page « link
+    # already used or expired »)
+    test="https://$domain$SHARE_URL_PATH/00000000000000000000000000000000/"
+    code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 8 --resolve "$domain:443:127.0.0.1" "$test" 2>/dev/null || true)
+    if [[ $code == 404 ]]; then
+        doctor_ok 'Site of the links online (https://%s/share/…)' "$domain"
+    else
+        doctor_error 'Site of the links: unexpected answer (code %s)   → seedtunnel vpn links on' "${code:-$(t 'none')}"
+    fi
+    doctor_share_tokens
+    [[ -n $ip ]] || return 0
+    code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 8 --resolve "$domain:443:$ip" "$test" 2>/dev/null || true)
+    if [[ $code == 404 ]]; then
+        doctor_ok 'HTTPS reachable through the public IP (tested from the server itself)'
+    else
+        doctor_warn 'HTTPS unreachable through the public IP %s (code %s): firewall?' "$ip" "${code:-$(t 'none')}"
+    fi
+    # the certificate really served, for Let's Encrypt
+    [[ $LINKS_CERTIFICATE == letsencrypt ]] || return 0
+    curl -s -o /dev/null --max-time 8 --resolve "$domain:443:$ip" "$test" 2>/dev/null || rc=$?
+    case $rc in
+        0 | 22) doctor_ok 'Certificate accepted by browsers for %s' "$domain" ;;
+        35 | 51 | 58 | 60) doctor_error 'The certificate served for %s is refused by browsers (curl code %s)   → seedtunnel vpn links on' "$domain" "$rc" ;;
+        *) doctor_warn 'Certificate served for %s not checked: HTTPS unreachable through the public IP (curl code %s)' "$domain" "$rc" ;;
+    esac
+}
+
+# The password of SFTP, allowed by default (needed before the first SSH key):
+# a warning only once there is a key, the password then being of no use
+doctor_sftp_password() {
+    if [[ $SEEDBOX_SFTP_PASSWORD != yes ]]; then
+        doctor_ok 'SFTP: SSH keys only (password refused)'
+    elif (($(sftp_keys_count) > 0)); then
+        doctor_warn 'SFTP: the password is still allowed, though you have an SSH key: refuse it   → seedtunnel seedbox sftp-password off'
+    else
+        printf '  %s\n' "$(t '(SFTP: password allowed; an SSH key is safer: menu Seedbox › SSH keys for SFTP)')"
+    fi
+}
+
+# Is the BitTorrent port reachable from the Internet? Asked to the service of
+# Transmission for its own port test (IPv4 only): it connects back to the
+# server, and answers 1 (open) or 0 (closed). Without an answer: not tested,
+# no warning.
+doctor_torrent_port() {
+    local -A facts=()
+    engine_probe peer facts
+    case ${facts[state]} in
+        not_running) ;;
+        open) doctor_ok 'BitTorrent port %s open from the Internet' "${facts[port]}" ;;
+        closed) doctor_warn 'BitTorrent port %s closed from the Internet: check the firewall of the hosting provider (at OVH: « Edge Network Firewall », in the control panel)' "${facts[port]}" ;;
+        *) printf '  %s\n' "$(t '(BitTorrent port %s not tested: result unavailable)' "${facts[port]}")" ;;
+    esac
+}
+
+# A local endpoint response is separate from the nginx authentication barrier.
+doctor_engine_rpc() {
+    local -A facts=()
+    engine_probe rpc facts
+    case ${facts[state]} in
+        not_running) ;;
+        auth_required) doctor_ok 'Local RPC endpoint responds and requires authentication (API methods not checked)' ;;
+        unreachable) doctor_error 'Engine service active, but local RPC endpoint is unreachable (curl code %s)' "${facts[transport_status]}" ;;
+        session_required | unexpected) doctor_warn 'Unexpected response from local RPC endpoint (HTTP %s); authenticated API not checked' "${facts[http_code]:-?}" ;;
+        *) doctor_warn 'Local RPC endpoint could not be checked' ;;
+    esac
+}
+
+doctor_firewall() {
+    local rules port open
+    doctor_title 'Firewall'
+    if { vpn_installed || seedbox_installed; } && ufw_active; then
+        doctor_error 'ufw (the firewall of Ubuntu) is on: it blocks the VPN and the seedbox   → sudo ufw disable, then seedtunnel firewall enable'
+    fi
+    if firewall_enabled; then
+        rules=$(nft list table inet "$FIREWALL_TABLE" 2>/dev/null || true)
+        if [[ -z $rules ]]; then
+            doctor_error 'Firewall enabled but rules missing   → seedtunnel firewall enable --yes'
+        elif ! firewall_refuses_by_default <<<"$rules"; then
+            doctor_error 'Firewall rules loaded, but they do not refuse what is not allowed   → seedtunnel firewall enable --yes'
+        else
+            doctor_ok 'On — open: %s' "$(firewall_summary)"
+            # SSH port changed without updating the firewall: one would be
+            # locked out at the next connection (or the next restart of SSH)
+            open=" $(firewall_open_tcp_ports <<<"$rules" | tr '\n' ' ') "
+            for port in $(firewall_sshd_ports); do
+                if [[ $open == *" $port "* ]]; then
+                    doctor_ok 'SSH port %s open in the firewall' "$port"
+                else
+                    doctor_error 'SSH uses port %s, closed by the firewall: risk of being locked out   → seedtunnel firewall enable' "$port"
+                fi
+            done
+        fi
+    else
+        doctor_warn 'seedtunnel firewall off   → seedtunnel firewall enable'
+    fi
+    if systemctl is-enabled --quiet nftables.service 2>/dev/null \
+        && grep -qs 'flush ruleset' "$NFTABLES_CONF"; then
+        doctor_warn 'nftables.service is enabled and empties all the rules at boot (%s)   → sudo systemctl disable nftables, if you do not use it yourself' "$NFTABLES_CONF"
+    fi
+}
+
+doctor_backup() {
+    local latest age since
+    doctor_title 'Backups'
+    if backup_auto_enabled; then
+        # what the weekly backup needs to run on its own
+        if ! systemctl is-active --quiet seedtunnel-backup.timer 2>/dev/null; then
+            doctor_error 'Weekly backup on, but its timer is stopped: no backup will be made   → seedtunnel apply'
+        fi
+        if [[ ! -s $BACKUP_PASSPHRASE_FILE ]]; then
+            doctor_error 'The passphrase of the weekly backup is missing: the backups will fail   → seedtunnel backup auto on'
+        elif ! secret_file_private "$BACKUP_PASSPHRASE_FILE"; then
+            doctor_error 'The passphrase of the weekly backup can be read by others than root   → chmod 600 %s' "$BACKUP_PASSPHRASE_FILE"
+        fi
+        latest=$(ls -1t "$BACKUP_DIR"/*-auto.tar.gz.enc 2>/dev/null | head -n 1 || true)
+        age=$(file_age_days "$latest")
+        if systemctl is-failed --quiet seedtunnel-backup.service 2>/dev/null; then
+            doctor_warn 'The last automatic backup failed   → journalctl -u seedtunnel-backup'
+        elif [[ -z $age ]]; then
+            # turned on when its passphrase was saved
+            since=$(file_age_days "$BACKUP_PASSPHRASE_FILE")
+            if [[ -n $since ]] && ((since > 8)); then
+                doctor_warn 'No automatic backup since it was turned on %s days ago   → journalctl -u seedtunnel-backup' "$since"
+            else
+                doctor_ok 'Weekly backup on (the first one comes within a week)'
+            fi
+        elif ((age > 8)); then
+            doctor_warn 'Last automatic backup %s days ago: the weekly backup seems to fail   → journalctl -u seedtunnel-backup' "$age"
+        else
+            doctor_ok 'Weekly backup on, last one %s' "$(days_ago "$age")"
+        fi
+    else
+        doctor_warn 'Weekly backup off   → seedtunnel backup auto on'
+    fi
+    age=$(file_age_days "$BACKUP_DOWNLOADED_MARK")
+    if [[ -z $age ]]; then
+        doctor_warn 'No backup downloaded to your computer yet   → seedtunnel backup share'
+    elif ((age > 30)); then
+        doctor_warn 'Last download of a backup started %s days ago   → seedtunnel backup share' "$age"
+    else
+        # only the start of the download is known, not that it went to the end
+        doctor_ok 'Download of a backup started %s (check its size on your computer)' "$(days_ago "$age")"
+    fi
+}
+
+doctor_main() {
+    local ip
+    DOCTOR_ERRORS=0
+    DOCTOR_WARNINGS=0
+    banner
+    section 'Diagnostics'
+    printf '%s ' "$(t 'Looking for the public IP address…')"
+    ip=$(public_ipv4)
+    echo "${ip:-$(t 'not found')}"
+    doctor_system
+    doctor_files
+    doctor_ssh_access
+    if vpn_installed; then doctor_vpn "$ip"; fi
+    if seedbox_installed; then doctor_seedbox "$ip"; fi
+    links_load
+    if links_site_on; then doctor_links "$ip"; fi
+    doctor_firewall
+    if vpn_installed || seedbox_installed; then doctor_backup; fi
+    echo
+    if ((DOCTOR_ERRORS)); then
+        err '%s problem(s), %s warning(s).' "$DOCTOR_ERRORS" "$DOCTOR_WARNINGS"
+    elif ((DOCTOR_WARNINGS)); then
+        warn 'No blocking problem, %s warning(s).' "$DOCTOR_WARNINGS"
+    else
+        ok 'Everything is fine.'
+    fi
+    # a report to send to someone who helps: asked from the menu, done with --link
+    if ((OPT_LINK)); then
+        echo
+        report_send
+    elif ((INTERACTIVE)); then
+        echo
+        if report_by_link; then
+            if confirm 'Create a one-time link to send this report? Domain, name of the server, public IP addresses, SFTP account, SSH keys and names of the VPN clients are replaced.' n; then report_send; fi
+        elif confirm 'Save this report to send it? Domain, name of the server, public IP addresses, SFTP account, SSH keys and names of the VPN clients are replaced.' n; then
+            report_send
+        fi
+    fi
+    pause
+}
+
+# --- Report to send for help (« seedtunnel doctor --link ») -----------------------
+# The diagnostics and the end of the log in one text file, where what is
+# private is replaced by a generic word: domain, name of the server, public IP
+# addresses, SFTP account, SSH keys, names of the VPN clients. The ports and
+# the addresses of the VPN (10.8.0.x, the same on every server) stay: they
+# help. Passwords, passphrases and private keys never go into the log.
+REPORT_LOG_LINES=500
+# names (of the server, the SFTP account, the clients) that are also common
+# words of a report: kept, they say nothing about anyone (« debian » would
+# change « debian-transmission » too, a client « vpn » every « vpn »)
+REPORT_COMMON_WORDS=" backup client clients debian firewall localhost nginx root seedbox seedtunnel server sftp ssh transmission ubuntu vpn vps web wg0 "
+REPORT_SCRIPT=""
+
+report_common_word() { [[ $REPORT_COMMON_WORDS == *" ${1,,} "* ]]; }
+
+# One known private value, as « length<TAB>value<TAB>replacement »: they are
+# replaced longest first (the client « lancelot-laptop » before the account « lancelot »)
+report_known() {
+    if [[ -n $1 ]]; then printf '%s\t%s\t%s\n' "${#1}" "$1" "$2"; fi
+}
+
+# A link needs an HTTPS site (of the seedbox, or of the links of the VPN);
+# otherwise the report is saved
+report_by_link() {
+    links_load
+    { seedbox_installed || links_site_on; } && systemctl is-active --quiet nginx
+}
+
+# Adds to the sed script: the whole VALUE (not inside a longer word) →
+# REPLACEMENT. Twice: two values next to each other share the character
+# between them. An IPv4 address is not part of a version number either:
+# « 4.23.9.0-2+b1 » (package) or « 1.2.3.4.5 » stay as they are.
+report_replace() {
+    local value=$1 replacement=$2 pattern before="(^|[^[:alnum:]_])" after="([^[:alnum:]_]|\$)"
+    [[ -n $value ]] || return 0
+    if is_ipv4 "$value"; then
+        before="(^|[^[:alnum:]_.])"
+        after="([^[:alnum:]_.~+-]|\\.([^0-9]|\$)|\$)"
+    fi
+    pattern="$before$(sed 's/[][\.*^$/+?(){}|]/\\&/g' <<<"$value")$after"
+    REPORT_SCRIPT+="s/$pattern/\\1$replacement\\2/g;s/$pattern/\\1$replacement\\2/g;"
+}
+
+# Public addresses only: the private networks (10.x of the VPN, 192.168.x…)
+# say nothing about anyone
+report_ipv4_is_public() {
+    local a b _rest
+    IFS=. read -r a b _rest <<<"$1"
+    if ((a == 0 || a == 10 || a == 127 || a >= 224)); then return 1; fi
+    if ((a == 100 && b >= 64 && b <= 127)) || ((a == 169 && b == 254)); then return 1; fi
+    if ((a == 172 && b >= 16 && b <= 31)) || ((a == 192 && b == 168)); then return 1; fi
+}
+report_ipv6_is_public() {
+    local address=${1,,}
+    [[ $address != fe80:* && $address != fc* && $address != fd* && $address != ::* ]]
+}
+
+# Public addresses of this server: of its interfaces, and the one of the VPN
+# (its private ones, like 10.8.0.1 in the VPN, stay: the same everywhere)
+report_server_addresses() {
+    local address
+    while IFS= read -r address; do
+        if { is_ipv4 "$address" && report_ipv4_is_public "$address"; } \
+            || { is_ipv6 "$address" && report_ipv6_is_public "$address"; }; then
+            printf '%s\n' "$address"
+        fi
+    done < <(
+        ip -o addr show scope global 2>/dev/null | awk '{ sub("/.*", "", $4); print $4 }' || true
+        if is_ipv4 "${VPN_PUBLIC_ADDRESS-}" || is_ipv6 "${VPN_PUBLIC_ADDRESS-}"; then printf '%s\n' "$VPN_PUBLIC_ADDRESS"; fi
+        if is_ipv4 "${SEEDBOX_DOMAIN-}"; then printf '%s\n' "$SEEDBOX_DOMAIN"; fi
+    )
+}
+
+# The private values seedtunnel knows, with what replaces them (report_known)
+report_known_values() {
+    local file=$1 host fqdn address name number client
+    if seedbox_installed && ! is_ipv4 "$SEEDBOX_DOMAIN"; then report_known "$SEEDBOX_DOMAIN" "$(t '<domain>')"; fi
+    if vpn_installed && ! is_ipv4 "$VPN_PUBLIC_ADDRESS" && ! is_ipv6 "$VPN_PUBLIC_ADDRESS"; then
+        report_known "$VPN_PUBLIC_ADDRESS" "$(t '<domain>')"
+    fi
+    fqdn=$(hostname -f 2>/dev/null || true)
+    host=$(hostname 2>/dev/null || true)
+    host=${host%%.*}
+    if [[ $fqdn == *.* ]]; then report_known "$fqdn" "$(t '<server>')"; fi
+    if ! report_common_word "$host"; then report_known "$host" "$(t '<server>')"; fi
+    while IFS= read -r address; do
+        report_known "$address" "$(t '<server-ip>')"
+    done < <(report_server_addresses | sort -u)
+    if seedbox_installed && ! report_common_word "$SEEDBOX_USER"; then report_known "$SEEDBOX_USER" "$(t '<sftp-user>')"; fi
+    # each client by its number: the same in every report, as its address
+    # 10.8.0.(N+1) and its port 60000+N
+    for client in "$VPN_CLIENTS_DIR"/*.env; do
+        vpn_is_client_file "$client" || continue
+        name=${client##*/}
+        name=${name%.env}
+        number=$(vpn_client_number "$client")
+        if ! report_common_word "$name"; then report_known "$name" "$(t '<client-%s>' "$number")"; fi
+    done
+    # clients removed since, as the log names them: their link, their files
+    while IFS= read -r name; do
+        if [[ ! -e $VPN_CLIENTS_DIR/$name.env ]] && ! report_common_word "$name"; then
+            report_known "$name" "$(t '<former-client>')"
+        fi
+    done < <(grep -oiE '((download link for|lien de téléchargement pour) |clients/)[A-Za-z0-9_-]+\.(conf|env)' "$file" \
+        | sed -E 's/^([Dd]ownload link for |[Ll]ien de téléchargement pour |clients\/)//; s/\.(conf|env)$//' | sort -u || true)
+    # domains used before (the domain changed since), as the log names them:
+    # title of the certificate, self-signed certificate (CN=, DNS:)
+    while IFS= read -r name; do
+        if [[ $name != "${SEEDBOX_DOMAIN-}" && $name != "${VPN_PUBLIC_ADDRESS-}" ]] && ! report_common_word "$name"; then
+            report_known "$name" "$(t '<former-domain>')"
+        fi
+    done < <(grep -oiE "((let's encrypt certificate for|certificat let's encrypt pour) |CN=|DNS:)[a-z0-9.-]+\.[a-z]{2,63}" "$file" \
+        | sed -E "s/^(.* (for|pour) |CN=|DNS:)//I" | sort -u || true)
+    # SFTP accounts used before (renamed, removed): titles of the log, useradd
+    while IFS= read -r name; do
+        if [[ $name != "${SEEDBOX_USER-}" ]] && ! report_common_word "$name"; then
+            report_known "$name" "$(t '<former-sftp-user>')"
+        fi
+    done < <(sed -nE "s/.*(Creating the user|Deleting the user|Création de l'utilisateur|Suppression de l'utilisateur) ([a-z_][a-z0-9_-]*).*/\2/p; s/^\\\$ useradd .* ([a-z_][a-z0-9_-]*)$/\1/p
+        s/.*(SFTP account|Compte SFTP) ([a-z_][a-z0-9_-]*) (renamed to|renommé en) ([a-z_][a-z0-9_-]*).*/\2\n\4/p" "$file" | sort -u || true)
+    # the accounts of the administrators: the one that ran sudo, those logged
+    # in. Not the SFTP account: « who » can list it too while WinSCP is
+    # connected (Debian 13 counts the SFTP sessions), and it has its own name
+    while IFS= read -r name; do
+        if [[ $name =~ ^[a-z_][a-z0-9_.-]*$ && $name != "${SEEDBOX_USER-}" ]] && ! report_common_word "$name"; then
+            report_known "$name" "$(t '<admin>')"
+        fi
+    done < <({
+        printf '%s\n' "${SUDO_USER-}"
+        # those of the group sudo too (the section SSH access names them)
+        ssh_admin_accounts 2>/dev/null || true
+        who 2>/dev/null | awk '{ print $1 }'
+    } | sort -u || true)
+}
+
+# The addresses of the DNS services offered in the menu, one per line
+report_dns_addresses() {
+    local key
+    for key in "${VPN_DNS_SERVICES[@]}"; do
+        vpn_dns_value "$key" | tr -s ', ' '\n'
+        echo
+    done
+}
+
+# Replaces what is private in FILE
+report_anonymize() {
+    local file=$1 _length value replacement address dns
+    # colors first, then the known values, longest first (the name of the
+    # server is often part of a domain, an account part of a client name)
+    REPORT_SCRIPT='s/\x1b\[[0-9;]*m//g;'
+    while IFS=$'\t' read -r _length value replacement; do
+        report_replace "$value" "$replacement"
+    done < <(report_known_values "$file" | sort -t $'\t' -k1,1nr)
+    # SSH public keys with their comment, and fingerprints
+    REPORT_SCRIPT+='s/(ssh-(ed25519|rsa|dss)|ecdsa-sha2-nistp[0-9]+|sk-[a-z0-9@.-]+) [A-Za-z0-9+\/=]+( [^ ]+)?/'"$(t '<ssh-key>')"'/g;'
+    REPORT_SCRIPT+='s/SHA256:[A-Za-z0-9+\/]{43}/'"$(t '<fingerprint>')"'/g;'
+    # the accounts named by needrestart (« jean @ session #1: sshd… », « jean @
+    # user manager service: systemd… », « jean @ user manager: (sd-pam)… » on
+    # Ubuntu 26.04), and the names of the backups made by another server
+    REPORT_SCRIPT+='s/^( *)[a-z_][a-z0-9_.-]* @ (session #|user manager)/\1'"$(t '<admin>')"' @ \2/;'
+    REPORT_SCRIPT+='s/seedtunnel-[A-Za-z0-9._-]+-([0-9]{8}-[0-9]{6})/seedtunnel-'"$(t '<server>')"'-\1/g;'
+    sed -E -i "$REPORT_SCRIPT" "$file"
+    # the other public addresses, as found in what is left; not those of the
+    # DNS services of the menu (Quad9…): the same for everyone, they say which
+    # one is used (one typed by hand is replaced)
+    REPORT_SCRIPT=""
+    dns=$(report_dns_addresses)
+    while IFS= read -r address; do
+        if grep -qxF -- "$address" <<<"$dns"; then continue; fi
+        if is_ipv4 "$address" && report_ipv4_is_public "$address"; then report_replace "$address" "$(t '<ip>')"; fi
+    done < <(grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' "$file" | sort -u || true)
+    while IFS= read -r address; do
+        if is_ipv6 "$address" && report_ipv6_is_public "$address"; then report_replace "$address" "$(t '<ip>')"; fi
+    done < <(grep -oiE '([0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}' "$file" | sort -u || true)
+    if [[ -n $REPORT_SCRIPT ]]; then sed -E -i "$REPORT_SCRIPT" "$file"; fi
+}
+
+# Writes the report into FILE: the diagnostics run again, without colors
+report_generate() {
+    local file=$1
+    {
+        t 'seedtunnel report of %s' "$(date '+%F %R %Z')"
+        printf '\nseedtunnel %s · %s\n' "$APP_VERSION" "${APP_OS_DESCRIPTION:-Debian}"
+        t 'Replaced: domains, names of the server, public IP addresses, SFTP accounts, administrators, SSH keys, names of the VPN clients.'
+        printf '\n\n=== %s\n' "$(t 'Diagnostics')"
+        (
+            C_RED="" C_GREEN="" C_YELLOW="" C_BOLD="" C_DIM="" C_RESET=""
+            INTERACTIVE=0
+            OPT_LINK=0
+            doctor_main
+        ) 2>&1
+        printf '\n=== %s\n' "$(t 'End of the log (last %s lines)' "$REPORT_LOG_LINES")"
+        tail -n "$REPORT_LOG_LINES" "$APP_LOG" 2>/dev/null || true
+    } >"$file"
+    report_anonymize "$file"
+}
+
+# Makes the report, then a one-time link to it; without the site of a
+# seedbox, saves it where the account that ran sudo can fetch it
+report_send() {
+    local tmp name owner home
+    name="seedtunnel-report-$(date +%Y%m%d-%H%M%S).txt"
+    tmp=$(mktemp)
+    printf '%s\n' "$(t 'Preparing the report (the diagnostics run once more)…')"
+    report_generate "$tmp"
+    if report_by_link; then
+        if ! (share_create "$tmp" "$name" "$(t 'seedtunnel report')" "$(text share_steps_report)" \
+            "$(t 'Domain, name of the server, public IP addresses, SFTP account, SSH keys and names of the VPN clients are replaced. No password, no key.')"); then
+            rm -f "$tmp"
+            return 1
+        fi
+        rm -f "$tmp"
+        return 0
+    fi
+    owner=${SUDO_USER:-root}
+    home=$(getent passwd "$owner" | cut -d: -f6 || true)
+    [[ -d $home ]] || {
+        owner=root
+        home=/root
+    }
+    install -m 600 -o "$owner" "$tmp" "$home/$name"
+    rm -f "$tmp"
+    ok 'Report saved: %s' "$home/$name"
+    say 'No download link without an HTTPS site: fetch it with WinSCP, FileZilla or scp, logged in as %s.' "$owner"
+    if vpn_installed && ! seedbox_installed && ! links_site_on; then
+        say 'For a link instead:  seedtunnel vpn links on  then  seedtunnel doctor --link'
+    fi
+}
+
+# --- Alerts at login -------------------------------------------------------------
+
+# What needs a look, said at each login by a script of update-motd.d (run by
+# PAM, as root, for every SSH session): the seedbox stopped by the disk guard,
+# the weekly backup failing (as doctor_backup sees it), the HTTPS certificate
+# of nginx expiring. Local and quick: a few files, systemctl and openssl,
+# nothing on the network, never a failure. Written in the language of
+# seedtunnel; seedtunnel doctor says more.
+LOGIN_ALERTS_FILE="/etc/update-motd.d/90-seedtunnel"
+
+login_alerts_generate() {
+    printf '%s\n' '#!/bin/bash' '# Written by seedtunnel — what needs a look, at each login (seedtunnel doctor says more)'
+    printf 'diskguard=%q\nbackup_timer=%q\nbackup_dir=%q\npassphrase=%q\nsite=%q\n' \
+        "$DISKGUARD_MARKER" "$BACKUP_TIMER" "$BACKUP_DIR" "$BACKUP_PASSPHRASE_FILE" "$NGINX_SITE"
+    # the numbers are put in at each login: « %s » kept in the messages
+    printf 'msg_disk=%q\n' "$(t 'seedtunnel: the seedbox is stopped, the disk is almost full.')"
+    printf 'msg_backup_failed=%q\n' "$(t 'seedtunnel: the last weekly backup failed.')"
+    printf 'msg_backup_old=%q\n' "$(t 'seedtunnel: no weekly backup for %s days.' '%s')"
+    printf 'msg_certificate_soon=%q\n' "$(t 'seedtunnel: the HTTPS certificate expires in %s day(s).' '%s')"
+    printf 'msg_certificate_expired=%q\n' "$(t 'seedtunnel: the HTTPS certificate has expired.')"
+    printf 'msg_doctor=%q\n' "$(t 'Details:  seedtunnel doctor')"
+    cat <<'EOF'
+alerts=()
+now=$(date +%s)
+if [[ -e $diskguard ]]; then alerts+=("$msg_disk"); fi
+# the weekly backup on: failed, or none for more than 8 days (since it was
+# turned on, when there is none yet)
+if [[ -f $backup_timer ]]; then
+    if systemctl is-failed --quiet seedtunnel-backup.service 2>/dev/null; then
+        alerts+=("$msg_backup_failed")
+    else
+        latest=$(ls -1t "$backup_dir"/*-auto.tar.gz.enc 2>/dev/null | head -n 1)
+        since=$(stat -c %Y -- "${latest:-$passphrase}" 2>/dev/null)
+        if [[ $since =~ ^[0-9]+$ ]] && (((now - since) / 86400 > 8)); then
+            alerts+=("$(printf "$msg_backup_old" "$(((now - since) / 86400))")")
+        fi
+    fi
+fi
+# the certificate nginx serves: expired, or less than 14 days left (Let's
+# Encrypt renews it 30 days before)
+certificate=$(sed -n 's/^[[:space:]]*ssl_certificate[[:space:]]\+\([^;]*\);.*/\1/p' "$site" 2>/dev/null | head -n 1)
+if [[ -n $certificate ]]; then
+    end=$(openssl x509 -in "$certificate" -noout -enddate 2>/dev/null | cut -d= -f2)
+    end=$(date -d "$end" +%s 2>/dev/null)
+    if [[ $end =~ ^[0-9]+$ ]]; then
+        if ((end <= now)); then
+            alerts+=("$msg_certificate_expired")
+        elif (((end - now) / 86400 < 14)); then
+            alerts+=("$(printf "$msg_certificate_soon" "$(((end - now) / 86400))")")
+        fi
+    fi
+fi
+if ((${#alerts[@]})); then
+    printf '\n'
+    printf '! %s\n' "${alerts[@]}"
+    printf '  %s\n\n' "$msg_doctor"
+fi
+exit 0
+EOF
+}
+
+# Written with the VPN or the seedbox (and again by « seedtunnel apply », and
+# after a change of language), where Debian runs update-motd.d at login
+login_alerts_apply() {
+    [[ -d ${LOGIN_ALERTS_FILE%/*} ]] || return 0
+    write_if_changed "$LOGIN_ALERTS_FILE" 755 root:root login_alerts_generate || true
+}
+
+# Removed when neither the VPN nor the seedbox is installed any more
+login_alerts_cleanup() {
+    if ! vpn_installed && ! seedbox_installed; then rm -f "$LOGIN_ALERTS_FILE"; fi
+}
